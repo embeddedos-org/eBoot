@@ -1,0 +1,106 @@
+name: Weekly
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-build:
+    name: Full Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DEBLDR_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C Release
+
+  cross-compile:
+    name: Cross (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm-cortex-m
+            toolchain: toolchains/arm-none-eabi.cmake
+            packages: gcc-arm-none-eabi
+          - arch: aarch64-linux
+            toolchain: toolchains/aarch64-linux-gnu.cmake
+            packages: gcc-aarch64-linux-gnu
+          - arch: riscv64-linux
+            toolchain: toolchains/riscv64-linux-gnu.cmake
+            packages: gcc-riscv64-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.packages }}
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_TOOLCHAIN_FILE=${{ matrix.toolchain }} -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+  report:
+    name: Weekly Report
+    runs-on: ubuntu-latest
+    needs: [full-build, cross-compile]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## Weekly Report — eBoot"
+          echo "| Job | Status |"
+          echo "|---|---|"
+          echo "| Full builds | ${{ needs.full-build.result }} |"
+          echo "| Cross-compile | ${{ needs.cross-compile.result }} |"
+name: eboot Weekly
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  weekly:
+    name: Weekly (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Install tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: Install tools (Windows)
+        if: runner.os == 'Windows'
+        run: choco install cmake ninja -y
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DEBOOT_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
