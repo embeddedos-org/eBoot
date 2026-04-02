@@ -17,7 +17,7 @@ jobs:
           echo "  Cross-Repo CI Dispatch"
           echo "  Source: eboot @ ${{ github.sha }}"
           echo "========================================"
-          for repo in ebuild eos eApps eosim; do
+          for repo in ebuild eos eApps eosim eai; do
             echo "Dispatching to $repo..."
             gh api repos/embeddedos-org/$repo/dispatches \
               -X POST -f event_type=dependency-update \
