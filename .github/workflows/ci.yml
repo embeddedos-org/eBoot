@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   repository_dispatch:
     types: [dependency-update]
   push:
@@ -30,6 +31,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -C Release
 
   config-generation:
+  workflow_dispatch:
     name: Config Generation
     runs-on: ubuntu-latest
     steps:
