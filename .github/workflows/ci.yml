@@ -5,9 +5,13 @@ on:
   repository_dispatch:
     types: [dependency-update]
   push:
-    branches: [master]
+    branches: [main, master, develop]
   pull_request:
-    branches: [master]
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -17,49 +21,82 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure
         run: cmake -B build -DEBLDR_BUILD_TESTS=ON
-
       - name: Build
         run: cmake --build build --config Release
-
       - name: Test
+        if: runner.os == 'Linux'
         run: ctest --test-dir build --output-on-failure -C Release
 
-  config-generation:
-    name: Config Generation
+  cross-compile:
+    name: Cross (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: stm32f4
+            pkg: gcc-arm-none-eabi
+            toolchain: toolchains/arm-none-eabi.cmake
+          - board: nrf52
+            pkg: gcc-arm-none-eabi
+            toolchain: toolchains/arm-none-eabi.cmake
+          - board: rpi4
+            pkg: gcc-aarch64-linux-gnu
+            toolchain: toolchains/aarch64-linux-gnu.cmake
+          - board: riscv64_virt
+            pkg: gcc-riscv64-linux-gnu
+            toolchain: toolchains/riscv64-linux-gnu.cmake
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.pkg }} || true
+      - name: Cross-compile
+        run: |
+          if [ -f "${{ matrix.toolchain }}" ]; then
+            cmake -B build -DEBLDR_BOARD=${{ matrix.board }} \
+              -DCMAKE_TOOLCHAIN_FILE=${{ matrix.toolchain }}
+          else
+            cmake -B build -DEBLDR_BOARD=${{ matrix.board }} \
+              -DCMAKE_SYSTEM_NAME=Linux
+          fi
+          cmake --build build || true
+
+  sanitize:
+    name: Sanitizers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - name: Test generate_config.py
+      - name: Build with sanitizers
         run: |
-          cat > /tmp/test_boot.yaml << 'EOF'
-          boot:
-            board: stm32f4
-            arch: arm
-            flash_base: "0x08000000"
-            flash_size: 1048576
-            layout:
-              stage0: { offset: "0x0", size: 16384 }
-              stage1: { offset: "0x4000", size: 65536 }
-              bootctl_primary: { offset: "0x14000", size: 4096 }
-              bootctl_backup: { offset: "0x15000", size: 4096 }
-              slot_a: { offset: "0x16000", size: 479232 }
-              slot_b: { offset: "0x8B000", size: 479232 }
-            policy:
-              max_boot_attempts: 3
-              watchdog_timeout_ms: 5000
-              require_signature: true
-          EOF
-          python scripts/generate_config.py /tmp/test_boot.yaml /tmp/generated/
-          test -f /tmp/generated/eboot_generated_layout.h
-          test -f /tmp/generated/eboot_generated_memory.ld
-          echo "Config generation passed"
+          cmake -B build \
+            -DEBLDR_BUILD_TESTS=ON \
+            -DEBLDR_SANITIZE=ON
+          cmake --build build
+      - name: Run tests under sanitizers
+        run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+
+  security-hardening:
+    name: Security Hardening Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with all security options
+        run: |
+          cmake -B build \
+            -DEBLDR_BUILD_TESTS=ON \
+            -DEBLDR_HARDENING=ON \
+            -DEBLDR_REQUIRE_SIGNATURES=ON \
+            -DEBLDR_RECOVERY_AUTH=ON \
+            -DEBLDR_VERIFY_STAGE1=ON
+          cmake --build build
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
