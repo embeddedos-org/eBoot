@@ -106,6 +106,13 @@ int eos_keystore_init(eos_keystore_t *ks)
         for (uint32_t i = 0; i < EOS_KEY_SLOTS; i++) {
             ks->slots[i].security_version = sec_ver;
         }
+    } else {
+        /* No HW counter available — default to version 1 so that
+         * anti-rollback checks remain meaningful (version 0 would
+         * allow any image to pass the security-version gate). */
+        for (uint32_t i = 0; i < EOS_KEY_SLOTS; i++) {
+            ks->slots[i].security_version = 1;
+        }
     }
 
     return EOS_OK;
