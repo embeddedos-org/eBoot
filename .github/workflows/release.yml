@@ -62,7 +62,7 @@ jobs:
           find build -name "*.a" -o -name "*.bin" -o -name "*.elf" | xargs -I{} cp {} fw/ 2>/dev/null || true
           cp -r include fw/ 2>/dev/null || true
           tar czf eboot-${{ steps.version.outputs.version }}-${{ matrix.board }}.tar.gz -C fw .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: eboot-${{ matrix.board }}
           path: "*.tar.gz"
