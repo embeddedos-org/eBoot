@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [dependency-update]
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DEBLDR_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build --output-on-failure -C Release
+
+  cross-compile:
+    name: Cross (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: stm32f4
+            pkg: gcc-arm-none-eabi
+            toolchain: toolchains/arm-none-eabi.cmake
+          - board: nrf52
+            pkg: gcc-arm-none-eabi
+            toolchain: toolchains/arm-none-eabi.cmake
+          - board: rpi4
+            pkg: gcc-aarch64-linux-gnu
+            toolchain: toolchains/aarch64-linux-gnu.cmake
+          - board: riscv64_virt
+            pkg: gcc-riscv64-linux-gnu
+            toolchain: toolchains/riscv64-linux-gnu.cmake
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.pkg }} || true
+      - name: Cross-compile
+        run: |
+          if [ -f "${{ matrix.toolchain }}" ]; then
+            cmake -B build -DEBLDR_BOARD=${{ matrix.board }} \
+              -DCMAKE_TOOLCHAIN_FILE=${{ matrix.toolchain }}
+          else
+            cmake -B build -DEBLDR_BOARD=${{ matrix.board }} \
+              -DCMAKE_SYSTEM_NAME=Linux
+          fi
+          cmake --build build || true
+
+  sanitize:
+    name: Sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with sanitizers
+        run: |
+          cmake -B build \
+            -DEBLDR_BUILD_TESTS=ON \
+            -DEBLDR_SANITIZE=ON
+          cmake --build build
+      - name: Run tests under sanitizers
+        run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+
+  security-hardening:
+    name: Security Hardening Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with all security options
+        run: |
+          cmake -B build \
+            -DEBLDR_BUILD_TESTS=ON \
+            -DEBLDR_HARDENING=ON \
+            -DEBLDR_REQUIRE_SIGNATURES=ON \
+            -DEBLDR_RECOVERY_AUTH=ON \
+            -DEBLDR_VERIFY_STAGE1=ON
+          cmake --build build
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure

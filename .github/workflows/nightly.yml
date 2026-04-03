@@ -1,0 +1,127 @@
+name: Nightly Regression
+
+on:
+  schedule:
+    - cron: "0 2 * * *"  # 2:00 AM UTC daily
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  native-build:
+    name: Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DEBLDR_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C Release
+
+  cross-compile:
+    name: Cross (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64-linux
+            toolchain: toolchains/aarch64-linux-gnu.cmake
+            packages: gcc-aarch64-linux-gnu
+          - arch: riscv64-linux
+            toolchain: toolchains/riscv64-linux-gnu.cmake
+            packages: gcc-riscv64-linux-gnu
+          - arch: arm-cortex-m
+            toolchain: toolchains/arm-none-eabi.cmake
+            packages: gcc-arm-none-eabi libnewlib-arm-none-eabi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.packages }}
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_TOOLCHAIN_FILE=${{ matrix.toolchain }} -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify artifacts
+        run: |
+          echo "=== Static libraries ==="
+          find build -name "*.a" | sort
+          LIB_COUNT=$(find build -name "*.a" | wc -l)
+          echo "Found $LIB_COUNT libraries"
+          if [ "$LIB_COUNT" -lt 1 ]; then
+            echo "ERROR: No libraries produced"
+            exit 1
+          fi
+
+  config-generation:
+    name: Config Generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Test generate_config.py
+        run: |
+          cat > /tmp/test_boot.yaml << 'EOF'
+          boot:
+            board: stm32f4
+            arch: arm
+            flash_base: "0x08000000"
+            flash_size: 1048576
+            layout:
+              stage0: { offset: "0x0", size: 16384 }
+              stage1: { offset: "0x4000", size: 65536 }
+              bootctl_primary: { offset: "0x14000", size: 4096 }
+              bootctl_backup: { offset: "0x15000", size: 4096 }
+              slot_a: { offset: "0x16000", size: 479232 }
+              slot_b: { offset: "0x8B000", size: 479232 }
+            policy:
+              max_boot_attempts: 3
+              watchdog_timeout_ms: 5000
+              require_signature: true
+          EOF
+          python scripts/generate_config.py /tmp/test_boot.yaml /tmp/generated/
+          test -f /tmp/generated/eboot_generated_layout.h
+          test -f /tmp/generated/eboot_generated_memory.ld
+          echo "Config generation passed"
+
+  report:
+    name: Nightly Report
+    runs-on: ubuntu-latest
+    needs: [native-build, cross-compile, config-generation]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## Nightly Regression Report — eboot"
+          echo "Date: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          echo ""
+          echo "| Job | Status |"
+          echo "|---|---|"
+          echo "| Native builds | ${{ needs.native-build.result }} |"
+          echo "| Cross-compile | ${{ needs.cross-compile.result }} |"
+          echo "| Config gen | ${{ needs.config-generation.result }} |"
+          if [ "${{ needs.native-build.result }}" != "success" ] || \
+             [ "${{ needs.cross-compile.result }}" != "success" ] || \
+             [ "${{ needs.config-generation.result }}" != "success" ]; then
+            echo ""
+            echo "❌ REGRESSION DETECTED"
+            exit 1
+          fi
+          echo ""
+          echo "✅ All checks passed"

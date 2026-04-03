@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: MIT
+# ci/ci_security.yml — GitHub Actions workflow for eBootloader security CI
+
+name: Security CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"   # Nightly at 03:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- Job 1: Static analysis (cppcheck + clang-tidy) ----
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install static-analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck clang-tidy
+
+      - name: Configure with security checks
+        run: |
+          cmake -B build \
+            -DEBLDR_ENABLE_SECURITY_CHECKS=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run cppcheck
+        run: cmake --build build --target security-check-cppcheck
+
+      - name: Run clang-tidy
+        run: cmake --build build --target security-check-clang-tidy
+
+  # ---- Job 2: Build & test with ASAN + UBSAN ----
+  sanitizer-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+
+      - name: Configure (ASAN + UBSAN)
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure --timeout 120
+
+  # ---- Job 3: Nightly fuzz (60 s per target) ----
+  nightly-fuzz:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+
+      - name: Configure (fuzz build)
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=clang \
+            -DEBLDR_BUILD_FUZZ=ON \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build fuzz targets
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Fuzz image_verify (60 s)
+        run: |
+          mkdir -p corpus/image_verify
+          ./build/tests/fuzz/fuzz_image_verify corpus/image_verify -max_total_time=60
+
+      - name: Fuzz recovery_protocol (60 s)
+        run: |
+          mkdir -p corpus/recovery_protocol
+          ./build/tests/fuzz/fuzz_recovery_protocol corpus/recovery_protocol -max_total_time=60
+
+      - name: Fuzz fw_update (60 s)
+        run: |
+          mkdir -p corpus/fw_update
+          ./build/tests/fuzz/fuzz_fw_update corpus/fw_update -max_total_time=60
+
+      - name: Fuzz crypto (60 s)
+        run: |
+          mkdir -p corpus/crypto
+          ./build/tests/fuzz/fuzz_crypto corpus/crypto -max_total_time=60
+
+      - name: Fuzz bootctl (60 s)
+        run: |
+          mkdir -p corpus/bootctl
+          ./build/tests/fuzz/fuzz_bootctl corpus/bootctl -max_total_time=60
+
+  # ---- Job 4: Dependency scan ----
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip-audit -r requirements.txt
+          else
+            echo "No requirements.txt found — skipping pip-audit"
+          fi
