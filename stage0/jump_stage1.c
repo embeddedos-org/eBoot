@@ -56,13 +56,51 @@ void ebldr_stage0_main(void)
 
     ebldr_watchdog_feed();
 
-    /* Jump to stage-1 (E-Boot) */
+    /* Verify stage-1 integrity before jumping (secure boot chain) */
     const eos_board_ops_t *ops = eos_hal_get_ops();
     if (ops && ops->jump) {
+        uint32_t stage1_addr = ops->flash_base + ops->app_vector_offset;
+
+#ifdef EBLDR_VERIFY_STAGE1
+        /* Compute SHA-256 of stage-1 and compare against build-time hash */
+        extern const uint8_t stage1_expected_hash[32];
+        extern const uint32_t stage1_expected_size;
+
+        uint8_t computed[32];
+        eos_sha256_ctx_t sha_ctx;
+        eos_sha256_init(&sha_ctx);
+
+        uint8_t buf[256];
+        uint32_t off = 0;
+        while (off < stage1_expected_size) {
+            uint32_t chunk = stage1_expected_size - off;
+            if (chunk > sizeof(buf)) chunk = sizeof(buf);
+            eos_hal_flash_read(stage1_addr + off, buf, chunk);
+            eos_sha256_update(&sha_ctx, buf, chunk);
+            off += chunk;
+        }
+        eos_sha256_final(&sha_ctx, computed);
+
+        /* Double-check for fault injection resistance */
+        volatile int match1 = 0, match2 = 0;
+        for (int i = 0; i < 32; i++) {
+            if (computed[i] != stage1_expected_hash[i]) match1 = 1;
+        }
+        for (int i = 31; i >= 0; i--) {
+            if (computed[i] != stage1_expected_hash[i]) match2 = 1;
+        }
+
+        if (match1 || match2) {
+            eos_boot_log_append(EOS_LOG_BOOT_FAIL, EOS_SLOT_NONE, 0xBAD1);
+            eos_recovery_enter(&bctl);
+        }
+        eos_boot_log_append(EOS_LOG_IMAGE_VALID, EOS_SLOT_NONE, 0);
+#endif
+
         /* Stage-1 is located immediately after stage-0 in flash */
         eos_hal_disable_interrupts();
         eos_hal_deinit_peripherals();
-        ops->jump(ops->flash_base + ops->app_vector_offset);
+        ops->jump(stage1_addr);
     }
 
     /* If jump fails, enter recovery */

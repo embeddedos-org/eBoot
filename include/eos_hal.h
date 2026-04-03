@@ -68,6 +68,30 @@ typedef struct {
     void (*disable_interrupts)(void);
     void (*enable_interrupts)(void);
     void (*deinit_peripherals)(void);
+
+    /* --- Security Extensions (Phase 2+) --- */
+    /* All nullable — NULL means "not supported by this board". */
+
+    /* OTP / eFuse secure storage */
+    int (*otp_read)(uint32_t offset, void *buf, size_t len);
+    int (*otp_write)(uint32_t offset, const void *buf, size_t len);
+
+    /* Hardware random number generator */
+    int (*rng_get)(void *buf, size_t len);
+
+    /* Debug interface control */
+    int (*debug_lock)(void);
+    int (*debug_status)(uint32_t *status);
+
+    /* Monotonic anti-rollback counter */
+    int (*monotonic_read)(uint32_t *value);
+    int (*monotonic_increment)(void);
+
+    /* HW-accelerated crypto (optional, software fallback used if NULL) */
+    int (*hw_sha256)(const void *data, size_t len, void *digest);
+    int (*hw_aes_decrypt)(const void *key, size_t key_len,
+                          const void *iv, const void *in,
+                          void *out, size_t len);
 } eos_board_ops_t;
 
 /* ---------------- Global Board Handle ---------------- */

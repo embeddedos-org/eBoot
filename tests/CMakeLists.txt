@@ -45,3 +45,34 @@ add_test(NAME test_slot_manager COMMAND test_slot_manager)
 add_executable(test_boot_log unit/test_boot_log.c)
 target_link_libraries(test_boot_log PRIVATE eboot_core)
 add_test(NAME test_boot_log COMMAND test_boot_log)
+
+# --- test_ed25519: Ed25519 signature verification ---
+add_executable(test_ed25519 unit/test_ed25519.c)
+target_link_libraries(test_ed25519 PRIVATE eboot_core)
+add_test(NAME test_ed25519 COMMAND test_ed25519)
+
+# --- test_keystore: Key management ---
+add_executable(test_keystore unit/test_keystore.c)
+target_link_libraries(test_keystore PRIVATE eboot_core)
+add_test(NAME test_keystore COMMAND test_keystore)
+
+# --- Valgrind test targets ---
+find_program(VALGRIND valgrind)
+if(VALGRIND)
+    set(VALGRIND_OPTS --leak-check=full --error-exitcode=1 --quiet)
+    foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
+                      test_device_table test_runtime_svc test_board_config
+                      test_multicore test_board_registry test_slot_manager
+                      test_boot_log)
+        add_test(
+            NAME valgrind_${TEST_NAME}
+            COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:${TEST_NAME}>
+        )
+        set_tests_properties(valgrind_${TEST_NAME} PROPERTIES LABELS "valgrind")
+    endforeach()
+endif()
+
+# --- Fuzz targets ---
+if(EBLDR_BUILD_FUZZ)
+    add_subdirectory(fuzz)
+endif()

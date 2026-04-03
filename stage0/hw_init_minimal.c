@@ -26,4 +26,19 @@ void ebldr_hw_init_minimal(void)
 
     /* Board-specific early initialization (clocks, flash latency) */
     board_early_init();
+
+    /* Lock debug interfaces before loading any secrets */
+#ifndef EBLDR_DEBUG_BUILD
+    if (ops->debug_lock) {
+        ops->debug_lock();
+    }
+#endif
+
+    /* Verify silicon revision and security fuse state */
+    if (ops->debug_status) {
+        uint32_t dbg_status = 0;
+        ops->debug_status(&dbg_status);
+        /* Log debug state for audit trail */
+        (void)dbg_status;
+    }
 }

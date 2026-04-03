@@ -13,6 +13,7 @@
 #include "eos_bootctl.h"
 #include "eos_image.h"
 #include "eos_hal.h"
+#include "eos_mpu_boot.h"
 
 /* Forward declarations */
 extern void eos_boot_log_init(uint32_t head);

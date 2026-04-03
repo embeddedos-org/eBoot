@@ -56,6 +56,46 @@ int eos_mpu_set_default(eos_mpu_ctx_t *ctx)
     return 0;
 }
 
+int eos_mpu_set_bootloader(eos_mpu_ctx_t *ctx)
+{
+    if (!ctx) return -1;
+    ctx->count = 0;
+
+    /* Bootloader code — read + execute, cacheable */
+    eos_mpu_add_region(ctx, 0x08000000, 0x10000, EOS_MPU_FULL_RO, true, true);
+    /* Bootloader data (RO) — read only, no execute */
+    eos_mpu_add_region(ctx, 0x08010000, 0x10000, EOS_MPU_FULL_RO, false, true);
+    /* Stack — read + write, no execute */
+    eos_mpu_add_region(ctx, 0x20000000, 0x4000, EOS_MPU_FULL_RW, false, true);
+    /* BSS/Data — read + write, no execute */
+    eos_mpu_add_region(ctx, 0x20004000, 0xC000, EOS_MPU_FULL_RW, false, true);
+    /* Peripherals — privileged RW, no execute, no cache */
+    eos_mpu_add_region(ctx, 0x40000000, 0x20000000, EOS_MPU_PRIV_RW, false, false);
+    /* System — privileged only */
+    eos_mpu_add_region(ctx, 0xE0000000, 0x10000, EOS_MPU_PRIV_RW, false, false);
+
+    return 0;
+}
+
+int eos_mpu_set_lockdown(eos_mpu_ctx_t *ctx)
+{
+    if (!ctx) return -1;
+    ctx->count = 0;
+
+    /* Application flash — read + execute, cacheable */
+    eos_mpu_add_region(ctx, 0x08020000, 0x1E0000, EOS_MPU_FULL_RO, true, true);
+    /* Application RAM — read + write, no execute */
+    eos_mpu_add_region(ctx, 0x20000000, 0x100000, EOS_MPU_FULL_RW, false, true);
+    /* Bootloader flash — NO ACCESS (locked down) */
+    eos_mpu_add_region(ctx, 0x08000000, 0x20000, EOS_MPU_NO_ACCESS, false, true);
+    /* Peripherals — full RW, no execute, no cache */
+    eos_mpu_add_region(ctx, 0x40000000, 0x20000000, EOS_MPU_FULL_RW, false, false);
+    /* System — privileged only */
+    eos_mpu_add_region(ctx, 0xE0000000, 0x10000, EOS_MPU_PRIV_RW, false, false);
+
+    return 0;
+}
+
 int eos_mpu_apply(const eos_mpu_ctx_t *ctx)
 {
     if (!ctx) return -1;

@@ -34,8 +34,14 @@ extern "C" {
 #define EOS_ERR_BUSY       -8
 #define EOS_ERR_AUTH       -9
 #define EOS_ERR_VERSION    -10
-#define EOS_ERR_FULL       -11
-#define EOS_ERR_NOT_FOUND  -12
+#define EOS_ERR_FULL           -11
+#define EOS_ERR_NOT_FOUND      -12
+#define EOS_ERR_NOT_SUPPORTED  -13
+#define EOS_ERR_ANTI_ROLLBACK  -14
+#define EOS_ERR_REPLAY         -15
+#define EOS_ERR_DECRYPT        -16
+#define EOS_ERR_KEY            -17
+#define EOS_ERR_DEBUG_LOCKED   -18
 
 /* ---------------- Magic Numbers ---------------- */
 

@@ -152,3 +152,54 @@ uint32_t eos_hal_slot_size(eos_slot_t slot)
     default:                return 0;
     }
 }
+
+/* --- Security Extension Wrappers --- */
+
+int eos_hal_otp_read(uint32_t offset, void *buf, size_t len)
+{
+    if (!g_ops || !g_ops->otp_read)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->otp_read(offset, buf, len);
+}
+
+int eos_hal_otp_write(uint32_t offset, const void *buf, size_t len)
+{
+    if (!g_ops || !g_ops->otp_write)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->otp_write(offset, buf, len);
+}
+
+int eos_hal_rng_get(void *buf, size_t len)
+{
+    if (!g_ops || !g_ops->rng_get)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->rng_get(buf, len);
+}
+
+int eos_hal_debug_lock(void)
+{
+    if (!g_ops || !g_ops->debug_lock)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->debug_lock();
+}
+
+int eos_hal_debug_status(uint32_t *status)
+{
+    if (!g_ops || !g_ops->debug_status)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->debug_status(status);
+}
+
+int eos_hal_monotonic_read(uint32_t *value)
+{
+    if (!g_ops || !g_ops->monotonic_read)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->monotonic_read(value);
+}
+
+int eos_hal_monotonic_increment(void)
+{
+    if (!g_ops || !g_ops->monotonic_increment)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->monotonic_increment();
+}

@@ -4,14 +4,22 @@
 
 /**
  * @file crypto_boot.c
- * @brief Self-contained SHA-256 + image verification for secure boot
+ * @brief Self-contained SHA-256 + Ed25519 signature verification
+ *
+ * Provides cryptographic primitives for secure boot:
+ * - SHA-256 hashing (NIST FIPS 180-4)
+ * - Ed25519 signature verification (RFC 8032)
+ * - Constant-time comparison for side-channel resistance
  */
 
 #include "eos_crypto_boot.h"
 #include "eos_hal.h"
 #include <string.h>
 
-/* SHA-256 constants */
+/* ================================================================
+ * SHA-256 Implementation (NIST FIPS 180-4)
+ * ================================================================ */
+
 static const uint32_t K[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
     0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -118,6 +126,25 @@ void eos_sha256_final(eos_sha256_ctx_t *ctx, uint8_t digest[EOS_SHA256_DIGEST_SI
     }
 }
 
+/* ================================================================
+ * Constant-Time Utilities
+ * ================================================================ */
+
+int eos_crypto_safe_compare(const uint8_t *a, const uint8_t *b, size_t len)
+{
+    if (!a || !b) return -1;
+
+    volatile uint8_t diff = 0;
+    for (size_t i = 0; i < len; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    return (diff == 0) ? 0 : -1;
+}
+
+/* ================================================================
+ * SHA-256 Hashing API
+ * ================================================================ */
+
 int eos_crypto_hash(const uint8_t *data, size_t len,
                      uint8_t digest[EOS_SHA256_DIGEST_SIZE])
 {
@@ -130,6 +157,10 @@ int eos_crypto_hash(const uint8_t *data, size_t len,
 
     return EOS_OK;
 }
+
+/* ================================================================
+ * SHA-256 Image Verification (streamed from flash)
+ * ================================================================ */
 
 int eos_crypto_verify_image(uint32_t image_addr, uint32_t image_size,
                              const uint8_t expected_hash[EOS_SHA256_DIGEST_SIZE])
@@ -153,21 +184,45 @@ int eos_crypto_verify_image(uint32_t image_addr, uint32_t image_size,
     uint8_t computed[EOS_SHA256_DIGEST_SIZE];
     eos_sha256_final(&ctx, computed);
 
-    if (memcmp(computed, expected_hash, EOS_SHA256_DIGEST_SIZE) != 0) {
+    if (eos_crypto_safe_compare(computed, expected_hash,
+                                 EOS_SHA256_DIGEST_SIZE) != 0) {
         return EOS_ERR_SIGNATURE;
     }
 
     return EOS_OK;
 }
 
+/* ================================================================
+ * Ed25519 Signature Verification (RFC 8032)
+ *
+ * Verification algorithm:
+ *   1. Decode public key A and signature (R, S)
+ *   2. Compute k = SHA-512(R || A || message) mod L
+ *   3. Check [8][S]B == [8]R + [8][k]A
+ *
+ * This implementation uses the hash-then-verify pattern recommended
+ * by mcuboot: the caller provides the SHA-256 hash of the message
+ * rather than the full message, reducing memory requirements.
+ *
+ * For production use, this function verifies that the signature
+ * is a valid Ed25519 signature over the provided data. The
+ * underlying curve arithmetic is in core/ed25519_verify.c.
+ * ================================================================ */
+
+/* Forward declaration — implemented in ed25519_verify.c */
+extern int eos_ed25519_verify(const uint8_t signature[64],
+                               const uint8_t public_key[32],
+                               const uint8_t *message, size_t msg_len);
+
 int eos_crypto_verify_signature(const uint8_t *data, size_t data_len,
                                  const uint8_t *signature, size_t sig_len,
                                  const uint8_t *public_key, size_t key_len)
 {
-    (void)data; (void)data_len;
-    (void)signature; (void)sig_len;
-    (void)public_key; (void)key_len;
+    if (!data || !signature || !public_key)
+        return EOS_ERR_INVALID;
 
-    /* Stub — Ed25519/ECDSA implementation goes here */
-    return EOS_ERR_GENERIC;
+    if (sig_len != 64 || key_len != 32)
+        return EOS_ERR_INVALID;
+
+    return eos_ed25519_verify(signature, public_key, data, data_len);
 }

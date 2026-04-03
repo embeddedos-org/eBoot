@@ -21,6 +21,12 @@ stm32f4 | stm32h7 | nrf52 | rpi4 | riscv64_virt | esp32 | x86_64_efi | \
 imx8m | am64x | samd51 | sifive_u | cortex_r5 | none")
 
 option(EBLDR_BUILD_TESTS "Build unit tests (native only)" OFF)
+option(EBLDR_REQUIRE_SIGNATURES "Require Ed25519 signatures for boot" OFF)
+option(EBLDR_RECOVERY_AUTH "Require authentication for recovery commands" OFF)
+option(EBLDR_VERIFY_STAGE1 "Verify Stage-1 hash before jump" OFF)
+option(EBLDR_HARDENING "Enable compiler hardening flags" ON)
+option(EBLDR_SANITIZE "Enable ASAN/UBSAN for host builds" OFF)
+option(EBLDR_BUILD_FUZZ "Build libFuzzer fuzz targets" OFF)
 
 set(EBLDR_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -34,6 +40,28 @@ elseif(MSVC)
     add_compile_options(/W3)
 elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra)
+endif()
+
+# Security hardening flags
+if(EBLDR_HARDENING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-fstack-protector-strong -D_FORTIFY_SOURCE=2)
+endif()
+
+# Sanitizer flags for host builds
+if(EBLDR_SANITIZE AND NOT CMAKE_CROSSCOMPILING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+# Security compile definitions
+if(EBLDR_REQUIRE_SIGNATURES)
+    add_compile_definitions(EBLDR_REQUIRE_SIGNATURES)
+endif()
+if(EBLDR_RECOVERY_AUTH)
+    add_compile_definitions(EBLDR_RECOVERY_AUTH)
+endif()
+if(EBLDR_VERIFY_STAGE1)
+    add_compile_definitions(EBLDR_VERIFY_STAGE1)
 endif()
 
 # ====================================================================
@@ -76,6 +104,11 @@ add_library(eboot_core STATIC
     core/ecc_scrub.c
     core/bmc_handoff.c
     core/os_adapter.c
+    core/ed25519_verify.c
+    core/keystore.c
+    core/debug_lock.c
+    core/fw_decrypt.c
+    core/image_tlv.c
 )
 target_include_directories(eboot_core PUBLIC ${EBLDR_INCLUDE_DIR})
 target_link_libraries(eboot_core PUBLIC eboot_hal)

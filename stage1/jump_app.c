@@ -14,6 +14,7 @@
 #include "eos_hal.h"
 #include "eos_bootctl.h"
 #include "eos_image.h"
+#include "eos_mpu_boot.h"
 
 /* Forward declarations from boot_log */
 extern void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail);
@@ -30,6 +31,29 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
     if (rc != EOS_OK)
         return rc;
 
+    /* Verify image integrity before jumping */
+    uint32_t payload_addr = addr + hdr.hdr_size;
+    rc = eos_image_verify_integrity(&hdr, payload_addr);
+    if (rc != EOS_OK) {
+        eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, rc);
+        return rc;
+    }
+
+    /* Verify signature if required */
+    rc = eos_image_verify_signature(&hdr);
+    if (rc != EOS_OK) {
+        eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, rc);
+        return rc;
+    }
+
+    /* Anti-rollback check */
+    extern int eos_image_check_rollback(uint32_t candidate_version);
+    rc = eos_image_check_rollback(hdr.image_version);
+    if (rc != EOS_OK && rc != EOS_ERR_NOT_SUPPORTED) {
+        eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, rc);
+        return rc;
+    }
+
     /* Increment boot attempts before jumping */
     eos_bootctl_increment_attempts(bctl);
 
@@ -39,6 +63,12 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
     eos_bootctl_save(bctl);
 
     eos_hal_watchdog_feed();
+
+    /* MPU lockdown: restrict bootloader memory before app jump */
+    eos_mpu_ctx_t mpu_ctx;
+    eos_mpu_init(&mpu_ctx);
+    eos_mpu_set_default(&mpu_ctx);
+    eos_mpu_apply(&mpu_ctx);
 
     /* Perform the jump via HAL */
     uint32_t vector_addr = hdr.load_addr;

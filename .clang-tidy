@@ -1,0 +1,28 @@
+Checks: >
+  -*,
+  cert-*,
+  bugprone-*,
+  clang-analyzer-security.*,
+  misc-*,
+  readability-braces-around-statements,
+  -modernize-*,
+  -readability-magic-numbers,
+  -cert-dcl37-c,
+  -cert-dcl51-c,
+  -bugprone-easily-swappable-parameters,
+
+WarningsAsErrors: >
+  bugprone-use-after-move,
+  bugprone-sizeof-expression,
+  cert-err34-c,
+  clang-analyzer-security.*,
+
+CheckOptions:
+  - key: readability-function-cognitive-complexity.Threshold
+    value: 25
+  - key: readability-function-size.LineThreshold
+    value: 100
+  - key: bugprone-suspicious-string-compare.WarnOnImplicitComparison
+    value: true
+
+HeaderFilterRegex: '(stage[012]|crypto|keystore|recovery|include)/.*\.h$'

@@ -56,6 +56,16 @@ void Reset_Handler(void)
     while (dst < &_ebss)
         *dst++ = 0;
 
+    /* Stack poisoning: fill remaining stack with canary pattern
+     * for post-mortem stack depth analysis and overflow detection */
+    {
+        volatile uint32_t *stack_ptr = &_sbss;
+        volatile uint32_t *stack_end = (volatile uint32_t *)(__builtin_frame_address(0));
+        while (stack_ptr < stack_end - 16) {
+            *stack_ptr++ = 0xDEADBEEF;
+        }
+    }
+
     /* Enter stage-0 */
     ebldr_hw_init_minimal();
     ebldr_stage0_main();

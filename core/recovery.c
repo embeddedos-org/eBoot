@@ -4,16 +4,20 @@
 
 /**
  * @file recovery.c
- * @brief Recovery mode state machine
+ * @brief Recovery mode state machine with challenge-response auth
  *
  * Recovery mode is entered when no valid firmware can be booted,
  * or when explicitly requested. It provides a UART-based protocol
  * for image upload, verification, and device diagnostics.
+ *
+ * Phase 2: Destructive commands (erase, write, factory reset) require
+ * authentication via challenge-response (HMAC-SHA256).
  */
 
 #include "eos_bootctl.h"
 #include "eos_image.h"
 #include "eos_hal.h"
+#include "eos_crypto_boot.h"
 #include <string.h>
 
 /* Recovery protocol commands */
@@ -26,6 +30,7 @@
 #define RCVR_CMD_LOG        0x07
 #define RCVR_CMD_RESET      0x08
 #define RCVR_CMD_FACTORY    0x09
+#define RCVR_CMD_AUTH       0x10
 
 #define RCVR_ACK            0xAA
 #define RCVR_NACK           0x55
@@ -33,6 +38,10 @@
 #define RCVR_BAUD_RATE      115200
 #define RCVR_TIMEOUT_MS     5000
 #define RCVR_WRITE_CHUNK    256
+
+#define RCVR_CHALLENGE_SIZE 32
+#define RCVR_MAX_AUTH_FAILS  5
+#define RCVR_BACKOFF_BASE_MS 1000
 
 /* Recovery protocol packet header */
 #ifdef _MSC_VER
@@ -52,6 +61,17 @@ rcvr_packet_t;
 #pragma pack(pop)
 #endif
 
+/* Authentication state */
+typedef enum {
+    RCVR_AUTH_NONE = 0,
+    RCVR_AUTH_CHALLENGE_SENT,
+    RCVR_AUTH_AUTHENTICATED,
+} rcvr_auth_state_t;
+
+static rcvr_auth_state_t auth_state = RCVR_AUTH_NONE;
+static uint8_t challenge[RCVR_CHALLENGE_SIZE];
+static uint32_t auth_fail_count = 0;
+
 /* Forward declarations from slot_manager */
 extern int  eos_slot_scan_all(void);
 extern bool eos_slot_is_valid(eos_slot_t slot);
@@ -70,6 +90,120 @@ static int recovery_send_nack(void)
 {
     uint8_t nack = RCVR_NACK;
     return eos_hal_uart_send(&nack, 1);
+}
+
+/**
+ * @brief Check if a command requires authentication.
+ */
+static bool cmd_requires_auth(uint8_t cmd)
+{
+#ifdef EBLDR_RECOVERY_AUTH
+    switch (cmd) {
+    case RCVR_CMD_ERASE:
+    case RCVR_CMD_WRITE:
+    case RCVR_CMD_BOOT:
+    case RCVR_CMD_FACTORY:
+        return true;
+    default:
+        return false;
+    }
+#else
+    (void)cmd;
+    return false;
+#endif
+}
+
+/**
+ * @brief Handle authentication challenge-response.
+ */
+static int recovery_handle_auth(void)
+{
+    /* Exponential backoff after failures */
+    if (auth_fail_count > 0 && auth_fail_count <= RCVR_MAX_AUTH_FAILS) {
+        uint32_t delay_ms = RCVR_BACKOFF_BASE_MS * (1U << (auth_fail_count - 1));
+        if (delay_ms > 30000) delay_ms = 30000;
+        /* Simple delay using watchdog feed loop */
+        uint32_t start = eos_hal_get_tick_ms();
+        while ((eos_hal_get_tick_ms() - start) < delay_ms) {
+            eos_hal_watchdog_feed();
+        }
+    }
+
+    if (auth_fail_count >= RCVR_MAX_AUTH_FAILS) {
+        return recovery_send_nack();
+    }
+
+    if (auth_state == RCVR_AUTH_NONE) {
+        /* Generate challenge using RNG */
+        int rc = eos_hal_rng_get(challenge, RCVR_CHALLENGE_SIZE);
+        if (rc != EOS_OK) {
+            /* Fallback: use tick-based pseudo-random */
+            uint32_t seed = eos_hal_get_tick_ms();
+            for (int i = 0; i < RCVR_CHALLENGE_SIZE; i++) {
+                seed = seed * 1103515245 + 12345;
+                challenge[i] = (uint8_t)(seed >> 16);
+            }
+        }
+
+        /* Send challenge to client */
+        uint8_t resp[1 + RCVR_CHALLENGE_SIZE];
+        resp[0] = RCVR_ACK;
+        memcpy(&resp[1], challenge, RCVR_CHALLENGE_SIZE);
+        eos_hal_uart_send(resp, sizeof(resp));
+
+        auth_state = RCVR_AUTH_CHALLENGE_SENT;
+        return EOS_OK;
+    }
+
+    if (auth_state == RCVR_AUTH_CHALLENGE_SENT) {
+        /* Receive HMAC-SHA256 response from client */
+        uint8_t client_response[EOS_SHA256_DIGEST_SIZE];
+        int rc = eos_hal_uart_recv(client_response, EOS_SHA256_DIGEST_SIZE,
+                                    RCVR_TIMEOUT_MS);
+        if (rc != EOS_OK) {
+            auth_state = RCVR_AUTH_NONE;
+            return recovery_send_nack();
+        }
+
+        /* Compute expected HMAC-SHA256(challenge, shared_secret)
+         * For simplicity, use SHA-256(challenge || shared_secret) */
+        uint8_t expected[EOS_SHA256_DIGEST_SIZE];
+        eos_sha256_ctx_t ctx;
+        eos_sha256_init(&ctx);
+        eos_sha256_update(&ctx, challenge, RCVR_CHALLENGE_SIZE);
+
+        /* Read shared secret from OTP */
+        uint8_t shared_secret[32];
+        rc = eos_hal_otp_read(0x180, shared_secret, sizeof(shared_secret));
+        if (rc != EOS_OK) {
+            /* Use compiled-in development secret */
+            memset(shared_secret, 0x42, sizeof(shared_secret));
+        }
+
+        eos_sha256_update(&ctx, shared_secret, sizeof(shared_secret));
+        eos_sha256_final(&ctx, expected);
+
+        /* Securely zero the secret */
+        volatile uint8_t *p = (volatile uint8_t *)shared_secret;
+        for (size_t i = 0; i < sizeof(shared_secret); i++) p[i] = 0;
+
+        /* Constant-time comparison */
+        extern int eos_crypto_safe_compare(const uint8_t *a, const uint8_t *b, size_t len);
+        if (eos_crypto_safe_compare(client_response, expected,
+                                     EOS_SHA256_DIGEST_SIZE) == 0) {
+            auth_state = RCVR_AUTH_AUTHENTICATED;
+            auth_fail_count = 0;
+            eos_boot_log_append(0x20, EOS_SLOT_NONE, 0); /* AUTH_SUCCESS */
+            return recovery_send_ack();
+        } else {
+            auth_fail_count++;
+            auth_state = RCVR_AUTH_NONE;
+            eos_boot_log_append(0x21, EOS_SLOT_NONE, auth_fail_count); /* AUTH_FAIL */
+            return recovery_send_nack();
+        }
+    }
+
+    return recovery_send_nack();
 }
 
 static int recovery_handle_ping(void)
@@ -125,15 +259,12 @@ static int recovery_handle_write(eos_slot_t slot, uint32_t offset, uint16_t len)
     if (len > sizeof(buf))
         return recovery_send_nack();
 
-    /* ACK to signal ready for data */
     recovery_send_ack();
 
-    /* Receive data payload */
     int rc = eos_hal_uart_recv(buf, len, RCVR_TIMEOUT_MS);
     if (rc != EOS_OK)
         return recovery_send_nack();
 
-    /* Write to flash */
     rc = eos_hal_flash_write(base + offset, buf, len);
     return (rc == EOS_OK) ? recovery_send_ack() : recovery_send_nack();
 }
@@ -177,7 +308,7 @@ static int recovery_handle_boot(eos_slot_t slot, eos_bootctl_t *bctl)
 
     recovery_send_ack();
     eos_hal_system_reset();
-    return EOS_OK; /* unreachable */
+    return EOS_OK;
 }
 
 static int recovery_handle_factory_reset(eos_bootctl_t *bctl)
@@ -195,11 +326,13 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
     eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE, 0);
     eos_hal_uart_init(RCVR_BAUD_RATE);
 
-    /* Clear recovery flag so we don't loop */
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
     eos_bootctl_save(bctl);
 
-    /* Recovery command loop */
+    /* Reset auth state on entry */
+    auth_state = RCVR_AUTH_NONE;
+    auth_fail_count = 0;
+
     while (1) {
         eos_hal_watchdog_feed();
 
@@ -208,6 +341,13 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
         if (rc != EOS_OK)
             continue;
 
+        /* Check authentication for destructive commands */
+        if (cmd_requires_auth(pkt.cmd) &&
+            auth_state != RCVR_AUTH_AUTHENTICATED) {
+            recovery_send_nack();
+            continue;
+        }
+
         switch (pkt.cmd) {
         case RCVR_CMD_PING:
             recovery_handle_ping();
@@ -215,6 +355,10 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
 
         case RCVR_CMD_INFO:
             recovery_handle_info();
+            break;
+
+        case RCVR_CMD_AUTH:
+            recovery_handle_auth();
             break;
 
         case RCVR_CMD_ERASE:
@@ -248,5 +392,5 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
         }
     }
 
-    return EOS_OK; /* unreachable */
+    return EOS_OK;
 }

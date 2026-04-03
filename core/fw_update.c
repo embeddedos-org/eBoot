@@ -152,7 +152,9 @@ int eos_fw_update_finalize(eos_fw_update_ctx_t *ctx, eos_upgrade_mode_t mode)
         uint8_t computed_hash[EOS_SHA256_DIGEST_SIZE];
         eos_sha256_final(&ctx->sha_ctx, computed_hash);
 
-        if (memcmp(computed_hash, ctx->header.hash, EOS_SHA256_DIGEST_SIZE) != 0) {
+        extern int eos_crypto_safe_compare(const uint8_t *a, const uint8_t *b, size_t len);
+        if (eos_crypto_safe_compare(computed_hash, ctx->header.hash,
+                                     EOS_SHA256_DIGEST_SIZE) != 0) {
             ctx->state = EOS_FW_STATE_ERROR;
             ctx->last_error = EOS_ERR_CRC;
             return EOS_ERR_CRC;
@@ -168,6 +170,25 @@ int eos_fw_update_finalize(eos_fw_update_ctx_t *ctx, eos_upgrade_mode_t mode)
             ctx->last_error = EOS_ERR_CRC;
             return EOS_ERR_CRC;
         }
+    }
+
+    /* Verify digital signature if present */
+    if (ctx->header.sig_type >= EOS_SIG_ED25519) {
+        int sig_rc = eos_image_verify_signature(&ctx->header);
+        if (sig_rc != EOS_OK) {
+            ctx->state = EOS_FW_STATE_ERROR;
+            ctx->last_error = sig_rc;
+            return sig_rc;
+        }
+    }
+
+    /* Anti-rollback check */
+    extern int eos_image_check_rollback(uint32_t candidate_version);
+    int rb_rc = eos_image_check_rollback(ctx->header.image_version);
+    if (rb_rc != EOS_OK && rb_rc != EOS_ERR_NOT_SUPPORTED) {
+        ctx->state = EOS_FW_STATE_ERROR;
+        ctx->last_error = rb_rc;
+        return rb_rc;
     }
 
     /* Request upgrade through firmware services */

@@ -121,3 +121,22 @@ int eos_rtsvc_set_next_boot(eos_slot_t slot)
     next_boot_slot = slot;
     return EOS_OK;
 }
+
+/* Stack canary failure handler for -fstack-protector-strong.
+ * On bare-metal targets, GCC/Clang require a user-defined
+ * __stack_chk_fail when stack protector is enabled. */
+#if defined(__GNUC__) || defined(__clang__)
+void __stack_chk_fail(void)
+{
+    /* Log the failure for post-mortem analysis */
+#ifdef EBOOT_ENABLE_PRINTF
+    printf("FATAL: stack smashing detected\n");
+#endif
+    /* Trigger immediate system reset */
+    eos_rtsvc_reset_system(EOS_RESET_SOFTWARE);
+    while (1); /* unreachable */
+}
+
+/* Stack canary guard value */
+uintptr_t __stack_chk_guard = 0xDEADBEEF ^ 0x0A0D0000;
+#endif
