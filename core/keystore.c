@@ -196,3 +196,43 @@ int eos_keystore_revoke_slot(eos_keystore_t *ks, uint32_t slot)
 
     return EOS_OK;
 }
+
+
+int eos_keystore_key_count(const eos_keystore_t *ks, uint32_t *count_out)
+{
+    if (!ks || !count_out) return EOS_ERR_INVALID;
+
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < EOS_KEY_SLOTS; i++) {
+        if (ks->slots[i].valid && !ks->slots[i].revoked) {
+            count++;
+        }
+    }
+    *count_out = count;
+    return EOS_OK;
+}
+
+int eos_keystore_get_security_version(const eos_keystore_t *ks,
+                                      uint32_t *version_out)
+{
+    if (!ks || !version_out) return EOS_ERR_INVALID;
+    if (ks->active_slot >= EOS_KEY_SLOTS) return EOS_ERR_KEY;
+
+    *version_out = ks->slots[ks->active_slot].security_version;
+    return EOS_OK;
+}
+
+int eos_keystore_set_security_version(eos_keystore_t *ks, uint32_t version)
+{
+    if (!ks) return EOS_ERR_INVALID;
+    if (ks->active_slot >= EOS_KEY_SLOTS) return EOS_ERR_KEY;
+
+    if (version < ks->slots[ks->active_slot].security_version) {
+        return EOS_ERR_ANTI_ROLLBACK;
+    }
+
+    for (uint32_t i = 0; i < EOS_KEY_SLOTS; i++) {
+        ks->slots[i].security_version = version;
+    }
+    return EOS_OK;
+}

@@ -135,6 +135,15 @@ void  eos_hal_disable_interrupts(void);
 void  eos_hal_enable_interrupts(void);
 void  eos_hal_deinit_peripherals(void);
 
+/* Phase 2 security extensions */
+int   eos_hal_otp_read(uint32_t offset, void *buf, size_t len);
+int   eos_hal_otp_write(uint32_t offset, const void *buf, size_t len);
+int   eos_hal_rng_get(void *buf, size_t len);
+int   eos_hal_debug_lock(void);
+int   eos_hal_debug_status(uint32_t *status);
+int   eos_hal_monotonic_read(uint32_t *value);
+int   eos_hal_monotonic_increment(void);
+
 /**
  * @brief Get the flash address for a given slot.
  * @param slot  Slot identifier.

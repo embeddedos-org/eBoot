@@ -87,6 +87,32 @@ int eos_keystore_check_security_version(const eos_keystore_t *ks,
  */
 int eos_keystore_revoke_slot(eos_keystore_t *ks, uint32_t slot);
 
+/**
+ * @brief Get the number of valid (non-revoked) keys.
+ * @param ks        Keystore context.
+ * @param count_out Receives the key count.
+ * @return EOS_OK on success.
+ */
+int eos_keystore_key_count(const eos_keystore_t *ks, uint32_t *count_out);
+
+/**
+ * @brief Get the current anti-rollback security version.
+ * @param ks          Keystore context.
+ * @param version_out Receives the security version.
+ * @return EOS_OK on success.
+ */
+int eos_keystore_get_security_version(const eos_keystore_t *ks,
+                                      uint32_t *version_out);
+
+/**
+ * @brief Set the anti-rollback security version.
+ * Must be >= current version (anti-rollback enforcement).
+ * @param ks      Keystore context.
+ * @param version New security version.
+ * @return EOS_OK on success, EOS_ERR_ANTI_ROLLBACK if version < current.
+ */
+int eos_keystore_set_security_version(eos_keystore_t *ks, uint32_t version);
+
 #ifdef __cplusplus
 }
 #endif
