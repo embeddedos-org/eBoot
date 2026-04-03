@@ -22,7 +22,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure
         run: cmake -B build -DEBLDR_BUILD_TESTS=ON
       - name: Build
@@ -51,7 +51,7 @@ jobs:
             pkg: gcc-riscv64-linux-gnu
             toolchain: toolchains/riscv64-linux-gnu.cmake
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install cross-compiler
         run: |
           sudo apt-get update
@@ -71,7 +71,7 @@ jobs:
     name: Sanitizers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build with sanitizers
         run: |
           cmake -B build \
@@ -88,7 +88,7 @@ jobs:
     name: Security Hardening Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build with all security options
         run: |
           cmake -B build \
