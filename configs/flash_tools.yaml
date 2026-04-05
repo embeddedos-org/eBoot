@@ -1,0 +1,453 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 EoS Project
+#
+# flash_tools.yaml — Board-to-Flash-Tool Mapping for eFlash
+#
+# Each board entry defines the vendor flash tool, commands, and setup hints.
+# Template variables: {image}, {address}, {board}, {build_dir}
+
+boards:
+
+  # =====================================================================
+  # ARM Cortex-M (Microcontrollers)
+  # =====================================================================
+
+  stm32f4:
+    arch: arm-cortex-m4f
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: stlink
+    flash_address: "0x08000000"
+    flash_command: >-
+      openocd -f interface/stlink.cfg -f target/stm32f4x.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: >-
+      openocd -f interface/stlink.cfg -f target/stm32f4x.cfg
+      -c "init; reset halt; stm32f4x mass_erase 0; exit"
+    reset_command: >-
+      openocd -f interface/stlink.cfg -f target/stm32f4x.cfg
+      -c "init; reset run; exit"
+    install_hint: "apt install openocd  |  brew install openocd  |  choco install openocd"
+    notes: "Connect ST-Link V2/V3 debugger to SWD header. Drivers: https://www.st.com/en/development-tools/stsw-link009.html"
+
+  stm32h7:
+    arch: arm-cortex-m7
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: stlink
+    flash_address: "0x08000000"
+    flash_command: >-
+      openocd -f interface/stlink.cfg -f target/stm32h7x.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: >-
+      openocd -f interface/stlink.cfg -f target/stm32h7x.cfg
+      -c "init; reset halt; stm32h7x mass_erase 0; exit"
+    reset_command: >-
+      openocd -f interface/stlink.cfg -f target/stm32h7x.cfg
+      -c "init; reset run; exit"
+    install_hint: "apt install openocd  |  brew install openocd  |  choco install openocd"
+    notes: "Connect ST-Link V2/V3 debugger. Dual-bank flash — ensure correct bank selected."
+
+  stm32mp1:
+    arch: arm-cortex-a7
+    tool: stm32cubeprogrammer
+    tool_check: "STM32_Programmer_CLI --version"
+    interface: stlink
+    flash_address: "0x00000000"
+    flash_command: >-
+      STM32_Programmer_CLI -c port=SWD -w {image} {address} -v -hardRst
+    erase_command: >-
+      STM32_Programmer_CLI -c port=SWD -e all
+    reset_command: >-
+      STM32_Programmer_CLI -c port=SWD -hardRst
+    install_hint: "Download STM32CubeProgrammer from https://www.st.com/en/development-tools/stm32cubeprog.html"
+    notes: "MPU device — boot mode switches must be set correctly (BOOT0/BOOT2 pins)."
+
+  nrf52:
+    arch: arm-cortex-m4f
+    tool: nrfjprog
+    tool_check: "nrfjprog --version"
+    interface: jlink
+    flash_address: "0x00000000"
+    flash_command: >-
+      nrfjprog --program {image} --chiperase --verify
+    erase_command: >-
+      nrfjprog --eraseall
+    reset_command: >-
+      nrfjprog --reset
+    verify_command: >-
+      nrfjprog --verify {image}
+    install_hint: "Download nRF Command Line Tools from https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools"
+    notes: "Requires J-Link debugger (included on nRF52 DK boards). Install J-Link drivers first."
+
+  samd51:
+    arch: arm-cortex-m4f
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: cmsis-dap
+    flash_address: "0x00000000"
+    flash_command: >-
+      openocd -f interface/cmsis-dap.cfg -f target/atsame5x.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: >-
+      openocd -f interface/cmsis-dap.cfg -f target/atsame5x.cfg
+      -c "init; reset halt; at91samd chip-erase; exit"
+    reset_command: >-
+      openocd -f interface/cmsis-dap.cfg -f target/atsame5x.cfg
+      -c "init; reset run; exit"
+    install_hint: "apt install openocd  |  brew install openocd"
+    notes: "Adafruit boards use UF2 bootloader — drag-drop .uf2 file to BOOT drive as alternative."
+
+  cortex_r5:
+    arch: arm-cortex-r5
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jlink
+    flash_address: "0x00200000"
+    flash_command: >-
+      openocd -f interface/jlink.cfg -f target/xilinx_zynqmp.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: >-
+      openocd -f interface/jlink.cfg -f target/xilinx_zynqmp.cfg
+      -c "init; reset halt; flash erase_sector 0 0 last; exit"
+    reset_command: >-
+      openocd -f interface/jlink.cfg -f target/xilinx_zynqmp.cfg
+      -c "init; reset run; exit"
+    install_hint: "apt install openocd  |  brew install openocd"
+    notes: "Xilinx/AMD Zynq UltraScale+ RPU. Requires J-Link or Xilinx Platform Cable."
+
+  # =====================================================================
+  # ARM64 (Application Processors)
+  # =====================================================================
+
+  rpi4:
+    arch: arm64-cortex-a72
+    tool: sd_card
+    tool_check: ""
+    interface: sd_card
+    flash_address: ""
+    flash_command: ""
+    erase_command: ""
+    reset_command: ""
+    install_hint: "No special tool needed — copy files to SD card boot partition."
+    notes: >-
+      1. Format microSD as FAT32.
+      2. Copy eboot_firmware.bin to SD card root.
+      3. Add config.txt with: kernel=eboot_firmware.bin, arm_64bit=1.
+      4. Insert SD card and power on.
+    custom_handler: rpi4
+
+  imx8m:
+    arch: arm64-cortex-a53
+    tool: uuu
+    tool_check: "uuu -v"
+    interface: usb
+    flash_address: "0x00000000"
+    flash_command: >-
+      uuu -b emmc {image}
+    erase_command: >-
+      uuu FB: flash -raw2sparse all zero.img
+    reset_command: ""
+    install_hint: "Download UUU from https://github.com/nxp-imx/mfgtools/releases"
+    notes: "NXP i.MX 8M — set boot switches to USB download mode. Connect USB-C OTG port."
+
+  am64x:
+    arch: arm64-cortex-a53
+    tool: uniflash
+    tool_check: "dslite --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      dslite --config=am64x.ccxml --mode=flash --image={image}
+    erase_command: >-
+      dslite --config=am64x.ccxml --mode=flash --operation=erase
+    reset_command: >-
+      dslite --config=am64x.ccxml --mode=flash --operation=reset
+    install_hint: "Download TI UniFlash from https://www.ti.com/tool/UNIFLASH"
+    notes: "Texas Instruments AM64x — requires XDS110 debug probe (onboard on EVM/SK)."
+
+  qemu_arm64:
+    arch: arm64
+    tool: qemu
+    tool_check: "qemu-system-aarch64 --version"
+    interface: virtual
+    flash_address: ""
+    flash_command: >-
+      qemu-system-aarch64 -M virt -cpu cortex-a53 -m 256M
+      -nographic -kernel {image}
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install qemu-system-arm  |  brew install qemu  |  choco install qemu"
+    notes: "Virtual platform — no physical hardware needed. Runs eBoot in QEMU emulator."
+    custom_handler: qemu
+
+  # =====================================================================
+  # RISC-V
+  # =====================================================================
+
+  sifive_u:
+    arch: riscv64
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jlink
+    flash_address: "0x20000000"
+    flash_command: >-
+      openocd -f interface/jlink.cfg -f target/sifive-hifive1.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: >-
+      openocd -f interface/jlink.cfg -f target/sifive-hifive1.cfg
+      -c "init; reset halt; flash erase_sector 0 0 last; exit"
+    reset_command: >-
+      openocd -f interface/jlink.cfg -f target/sifive-hifive1.cfg
+      -c "init; reset run; exit"
+    install_hint: "apt install openocd  |  brew install openocd"
+    notes: "SiFive HiFive boards. Requires J-Link or FTDI debug adapter."
+
+  riscv64_virt:
+    arch: riscv64
+    tool: qemu
+    tool_check: "qemu-system-riscv64 --version"
+    interface: virtual
+    flash_address: ""
+    flash_command: >-
+      qemu-system-riscv64 -M virt -m 256M -nographic
+      -bios {image}
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install qemu-system-misc  |  brew install qemu"
+    notes: "Virtual RISC-V platform — no physical hardware needed."
+    custom_handler: qemu
+
+  # =====================================================================
+  # ESP32 (Xtensa / RISC-V)
+  # =====================================================================
+
+  esp32:
+    arch: xtensa-lx6
+    tool: esptool
+    tool_check: "esptool.py version"
+    interface: uart
+    flash_address: "0x1000"
+    flash_command: >-
+      esptool.py --chip esp32 --port {port} --baud 460800
+      write_flash -z {address} {image}
+    erase_command: >-
+      esptool.py --chip esp32 --port {port} erase_flash
+    reset_command: >-
+      esptool.py --chip esp32 --port {port} run
+    install_hint: "pip install esptool"
+    notes: "Connect via USB. Hold BOOT button during flash if auto-reset fails. Default port: /dev/ttyUSB0 (Linux), COM3 (Windows)."
+    extra_args:
+      - name: port
+        flag: "--port"
+        default_linux: "/dev/ttyUSB0"
+        default_windows: "COM3"
+        default_macos: "/dev/cu.usbserial-0001"
+        help: "Serial port for ESP32"
+
+  # =====================================================================
+  # x86 / x86_64
+  # =====================================================================
+
+  x86:
+    arch: x86
+    tool: dd
+    tool_check: "dd --version"
+    interface: disk
+    flash_address: ""
+    flash_command: >-
+      dd if={image} of={device} bs=512 conv=notrunc
+    erase_command: ""
+    reset_command: ""
+    install_hint: "dd is built-in on Linux/macOS. On Windows use WSL or Rufus."
+    notes: >-
+      Write eBoot image to raw disk/USB drive sector 0.
+      WARNING: dd overwrites the target device — double-check the device path!
+    extra_args:
+      - name: device
+        flag: "--device"
+        required: true
+        help: "Target device (e.g., /dev/sdb)"
+
+  x86_64_efi:
+    arch: x86_64
+    tool: dd
+    tool_check: "dd --version"
+    interface: efi
+    flash_address: ""
+    flash_command: >-
+      dd if={image} of={device} bs=512 conv=notrunc
+    erase_command: ""
+    reset_command: ""
+    install_hint: "dd is built-in on Linux/macOS. On Windows use Rufus to create bootable USB."
+    notes: >-
+      UEFI boot — create EFI system partition or write to USB.
+      Copy eboot_firmware.efi to /EFI/BOOT/BOOTX64.EFI on FAT32 partition.
+    extra_args:
+      - name: device
+        flag: "--device"
+        required: true
+        help: "Target device (e.g., /dev/sdb)"
+
+  # =====================================================================
+  # SPARC
+  # =====================================================================
+
+  sparc:
+    arch: sparc-leon3
+    tool: grmon
+    tool_check: "grmon --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      grmon -digilent -u -c "flash unlock all; flash erase all; flash load {image}; verify {image}; run"
+    erase_command: >-
+      grmon -digilent -u -c "flash unlock all; flash erase all"
+    reset_command: >-
+      grmon -digilent -u -c "run"
+    install_hint: "Download GRMON from https://www.gaisler.com/index.php/downloads/debug-tools"
+    notes: "SPARC LEON3 processor. Requires Digilent JTAG cable or Gaisler debug cable."
+
+  # =====================================================================
+  # Legacy / Niche Architectures
+  # =====================================================================
+
+  m68k:
+    arch: m68k
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: bdm
+    flash_address: "0x00000000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg -f target/mcf5xxx.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "Motorola 68k / ColdFire. Requires BDM or JTAG debug adapter."
+
+  mips:
+    arch: mips
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jtag
+    flash_address: "0xBFC00000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg -f target/pic32mx.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "MIPS architecture. Flash at boot vector 0xBFC00000."
+
+  powerpc:
+    arch: powerpc
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jtag
+    flash_address: "0xFFF00000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg -f target/ppc476.cfg
+      -c "program {image} verify reset exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "PowerPC architecture. Ensure JTAG adapter supports PowerPC debug interface."
+
+  sh4:
+    arch: sh4
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jtag
+    flash_address: "0xA0000000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg
+      -c "program {image} verify exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "Renesas SuperH SH-4. Limited OpenOCD support — may require custom config."
+
+  v850:
+    arch: v850
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg
+      -c "program {image} verify exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "Renesas V850. Use Renesas E1/E2 emulator or JTAG adapter."
+
+  frv:
+    arch: frv
+    tool: gdb
+    tool_check: "frv-elf-gdb --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      frv-elf-gdb -batch -ex "target remote :3333"
+      -ex "monitor reset halt" -ex "load" -ex "monitor reset run" {image}
+    erase_command: ""
+    reset_command: ""
+    install_hint: "Build frv-elf-gdb from source or use vendor SDK."
+    notes: "Fujitsu FR-V. Requires architecture-specific GDB and JTAG server."
+
+  h8300:
+    arch: h8300
+    tool: gdb
+    tool_check: "h8300-elf-gdb --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      h8300-elf-gdb -batch -ex "target remote :3333"
+      -ex "monitor reset halt" -ex "load" -ex "monitor reset run" {image}
+    erase_command: ""
+    reset_command: ""
+    install_hint: "Build h8300-elf-gdb from source or use Renesas HEW tools."
+    notes: "Renesas H8/300. Requires architecture-specific GDB and debug adapter."
+
+  mn103:
+    arch: mn103
+    tool: gdb
+    tool_check: "mn10300-elf-gdb --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      mn10300-elf-gdb -batch -ex "target remote :3333"
+      -ex "monitor reset halt" -ex "load" -ex "monitor reset run" {image}
+    erase_command: ""
+    reset_command: ""
+    install_hint: "Build mn10300-elf-gdb from source."
+    notes: "Panasonic MN103. Very niche — limited tooling available."
+
+  strongarm:
+    arch: arm-strongarm
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg
+      -c "program {image} verify exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "Intel StrongARM (SA-110/SA-1100). Legacy ARM architecture."
+
+  xscale:
+    arch: arm-xscale
+    tool: openocd
+    tool_check: "openocd --version"
+    interface: jtag
+    flash_address: "0x00000000"
+    flash_command: >-
+      openocd -f interface/ftdi/olimex-jtag-tiny.cfg -f target/pxa270.cfg
+      -c "program {image} verify exit {address}"
+    erase_command: ""
+    reset_command: ""
+    install_hint: "apt install openocd"
+    notes: "Intel XScale (PXA255/270). Legacy ARM architecture with Thumb support."

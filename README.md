@@ -26,13 +26,16 @@ cmake -B build -DEBLDR_BUILD_TESTS=ON
 cmake --build build
 cd build && ctest
 
-# Cross-compile for ARM
-cmake -B build-arm -DCMAKE_C_COMPILER=arm-none-eabi-gcc -DCMAKE_SYSTEM_NAME=Generic
+# Cross-compile for STM32F4
+cmake -B build-arm -DEBLDR_BOARD=stm32f4 \
+  -DCMAKE_TOOLCHAIN_FILE=toolchains/arm-none-eabi.cmake
 cmake --build build-arm
 
-# Cross-compile for RISC-V
-cmake -B build-rv -DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc -DCMAKE_SYSTEM_NAME=Linux
-cmake --build build-rv
+# Flash with eFlash (unified flashing tool)
+python tools/eflash.py flash --board stm32f4 --image build-arm/eboot_firmware.bin --verify --reset
+
+# Or use CMake flash target
+cmake --build build-arm --target flash
 ```
 
 ---
@@ -50,6 +53,7 @@ cmake --build build-rv
 | **UEFI-like** | Device table, runtime services (variables, reset, time), interactive boot menu |
 | **Board Registry** | Runtime multi-board selection, GCC constructor auto-registration |
 | **Recovery** | UART-based recovery protocol, hardware pin trigger, factory reset |
+| **Flashing** | Unified eFlash tool wrapping 25 board-vendor tools behind a single CLI |
 | **Platforms** | ARM Cortex-M/A, RISC-V 32/64, Xtensa, x86_64, PowerPC, SPARC, SuperH, M68K — 24 board ports |
 
 ---
@@ -105,8 +109,8 @@ eboot/
 │   ├── x86_64_efi/           #   x86_64 UEFI
 │   └── ...                   #   + 16 more
 ├── tests/                    # Unit tests (native host)
-├── tools/                    # Host tools (imgpack, signing)
-├── configs/                  # Boot config schemas (YAML)
+├── tools/                    # Host tools (eFlash, imgpack, signing)
+├── configs/                  # Boot + flash config schemas (YAML)
 └── docs/                     # Documentation
 ```
 
