@@ -72,14 +72,10 @@ void eos_power_dump(const eos_power_ctx_t *pwr)
 #if !defined(EOS_BARE_METAL)
     const char *causes[] = {"POWER_ON","WATCHDOG","SOFTWARE","BROWNOUT","PIN","LOCKUP","UNKNOWN"};
     const char *states[] = {"RUN","SLEEP","DEEP_SLEEP","STANDBY","SHUTDOWN"};
-    int cidx = (int)pwr->last_reset;
-    int sidx = (int)pwr->state;
-    if (cidx < 0 || cidx >= (int)(sizeof(causes)/sizeof(causes[0]))) cidx = 6;
-    if (sidx < 0 || sidx >= (int)(sizeof(states)/sizeof(states[0]))) sidx = 0;
+    int cause_idx = (int)pwr->last_reset;
     int state_idx = (int)pwr->state;
-           states[sidx], causes[cidx],
-    if (state_idx < 0 || state_idx >= (int)(sizeof(states)/sizeof(states[0]))) state_idx = (int)(sizeof(states)/sizeof(states[0])) - 1;
-    if (cause_idx < 0 || cause_idx >= (int)(sizeof(causes)/sizeof(causes[0]))) cause_idx = (int)(sizeof(causes)/sizeof(causes[0])) - 1;
+    if (cause_idx < 0 || cause_idx >= (int)(sizeof(causes)/sizeof(causes[0]))) cause_idx = 6;
+    if (state_idx < 0 || state_idx >= (int)(sizeof(states)/sizeof(states[0]))) state_idx = 0;
     printf("Power: state=%s reset=%s PMIC=%s USB=%s\n",
            states[state_idx], causes[cause_idx],
            pwr->pmic_present ? "yes" : "no",
