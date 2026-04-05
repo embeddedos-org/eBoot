@@ -7,7 +7,7 @@
 
 **Multi-platform modular bootloader with multicore, secure boot, and firmware update support**
 
-eboot is a production-grade boot platform for embedded systems — supporting **24 board ports** across **10 architectures**, with clean separation between boot logic, hardware abstraction, and firmware management.
+eboot is a production-grade boot platform for embedded systems — supporting **83 board ports** across **73 architecture families**, with clean separation between boot logic, hardware abstraction, and firmware management.
 
 → **New to eboot?** See the [Quickstart Guide](docs/quickstart.md) — build and flash in 3 commands.
 
@@ -54,7 +54,7 @@ cmake --build build-arm --target flash
 | **Board Registry** | Runtime multi-board selection, GCC constructor auto-registration |
 | **Recovery** | UART-based recovery protocol, hardware pin trigger, factory reset |
 | **Flashing** | Unified eFlash tool wrapping 25 board-vendor tools behind a single CLI |
-| **Platforms** | ARM Cortex-M/A, RISC-V 32/64, Xtensa, x86_64, PowerPC, SPARC, SuperH, M68K — 24 board ports |
+| **Platforms** | ARM Cortex-M/A, RISC-V 32/64, Xtensa, x86_64, PowerPC, SPARC, SuperH, M68K — 83 board ports |
 
 ---
 
@@ -98,7 +98,7 @@ eboot/
 ├── hal/                      # HAL dispatch + board registry
 ├── stage0/                   # Minimal first-stage bootloader
 ├── stage1/                   # Stage-1 boot manager
-├── boards/                   # Board ports (24 platforms)
+├── boards/                   # Board ports (83 platforms)
 │   ├── stm32f4/              #   ARM Cortex-M4 (reference)
 │   ├── stm32h7/              #   ARM Cortex-M7
 │   ├── nrf52/                #   ARM Cortex-M4F (BLE)
@@ -107,7 +107,7 @@ eboot/
 │   ├── riscv64_virt/         #   RISC-V 64 (QEMU)
 │   ├── esp32/                #   Xtensa LX6 (Espressif)
 │   ├── x86_64_efi/           #   x86_64 UEFI
-│   └── ...                   #   + 16 more
+│   └── ...                   #   + 57 more
 ├── tests/                    # Unit tests (native host)
 ├── tools/                    # Host tools (eFlash, imgpack, signing)
 ├── configs/                  # Boot + flash config schemas (YAML)
