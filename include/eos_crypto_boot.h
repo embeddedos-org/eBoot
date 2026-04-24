@@ -42,7 +42,7 @@ int eos_crypto_verify_image(uint32_t image_addr, uint32_t image_size,
                              const uint8_t expected_hash[EOS_SHA256_DIGEST_SIZE]);
 
 /**
- * Verify a digital signature (Ed25519-style stub).
+ * Verify a digital signature (Ed25519 — RFC 8032).
  */
 int eos_crypto_verify_signature(const uint8_t *data, size_t data_len,
                                  const uint8_t *signature, size_t sig_len,

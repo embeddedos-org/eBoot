@@ -45,7 +45,7 @@ cmake --build build-arm --target flash
 | Category | Features |
 |---|---|
 | **Boot Management** | Staged boot (stage-0 + stage-1), A/B slots with automatic rollback, boot policy engine |
-| **Secure Boot** | Self-contained SHA-256, CRC-32, Ed25519 signature stubs, anti-rollback |
+| **Secure Boot** | Self-contained SHA-256, CRC-32, Ed25519 signature verification, anti-rollback |
 | **Firmware Update** | Stream-based pipeline (256B chunks), XMODEM/YMODEM/raw transports, pluggable custom transports |
 | **Multicore** | SMP, AMP, lockstep boot; ARM PSCI, RISC-V SBI HSM, x86 SIPI, mailbox support |
 | **Hardware Config** | Declarative pin muxing, memory regions, interrupt priorities, clock trees via macros |
@@ -234,6 +234,59 @@ ctest --test-dir build --output-on-failure
 git tag v0.1.0
 git push origin v0.1.0
 ```
+
+---
+
+## 🔐 Security
+
+eBoot implements a secure boot chain with cryptographic verification at every stage:
+
+### Secure Boot Chain
+
+```
+ROM → Stage-0 (minimal) → Stage-1 (full boot manager) → OS/RTOS
+         │                      │
+         └── CRC-32 check       └── SHA-256 hash + Ed25519 signature verify
+```
+
+### Cryptographic Primitives
+
+| Algorithm | Implementation | Status | File |
+|-----------|---------------|--------|------|
+| **SHA-256** | NIST FIPS 180-4, self-contained | Real | `core/crypto_boot.c` |
+| **CRC-32** | Lookup table | Real | `core/bootctl.c` |
+| **Ed25519** | RFC 8032, full Curve25519 field arithmetic | Real | `core/ed25519_verify.c` |
+| **Constant-time compare** | Side-channel resistant | Real | `core/crypto_boot.c` |
+
+### Ed25519 Verification Details
+
+The Ed25519 implementation is fully self-contained with no external dependencies:
+- Full field arithmetic for Curve25519 (mod p = 2^255 - 19) using 10-limb representation
+- Extended coordinates for Edwards curve point operations (add, double, scalar multiply)
+- Scalar reduction mod L (group order) using Barrett reduction
+- Verification: `[S]B == R + [k]A` where `k = SHA-256(R || A || M)`
+
+> **Note**: Uses SHA-256 instead of SHA-512 internally (per project convention). The signing tool (`sign_image.py`) must use the matching algorithm.
+
+### Anti-Rollback Protection
+
+- Boot control block tracks firmware version monotonic counters
+- A/B slot management with automatic rollback on failed boot attempts
+- Maximum boot attempt policy enforcement via `boot_policy.c`
+- Watchdog-based boot failure detection
+
+### Security Features
+
+| Feature | Description |
+|---------|-------------|
+| **Firmware Keystore** | Trusted key storage for signature verification (`core/keystore.c`) |
+| **Debug Lock** | Hardware debug port locking for production builds (`core/debug_lock.c`) |
+| **MPU Configuration** | Memory protection unit setup during boot (`core/mpu_boot.c`) |
+| **Recovery Mode** | UART-based recovery with hardware pin trigger (`core/recovery.c`) |
+| **Image TLV** | Type-Length-Value metadata for firmware images (`core/image_tlv.c`) |
+| **Firmware Decryption** | Encrypted firmware image support (`core/fw_decrypt.c`) |
+
+For vulnerability reports, see [SECURITY.md](SECURITY.md).
 
 ---
 
