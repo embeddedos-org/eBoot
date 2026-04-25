@@ -113,6 +113,9 @@ eBoot supports **83 board ports** across **73 architecture families**, with clea
 
 ### 1.1 What Is eBoot?
 
+![Figure: eBoot System Architecture — layered design from hardware to application](images/architecture.png)
+
+
 eBoot is a multi-platform modular bootloader designed for the EmbeddedOS ecosystem. It provides a complete boot solution that handles everything from initial hardware setup at power-on to loading and verifying the application firmware. Unlike monolithic bootloaders, eBoot uses a staged architecture with clean separation between:
 
 - **Stage-0**: Minimal first-stage bootloader — runs from ROM/flash, initializes essential hardware (clocks, memory controller, UART), and loads Stage-1
@@ -195,6 +198,9 @@ When used with **ebuild**, configuration files (flash layout, linker scripts, si
 ## Chapter 2: Architecture Overview
 
 ### 2.1 System Architecture
+
+![Figure: eBoot Secure Boot Flow — from reset vector through crypto verification to application launch](images/boot-flow.png)
+
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -1260,6 +1266,9 @@ Example: Version 1.2.3 = 0x01020003
 ## Chapter 15: A/B Slot Architecture
 
 ### 15.1 Dual-Slot Design
+
+![Figure: A/B Slot Partition Layout — dual firmware slots with boot metadata](images/ab-slots.png)
+
 
 The A/B slot architecture ensures that a valid firmware is always available:
 
