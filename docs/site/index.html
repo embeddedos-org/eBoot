@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>eBoot — Secure Bootloader | EmbeddedOS</title>
+  <meta name="description" content="Production-grade bootloader supporting 24 board ports across 10 architectures with staged boot, A/B slots, secure boot chain, and Ed25519 verification.">
+  <meta name="keywords" content="bootloader, secure boot, firmware, a/b slots, ed25519, arm, risc-v, embedded">
+  <meta name="author" content="EmbeddedOS Organization">
+  <link rel="canonical" href="https://embeddedos-org.github.io/eBoot/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="eBoot — Secure Bootloader | EmbeddedOS">
+  <meta property="og:description" content="Production-grade bootloader supporting 24 board ports across 10 architectures with staged boot, A/B slots, secure boot chain, and Ed25519 verification.">
+  <meta property="og:url" content="https://embeddedos-org.github.io/eBoot/">
+  <meta property="og:site_name" content="EmbeddedOS">
+  <meta property="og:image" content="https://embeddedos-org.github.io/assets/eboot-og.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="eBoot — Secure Bootloader | EmbeddedOS">
+  <meta name="twitter:description" content="Production-grade bootloader supporting 24 board ports across 10 architectures with staged boot, A/B slots, secure boot chain, and Ed25519 verification.">
+  <meta name="twitter:image" content="https://embeddedos-org.github.io/assets/eboot-og.png">
+
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "eBoot",
+    "alternateName": "Secure Bootloader",
+    "description": "Production-grade bootloader supporting 24 board ports across 10 architectures with staged boot, A/B slots, secure boot chain, and Ed25519 verification.",
+    "url": "https://embeddedos-org.github.io/eBoot/",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Embedded / Bare-metal",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "sourceOrganization": {
+      "@type": "Organization",
+      "name": "EmbeddedOS",
+      "url": "https://embeddedos-org.github.io/"
+    },
+    "codeRepository": "https://github.com/embeddedos-org/eBoot"
+  }
+  </script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="nav-inner">
+      <a href="https://embeddedos-org.github.io/" class="logo">
+        <div class="logo-icon">EB</div>
+        EmbeddedOS
+      </a>
+      <div class="nav-links">
+        <a href="https://embeddedos-org.github.io/">Home</a>
+        <a href="https://embeddedos-org.github.io/eBoot/" class="active">Docs</a>
+        <a href="https://github.com/embeddedos-org/eBoot">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Breadcrumb -->
+  <div class="breadcrumb">
+    <a href="https://embeddedos-org.github.io/">EmbeddedOS</a>
+    <span class="sep">/</span>
+    <span>eBoot</span>
+  </div>
+
+  <!-- Hero -->
+  <section class="hero" style="border-left: 4px solid #58a6ff;">
+    <div class="hero-content">
+      <h1 style="background: linear-gradient(135deg, #58a6ff, var(--purple), var(--pink)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">eBoot — Secure Bootloader</h1>
+      <p class="subtitle">Production-grade bootloader supporting 24 board ports across 10 architectures with staged boot, A/B slots, secure boot chain, and Ed25519 verification.</p>
+      <div class="hero-badges">
+        <span class="badge badge-blue">Staged Boot</span>
+        <span class="badge badge-green">24 Board Ports</span>
+        <span class="badge badge-purple">Secure Boot Chain</span>
+        <span class="badge badge-orange">A/B Slots</span>
+        <span class="badge badge-cyan">10 Architectures</span>
+      </div>
+      <div class="hero-buttons">
+        <a href="https://github.com/embeddedos-org/eBoot" class="btn btn-primary">View on GitHub</a>
+        <a href="https://github.com/embeddedos-org/eBoot/releases/tag/v0.2.0-book" class="btn btn-outline">Download Book (PDF)</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section">
+    <h2 class="section-title">Key Features</h2>
+    <p class="section-subtitle">Secure, reliable boot for every embedded platform</p>
+    <div class="feature-grid">
+      <div class="feature-card" style="border-top: 3px solid #58a6ff;">
+        <h3>Staged Boot (Stage-0 + Stage-1)</h3>
+        <p>Two-stage boot architecture: minimal stage-0 ROM initializes hardware, stage-1 handles full boot logic with peripheral and memory setup.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #3fb950;">
+        <h3>24 Board Ports</h3>
+        <p>Ready-to-use board support packages for STM32, nRF, ESP32, Raspberry Pi, BeagleBone, RISC-V SiFive, and many more.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #bc8cff;">
+        <h3>A/B Slots with Rollback</h3>
+        <p>Dual firmware slots enable seamless updates with automatic rollback on boot failure, ensuring devices never brick.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #f0883e;">
+        <h3>Secure Boot Chain (Ed25519)</h3>
+        <p>Cryptographic signature verification at every boot stage using Ed25519 with hardware root-of-trust integration.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #79c0ff;">
+        <h3>Stream-Based Firmware Update</h3>
+        <p>Memory-efficient streaming update engine that can apply firmware images larger than available RAM using chunked transfers.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #f778ba;">
+        <h3>SMP/AMP/Lockstep Multicore Boot</h3>
+        <p>Boot multiple cores in symmetric, asymmetric, or lockstep configurations with per-core initialization sequences.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #e3b341;">
+        <h3>UEFI-Style Device Table</h3>
+        <p>Standardized device description table passed from bootloader to OS, enabling hardware-agnostic kernel initialization.</p>
+      </div>
+      <div class="feature-card" style="border-top: 3px solid #f85149;">
+        <h3>Recovery Mode</h3>
+        <p>Built-in recovery shell with UART/USB console, memory dump, flash erase, and emergency firmware loading capabilities.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Start -->
+  <div class="section-alt">
+    <section class="section">
+      <h2 class="section-title">Quick Start</h2>
+      <p class="section-subtitle">Build and flash eBoot to your target board</p>
+      <pre><code><span style="color: var(--text-muted);"># Clone the repository</span>
+git clone https://github.com/embeddedos-org/eBoot.git
+cd eBoot
+
+<span style="color: var(--text-muted);"># Configure for your board</span>
+cmake -B build -DEBOOT_BOARD=stm32f4
+cmake --build build
+
+<span style="color: var(--text-muted);"># Flash stage-0 + stage-1</span>
+cmake --build build --target flash</code></pre>
+    </section>
+  </div>
+
+  <!-- API Highlights -->
+  <section class="section">
+    <h2 class="section-title">API Highlights</h2>
+    <p class="section-subtitle">Core bootloader modules</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Description</th>
+          <th>Header</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>eboot/stage0</code></td>
+          <td>Minimal ROM boot — clock, memory, and stack init</td>
+          <td><code>eboot/stage0.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/stage1</code></td>
+          <td>Full boot — peripheral init, image loading, handoff</td>
+          <td><code>eboot/stage1.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/secure</code></td>
+          <td>Secure boot — Ed25519 verification, chain of trust</td>
+          <td><code>eboot/secure.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/slot</code></td>
+          <td>A/B slot management — selection, rollback, metadata</td>
+          <td><code>eboot/slot.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/update</code></td>
+          <td>Streaming firmware update — chunked transfer, verify</td>
+          <td><code>eboot/update.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/devtable</code></td>
+          <td>Device table — UEFI-style hardware description</td>
+          <td><code>eboot/devtable.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/multicore</code></td>
+          <td>Multicore boot — SMP/AMP/Lockstep init</td>
+          <td><code>eboot/multicore.h</code></td>
+        </tr>
+        <tr>
+          <td><code>eboot/recovery</code></td>
+          <td>Recovery mode — console, flash tools, diagnostics</td>
+          <td><code>eboot/recovery.h</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <a href="https://embeddedos-org.github.io/eos/">EoS — Embedded OS</a>
+        <a href="https://embeddedos-org.github.io/eBoot/">eBoot — Bootloader</a>
+        <a href="https://embeddedos-org.github.io/ebuild/">ebuild — Build System</a>
+        <a href="https://embeddedos-org.github.io/eIPC/">eIPC — IPC Framework</a>
+        <a href="https://embeddedos-org.github.io/eAI/">eAI — AI Framework</a>
+        <a href="https://github.com/embeddedos-org/eos">GitHub — EoS</a>
+        <a href="https://github.com/embeddedos-org/eBoot">GitHub — eBoot</a>
+        <a href="https://github.com/embeddedos-org/ebuild">GitHub — ebuild</a>
+        <a href="https://github.com/embeddedos-org/eIPC">GitHub — eIPC</a>
+        <a href="https://github.com/embeddedos-org/eAI">GitHub — eAI</a>
+      </div>
+      <div class="footer-bottom">
+        &copy; 2025 EmbeddedOS Organization. Open-source under the MIT License.
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
