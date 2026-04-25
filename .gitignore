@@ -6,3 +6,8 @@ build_test/
 *.bin
 *.hex
 *.map
+
+# Editor swap files
+*.swp
+*.swo
+*~
