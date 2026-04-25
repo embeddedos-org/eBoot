@@ -672,6 +672,9 @@ int eos_ed25519_verify(const eos_ed25519_ctx_t *ctx,
 
 ### 6.1 Stream-Based Architecture
 
+![Figure: eBoot OTA Firmware Update Pipeline — download, verify, write, reboot cycle](images/firmware-update-flow.png)
+
+
 eBoot uses a stream-based firmware update pipeline that processes data in 256-byte chunks. The firmware image is never fully loaded into RAM — chunks are written directly to the target flash slot as they arrive.
 
 ```c
@@ -1124,6 +1127,9 @@ EOS_REGISTER_BOARD(my_board_ops);
 ## Chapter 12: Secure Boot Chain
 
 ### 12.1 Chain of Trust
+
+![Figure: eBoot Secure Boot Chain of Trust — from hardware root of trust through verified firmware](images/secure-boot-chain.png)
+
 
 The eBoot secure boot chain establishes trust from the hardware root of trust (ROM) through each boot stage to the application:
 
