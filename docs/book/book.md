@@ -30,6 +30,9 @@ titlepage-background: "cover.png"
 
 ## Preface
 
+
+![Figure: eBoot — 3D Product Visualization](images/product-3d.png)
+
 eBoot is the production-grade bootloader platform for the EmbeddedOS (EoS) ecosystem. It provides a complete, secure, and modular boot solution for embedded systems — from tiny Cortex-M microcontrollers to multi-core ARM64 and x86_64 edge servers.
 
 This reference guide is intended for firmware engineers, system architects, and embedded developers who need to understand, configure, deploy, and extend eBoot across their hardware platforms. Whether you are bringing up a new board, integrating secure boot into your product pipeline, or building a custom firmware update system, this book provides the authoritative reference you need.
