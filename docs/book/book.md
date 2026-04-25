@@ -1,6 +1,17 @@
+---
+title: "eBoot — Official Reference Guide"
+author: "Srikanth Patchava & EmbeddedOS Contributors"
+date: "April 2026"
+version: "v1.0.0"
+bibliography: references.bib
+csl: ieee.csl
+titlepage: true
+titlepage-background: "cover.png"
+---
+
 # eBoot: The Definitive Reference Guide
 
-## EmbeddedOS Secure Bootloader Platform
+## EmbeddedOS Secure Boot [@uefi2021]loader Platform
 
 **Version 0.1.0**
 
@@ -10,7 +21,7 @@
 
 ---
 
-*A comprehensive technical reference for the eBoot multi-platform modular bootloader with multicore, secure boot, and firmware update support.*
+*A comprehensive technical reference for the eBoot multi-platform modular bootloader with multicore, secure boot, and firmware update [@suit_manifest] support.*
 
 *Published by the EmbeddedOS Project*
 *Copyright (c) 2026 EoS Project. MIT License.*
@@ -39,7 +50,7 @@ eBoot supports **83 board ports** across **73 architecture families**, with clea
 - **Part II: Core Services** — Detailed coverage of all 22 boot services
 - **Part III: Platform Porting** — Board support, HAL, and bring-up procedures
 - **Part IV: Security** — Secure boot, cryptographic verification, and anti-rollback
-- **Part V: Firmware Updates** — OTA, transport protocols, and A/B slot management
+- **Part V: Firmware Updates** — OTA, transport protocols, and A/B [@android_ab] slot management
 - **Part VI: Advanced Topics** — Multicore boot, RTOS integration, UEFI-style services
 - **Part VII: Reference** — Complete API reference, configuration schemas, troubleshooting
 
@@ -114,7 +125,7 @@ This separation allows Stage-0 to remain small and simple (typically 8-16 KB), m
 | Category | Features |
 |---|---|
 | **Boot Management** | Staged boot (stage-0 + stage-1), A/B slots with automatic rollback, boot policy engine |
-| **Secure Boot** | Self-contained SHA-256, CRC-32, Ed25519 signature stubs, anti-rollback |
+| **Secure Boot** | Self-contained SHA-256 [@fips180], CRC-32, Ed25519 [@bernstein2012] signature stubs, anti-rollback |
 | **Firmware Update** | Stream-based pipeline (256B chunks), XMODEM/YMODEM/raw transports, pluggable custom transports |
 | **Multicore** | SMP, AMP, lockstep boot; ARM PSCI, RISC-V SBI HSM, x86 SIPI, mailbox support |
 | **Hardware Config** | Declarative pin muxing, memory regions, interrupt priorities, clock trees via macros |
@@ -1677,3 +1688,8 @@ eBoot aligns with: ISO/IEC/IEEE 15288:2023, ISO/IEC 12207, ISO/IEC/IEEE 42010, I
 
 ---
 Part of the [EmbeddedOS Organization](https://embeddedos-org.github.io).
+
+## References
+
+::: {#refs}
+:::
