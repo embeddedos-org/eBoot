@@ -4,6 +4,7 @@
 [![Nightly](https://github.com/embeddedos-org/eboot/actions/workflows/nightly.yml/badge.svg)](https://github.com/embeddedos-org/eboot/actions/workflows/nightly.yml)
 [![Release](https://github.com/embeddedos-org/eboot/actions/workflows/release.yml/badge.svg)](https://github.com/embeddedos-org/eboot/actions/workflows/release.yml)
 [![Version](https://img.shields.io/github/v/tag/embeddedos-org/eboot?label=version)](https://github.com/embeddedos-org/eboot/releases/latest)
+[![Book](https://github.com/embeddedos-org/eBoot/actions/workflows/book-build.yml/badge.svg)](https://github.com/embeddedos-org/eBoot/actions/workflows/book-build.yml)
 
 **Multi-platform modular bootloader with multicore, secure boot, and firmware update support**
 
