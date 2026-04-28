@@ -1,0 +1,74 @@
+name: Build Promo Video
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'promo/**'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: video-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  render-video:
+    name: Render Promo Video
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libcairo2-dev libpango1.0-dev
+          pip install manim==0.18.1 edge-tts mutagen
+
+      - name: Generate narration audio
+        run: |
+          cd promo
+          python generate_audio.py
+          cat durations.json
+
+      - name: Render synced promo video
+        run: |
+          cd promo
+          manim render -qh --format mp4 promo_scene.py ProductPromo
+
+      - name: Merge video + audio
+        run: |
+          cd promo
+          VIDEO=$(find media/videos -name "ProductPromo.mp4" | head -1)
+          ffmpeg -y -i "$VIDEO" -i narration.mp3 \
+            -c:v copy -c:a aac -b:a 192k \
+            -map 0:v:0 -map 1:a:0 \
+            -shortest \
+            eBoot_v1.0_promo.mp4
+          ls -lh eBoot_v1.0_promo.mp4
+
+      - name: Upload final video
+        uses: actions/upload-artifact@v4
+        with:
+          name: eBoot-promo-video
+          path: promo/eBoot_v1.0_promo.mp4
+          retention-days: 90
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: promo/eBoot_v1.0_promo.mp4
+          tag_name: ${{ github.event.release.tag_name }}
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
