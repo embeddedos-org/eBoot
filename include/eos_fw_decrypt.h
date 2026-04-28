@@ -28,6 +28,8 @@ typedef struct {
     uint8_t  key[EOS_AES_KEY_SIZE];
     uint8_t  iv[EOS_AES_IV_SIZE];
     uint8_t  tag[EOS_AES_TAG_SIZE];
+    uint8_t  ghash_h[EOS_AES_BLOCK_SIZE];   /* GHASH subkey H = AES_K(0) */
+    uint8_t  ghash_acc[EOS_AES_BLOCK_SIZE];  /* Running GHASH accumulator */
     uint32_t bytes_processed;
     bool     initialized;
 } eos_fw_decrypt_ctx_t;

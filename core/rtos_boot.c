@@ -8,6 +8,7 @@
  */
 
 #include "eos_rtos_boot.h"
+#include "eos_mpu_boot.h"
 #include "eos_hal.h"
 #include <string.h>
 
@@ -15,6 +16,7 @@
 #define FREERTOS_MAGIC       0x46524545  /* "FREE" */
 #define ZEPHYR_MAGIC         0x5A455048  /* "ZEPH" */
 #define NUTTX_MAGIC          0x4E555458  /* "NUTX" */
+#define EOS_MAGIC            0x454F5300  /* "EOS\0" */
 
 eos_rtos_type_t eos_rtos_detect(uint32_t image_addr)
 {
@@ -26,6 +28,7 @@ eos_rtos_type_t eos_rtos_detect(uint32_t image_addr)
         case FREERTOS_MAGIC: return EOS_RTOS_FREERTOS;
         case ZEPHYR_MAGIC:   return EOS_RTOS_ZEPHYR;
         case NUTTX_MAGIC:    return EOS_RTOS_NUTTX;
+        case EOS_MAGIC:      return EOS_RTOS_CUSTOM;
         default:             return EOS_RTOS_NONE;
     }
 }
@@ -39,19 +42,54 @@ int eos_rtos_configure_mpu(const eos_rtos_boot_config_t *cfg)
             /* MPU remains off — RTOS manages it */
             break;
 
-        case EOS_MPU_PRIVILEGED:
+        case EOS_MPU_PRIVILEGED: {
             /* Configure MPU for privileged-only access to flash/RAM */
-            /* Platform-specific: set up region 0 for flash (RO),
-             * region 1 for RAM (RW), region 2 for peripherals */
+            eos_mpu_ctx_t mpu;
+            eos_mpu_init(&mpu);
+            /* Flash — privileged read-only, executable, cacheable */
+            eos_mpu_add_region(&mpu, cfg->entry_addr & 0xFFF00000, 0x200000,
+                               EOS_MPU_PRIV_RO, true, true);
+            /* RAM — privileged read-write, no execute, cacheable */
+            eos_mpu_add_region(&mpu, cfg->stack_addr & 0xFFF00000, 0x100000,
+                               EOS_MPU_PRIV_RW, false, true);
+            /* Peripherals — privileged RW, no execute, no cache */
+            eos_mpu_add_region(&mpu, 0x40000000, 0x20000000,
+                               EOS_MPU_PRIV_RW, false, false);
+            /* System control — privileged only */
+            eos_mpu_add_region(&mpu, 0xE0000000, 0x10000,
+                               EOS_MPU_PRIV_RW, false, false);
+            eos_mpu_apply(&mpu);
             break;
+        }
 
-        case EOS_MPU_PROTECTED:
-            /* Full MPU setup with separate regions for:
-             * - RTOS kernel (privileged RW)
-             * - Task stacks (unprivileged RW)
-             * - Shared memory (RW)
-             * - Peripheral space (privileged only) */
+        case EOS_MPU_PROTECTED: {
+            /* Full MPU setup with separate regions for kernel/task isolation */
+            eos_mpu_ctx_t mpu;
+            eos_mpu_init(&mpu);
+            /* RTOS kernel code — privileged read-only, executable */
+            eos_mpu_add_region(&mpu, cfg->entry_addr & 0xFFF00000, 0x100000,
+                               EOS_MPU_PRIV_RO, true, true);
+            /* RTOS kernel data / heap — privileged RW, no execute */
+            eos_mpu_add_region(&mpu, cfg->heap_start, cfg->heap_size,
+                               EOS_MPU_PRIV_RW, false, true);
+            /* Task stacks — unprivileged RW, no execute */
+            eos_mpu_add_region(&mpu, cfg->stack_addr & 0xFFF00000, 0x40000,
+                               EOS_MPU_FULL_RW, false, true);
+            /* Shared memory — full RW, no execute */
+            eos_mpu_add_region(&mpu, (cfg->stack_addr & 0xFFF00000) + 0x40000, 0x10000,
+                               EOS_MPU_FULL_RW, false, true);
+            /* Peripherals — privileged only, no execute, no cache */
+            eos_mpu_add_region(&mpu, 0x40000000, 0x20000000,
+                               EOS_MPU_PRIV_RW, false, false);
+            /* System control — privileged only */
+            eos_mpu_add_region(&mpu, 0xE0000000, 0x10000,
+                               EOS_MPU_PRIV_RW, false, false);
+            eos_mpu_apply(&mpu);
             break;
+        }
+
+        default:
+            return EOS_ERR_INVALID;
     }
 
     return EOS_OK;

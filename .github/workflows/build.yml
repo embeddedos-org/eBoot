@@ -1,0 +1,53 @@
+name: eBoot Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-host:
+    name: Host Build & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake gcc g++
+      - name: Configure
+        run: cmake -B build -DEBLDR_BUILD_TESTS=ON -DEBLDR_BOARD=none
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  build-arm:
+    name: Cross-compile STM32F4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Configure
+        run: |
+          cmake -B build-arm \
+            -DCMAKE_SYSTEM_NAME=Generic \
+            -DCMAKE_C_COMPILER=arm-none-eabi-gcc \
+            -DEBLDR_BOARD=stm32f4 \
+            -DCMAKE_C_FLAGS="-mcpu=cortex-m4 -mthumb -specs=nosys.specs"
+      - name: Build
+        run: cmake --build build-arm --parallel
+
+  lint:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style \
+            --suppress=missingIncludeSystem \
+            --error-exitcode=1 \
+            core/ hal/ include/

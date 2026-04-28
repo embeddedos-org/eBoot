@@ -490,14 +490,6 @@ if(NOT EBLDR_BOARD STREQUAL "none")
 endif()
 
 # ====================================================================
-# Flash target — invokes eFlash tool
-# ====================================================================
-if(NOT EBLDR_BOARD STREQUAL "none" AND CMAKE_CROSSCOMPILING)
-    find_package(Python3 COMPONENTS Interpreter QUIET)
-    if(Python3_FOUND)
-        add_custom_target(flash
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/eflash.py
-                flash --board ${EBLDR_BOARD}
 # Flash targets — invokes eFlash tool (cross-compile only)
 # ====================================================================
 if(NOT EBLDR_BOARD STREQUAL "none" AND CMAKE_CROSSCOMPILING)
@@ -506,31 +498,6 @@ if(NOT EBLDR_BOARD STREQUAL "none" AND CMAKE_CROSSCOMPILING)
         add_custom_target(flash
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/eflash.py
                 flash --board ${EBLDR_BOARD}
-                --image ${CMAKE_CURRENT_BINARY_DIR}/eboot_firmware.bin
-                --verify --reset
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Flashing ${EBLDR_BOARD} via eFlash"
-            VERBATIM
-        )
-        add_custom_target(flash_stage0
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/eflash.py
-                flash --board ${EBLDR_BOARD}
-                --image ${CMAKE_CURRENT_BINARY_DIR}/ebldr_stage0.bin
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Flashing stage0 for ${EBLDR_BOARD} via eFlash"
-            VERBATIM
-        )
-        add_custom_target(flash_info
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/eflash.py
-                info --board ${EBLDR_BOARD}
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Flash info for ${EBLDR_BOARD}"
-            VERBATIM
-        )
-    endif()
-endif()
-
-# ====================================================================
                 --image ${CMAKE_CURRENT_BINARY_DIR}/eboot_firmware.bin
                 --verify --reset
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
