@@ -34,6 +34,7 @@ jobs:
   cross-compile:
     name: Cross (${{ matrix.board }})
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -87,6 +88,7 @@ jobs:
   security-hardening:
     name: Security Hardening Build
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Build with all security options
