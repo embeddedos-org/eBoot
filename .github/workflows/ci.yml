@@ -13,11 +13,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -27,15 +29,13 @@ jobs:
       - name: Configure
         run: cmake -B build -DEBLDR_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
       - name: Test
-        if: runner.os == 'Linux'
         run: ctest --test-dir build --output-on-failure -C Release
 
   cross-compile:
     name: Cross (${{ matrix.board }})
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +57,7 @@ jobs:
       - name: Install cross-compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.pkg }} || true
+          sudo apt-get install -y ${{ matrix.pkg }}
       - name: Cross-compile
         run: |
           if [ -f "${{ matrix.toolchain }}" ]; then
@@ -67,12 +67,11 @@ jobs:
             cmake -B build -DEBLDR_BOARD=${{ matrix.board }} \
               -DCMAKE_SYSTEM_NAME=Linux
           fi
-          cmake --build build || true
+          cmake --build build --parallel
 
   sanitize:
     name: Sanitizers
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Build with sanitizers
@@ -80,17 +79,16 @@ jobs:
           cmake -B build \
             -DEBLDR_BUILD_TESTS=ON \
             -DEBLDR_SANITIZE=ON
-          cmake --build build
+          cmake --build build --parallel
       - name: Run tests under sanitizers
-        run: ctest --test-dir build --output-on-failure
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
 
   security-hardening:
     name: Security Hardening Build
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Build with all security options
@@ -101,6 +99,6 @@ jobs:
             -DEBLDR_REQUIRE_SIGNATURES=ON \
             -DEBLDR_RECOVERY_AUTH=ON \
             -DEBLDR_VERIFY_STAGE1=ON
-          cmake --build build
+          cmake --build build --parallel
       - name: Run tests
         run: ctest --test-dir build --output-on-failure

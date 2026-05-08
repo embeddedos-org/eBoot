@@ -10,6 +10,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     name: Validate
@@ -19,10 +23,10 @@ jobs:
       - name: Build & Test
         run: |
           cmake -B build -DEBLDR_BUILD_TESTS=ON -DEBLDR_HARDENING=ON
-          cmake --build build
+          cmake --build build --parallel
           ctest --test-dir build --output-on-failure
 
-  cross-compile:
+  firmware-arm-cortex-m:
     name: Firmware (${{ matrix.board }})
     runs-on: ubuntu-latest
     needs: validate
@@ -31,47 +35,218 @@ jobs:
       matrix:
         include:
           - board: stm32f4
-            pkg: gcc-arm-none-eabi
           - board: stm32h7
-            pkg: gcc-arm-none-eabi
           - board: nrf52
-            pkg: gcc-arm-none-eabi
-          - board: rpi4
-            pkg: gcc-aarch64-linux-gnu
-          - board: riscv64_virt
-            pkg: gcc-riscv64-linux-gnu
-          - board: esp32
-            pkg: gcc-arm-none-eabi
-          - board: x86_64_efi
-            pkg: ""
     steps:
       - uses: actions/checkout@v4
-      - name: Install cross-compiler
-        if: matrix.pkg != ''
+      - name: Install ARM Cortex-M toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.pkg }} || true
+          sudo apt-get install -y gcc-arm-none-eabi
       - name: Extract version
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
       - name: Build firmware
         run: |
-          cmake -B build -DEBLDR_BOARD=${{ matrix.board }} -DCMAKE_BUILD_TYPE=Release || \
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build || true
+          cmake -B build -DEBLDR_BOARD=${{ matrix.board }} -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Collect artifacts
+        run: |
           mkdir -p fw
-          find build -name "*.a" -o -name "*.bin" -o -name "*.elf" | xargs -I{} cp {} fw/ 2>/dev/null || true
-          cp -r include fw/ 2>/dev/null || true
+          find build -maxdepth 4 \( -name "*.elf" -o -name "*.bin" -o -name "*.hex" -o -name "*.uf2" -o -name "*.a" \) \
+            -exec cp {} fw/ \;
+          cp -r include fw/include 2>/dev/null || true
           tar czf eboot-${{ steps.version.outputs.version }}-${{ matrix.board }}.tar.gz -C fw .
       - uses: actions/upload-artifact@v4
         with:
           name: eboot-${{ matrix.board }}
           path: "*.tar.gz"
 
+  firmware-rpi4:
+    name: Firmware (rpi4)
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install aarch64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Build
+        run: |
+          cmake -B build -DEBLDR_BOARD=rpi4 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Collect artifacts
+        run: |
+          mkdir -p fw
+          find build -maxdepth 4 \( -name "*.elf" -o -name "*.bin" -o -name "*.a" \) -exec cp {} fw/ \;
+          cp -r include fw/include 2>/dev/null || true
+          tar czf eboot-${{ steps.version.outputs.version }}-rpi4.tar.gz -C fw .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eboot-rpi4
+          path: "*.tar.gz"
+
+  firmware-riscv64:
+    name: Firmware (riscv64_virt)
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install riscv64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Build
+        run: |
+          cmake -B build -DEBLDR_BOARD=riscv64_virt \
+            -DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Collect artifacts
+        run: |
+          mkdir -p fw
+          find build -maxdepth 4 \( -name "*.elf" -o -name "*.bin" -o -name "*.a" \) -exec cp {} fw/ \;
+          cp -r include fw/include 2>/dev/null || true
+          tar czf eboot-${{ steps.version.outputs.version }}-riscv64_virt.tar.gz -C fw .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eboot-riscv64_virt
+          path: "*.tar.gz"
+
+  firmware-esp32-xtensa:
+    name: Firmware (esp32 / Xtensa)
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache ESP-IDF
+        id: cache-idf
+        uses: actions/cache@v4
+        with:
+          path: ~/esp-idf
+          key: esp-idf-v5.3
+      - name: Install ESP-IDF (Xtensa toolchain for ESP32)
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+          mkdir -p ~/esp
+          cd ~/esp
+          git clone -b v5.3 --depth 1 --recursive https://github.com/espressif/esp-idf.git
+          cd esp-idf
+          ./install.sh esp32
+          mv ~/esp/esp-idf ~/esp-idf
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Build firmware (Xtensa)
+        run: |
+          source ~/esp-idf/export.sh
+          # Use ESP-IDF's idf.py if a top-level CMakeLists has IDF setup, else direct cmake
+          cmake -B build -DEBLDR_BOARD=esp32 -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$IDF_PATH/tools/cmake/toolchain-esp32.cmake || \
+          cmake -B build -DEBLDR_BOARD=esp32 -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Collect artifacts
+        run: |
+          mkdir -p fw
+          find build -maxdepth 4 \( -name "*.elf" -o -name "*.bin" -o -name "*.a" \) -exec cp {} fw/ \;
+          tar czf eboot-${{ steps.version.outputs.version }}-esp32-xtensa.tar.gz -C fw .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eboot-esp32-xtensa
+          path: "*.tar.gz"
+
+  firmware-esp32c3-riscv:
+    name: Firmware (esp32-c3 / RISC-V)
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache ESP-IDF C3
+        id: cache-idfc3
+        uses: actions/cache@v4
+        with:
+          path: ~/esp-idf
+          key: esp-idf-v5.3-c3
+      - name: Install ESP-IDF (RISC-V toolchain for ESP32-C3)
+        if: steps.cache-idfc3.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+          mkdir -p ~/esp
+          cd ~/esp
+          git clone -b v5.3 --depth 1 --recursive https://github.com/espressif/esp-idf.git
+          cd esp-idf
+          ./install.sh esp32c3
+          mv ~/esp/esp-idf ~/esp-idf
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Build firmware (RISC-V)
+        run: |
+          source ~/esp-idf/export.sh
+          cmake -B build -DEBLDR_BOARD=esp32c3 -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$IDF_PATH/tools/cmake/toolchain-esp32c3.cmake || \
+          cmake -B build -DEBLDR_BOARD=esp32c3 -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Collect artifacts
+        run: |
+          mkdir -p fw
+          find build -maxdepth 4 \( -name "*.elf" -o -name "*.bin" -o -name "*.a" \) -exec cp {} fw/ \;
+          tar czf eboot-${{ steps.version.outputs.version }}-esp32c3-riscv.tar.gz -C fw .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eboot-esp32c3-riscv
+          path: "*.tar.gz"
+
+  firmware-x86_64-efi:
+    name: Firmware (x86_64 EFI)
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU-EFI toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnu-efi gcc binutils
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Build EFI firmware
+        run: |
+          cmake -B build -DEBLDR_BOARD=x86_64_efi -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Collect artifacts
+        run: |
+          mkdir -p fw
+          find build -maxdepth 4 \( -name "*.efi" -o -name "*.elf" -o -name "*.bin" -o -name "*.a" \) -exec cp {} fw/ \;
+          tar czf eboot-${{ steps.version.outputs.version }}-x86_64-efi.tar.gz -C fw .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eboot-x86_64-efi
+          path: "*.tar.gz"
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [validate, cross-compile]
+    needs:
+      - validate
+      - firmware-arm-cortex-m
+      - firmware-rpi4
+      - firmware-riscv64
+      - firmware-esp32-xtensa
+      - firmware-esp32c3-riscv
+      - firmware-x86_64-efi
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,58 +264,76 @@ jobs:
           merge-multiple: true
       - name: Generate checksums
         run: sha256sum *.tar.gz > SHA256SUMS.txt
-      - name: Generate SBOM (CycloneDX v1.5)
-        run: |
-          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "00000000-0000-0000-0000-$(date +%s)")
-          cat > sbom.cdx.json << EOF
-          {
-            "bomFormat": "CycloneDX",
-            "specVersion": "1.5",
-            "serialNumber": "urn:uuid:${UUID}",
-            "version": 1,
-            "metadata": {
-              "timestamp": "${TIMESTAMP}",
-              "component": {
-                "type": "firmware",
-                "name": "eBoot",
-                "version": "${{ steps.version.outputs.version }}",
-                "supplier": { "name": "embeddedos-org" },
-                "licenses": [{ "license": { "id": "MIT" } }]
-              }
-            },
-            "components": []
-          }
-          EOF
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: sbom.cdx.json
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom.spdx.json
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
-      - name: Sign artifacts
+      - name: Sign artifacts (cosign keyless)
         run: |
+          set -e
           for f in *.tar.gz; do
-            cosign sign-blob --yes --bundle "${f}.sig.bundle" "$f" 2>/dev/null || true
+            [ -f "$f" ] || continue
+            cosign sign-blob --yes --bundle "${f}.sig.bundle" "$f"
           done
-      - name: Check release does not already exist
+      - name: Optional GPG signing
+        if: env.GPG_KEY != ''
+        env:
+          GPG_KEY: ${{ secrets.GPG_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          if gh release view "${{ steps.version.outputs.tag }}" &>/dev/null; then
-            echo "::error::Release ${{ steps.version.outputs.tag }} already exists."
-            exit 1
-          fi
+          echo "$GPG_KEY" | gpg --batch --import
+          for f in *.tar.gz; do
+            [ -f "$f" ] || continue
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-fd 0 --detach-sign --armor "$f"
+          done
+      - name: Idempotent release create-or-update
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create GitHub Release
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — will update artifacts."
+          else
+            gh release create "$TAG" --title "eBoot $TAG" --generate-notes \
+              $([ "${{ contains(steps.version.outputs.tag, 'rc') || contains(steps.version.outputs.tag, 'beta') }}" = "true" ] && echo "--prerelease")
+          fi
+      - name: Attach artifacts
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "eBoot ${{ steps.version.outputs.tag }}"
           generate_release_notes: true
+          fail_on_unmatched_files: false
           body: |
-            ### Release Integrity
+            ## eBoot ${{ steps.version.outputs.tag }}
+
+            Bootloader firmware images for ARM Cortex-M (STM32F4 / STM32H7 / nRF52),
+            RPi4 (aarch64), RISC-V64 virt, ESP32 (Xtensa), ESP32-C3 (RISC-V), and
+            x86_64 EFI.
+
+            ### Integrity & supply-chain
             - `SHA256SUMS.txt` — checksums
-            - `sbom.cdx.json` — CycloneDX SBOM (v1.5)
-            - `*.sig.bundle` — Sigstore cosign signatures
+            - `sbom.cdx.json` — CycloneDX SBOM
+            - `sbom.spdx.json` — SPDX SBOM
+            - `*.sig.bundle` — Sigstore cosign keyless signatures
           files: |
             *.tar.gz
             *.sig.bundle
+            *.asc
             SHA256SUMS.txt
             sbom.cdx.json
-          prerelease: ${{ contains(steps.version.outputs.version, 'rc') || contains(steps.version.outputs.version, 'beta') }}
+            sbom.spdx.json
+          prerelease: ${{ contains(steps.version.outputs.tag, 'rc') || contains(steps.version.outputs.tag, 'beta') }}
