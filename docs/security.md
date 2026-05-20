@@ -86,9 +86,9 @@ Planned for future releases.
 
 | Feature | Module | API | Status | Acceptance Criteria |
 |---|---|---|---|---|
-| SHA-256 image hash | `core/crypto_boot.c` | `eos_crypto_hash()`, `eos_crypto_verify_image()` | 🔶 API defined, stub implementation | Hash matches NIST CAVP test vectors; image verification rejects single-bit payload corruption |
-| Ed25519 signature verification | `core/crypto_boot.c` | `eos_crypto_verify_signature()` | 🔶 API defined, stub implementation | Passes RFC 8032 §7.1 test vectors; rejects forged signatures; constant-time execution |
-| Image signature check | `core/image_verify.c` | `eos_image_verify_signature()` | 🔶 API defined, calls crypto stub | Valid signatures accepted; invalid rejected with `EOS_ERR_SIGNATURE`; all return codes checked |
+| SHA-256 image hash | `core/crypto_boot.c` | `eos_crypto_hash()`, `eos_crypto_verify_image()` | ✅ Implemented (FIPS 180-4) | Hash matches NIST CAVP test vectors; image verification rejects single-bit payload corruption |
+| Ed25519 signature verification | `core/crypto_boot.c` | `eos_crypto_verify_signature()` | ✅ Implemented (RFC 8032) | Passes RFC 8032 §7.1 test vectors; rejects forged signatures; constant-time execution |
+| Image signature check | `core/image_verify.c` | `eos_image_verify_signature()` | ✅ Implemented | Valid signatures accepted; invalid rejected with `EOS_ERR_SIGNATURE`; all return codes checked |
 | Key hash in TLV | `include/eos_image.h` | TLV extension (planned) | 🔲 Not started | Key hash selects correct verification key slot; unknown key hash returns error |
 | Anti-rollback counter | `include/eos_bootctl.h` | `eos_image_check_version()` | 🔶 API defined | Counter stored in OTP/flash; images with lower counter rejected; counter survives factory reset |
 | Security counter in header | `include/eos_image.h` | Header `reserved` field allocation | 🔲 Not started | Counter field parsed from header; compared against device counter before boot |
