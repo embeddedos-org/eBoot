@@ -130,7 +130,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Cache ESP-IDF
         id: cache-idf
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/esp-idf
           key: esp-idf-v5.3
@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Cache ESP-IDF C3
         id: cache-idfc3
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/esp-idf
           key: esp-idf-v5.3-c3
