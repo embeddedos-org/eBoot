@@ -21,9 +21,9 @@ stm32f4 | stm32h7 | nrf52 | rpi4 | riscv64_virt | esp32 | x86_64_efi | \
 imx8m | am64x | samd51 | sifive_u | cortex_r5 | none")
 
 option(EBLDR_BUILD_TESTS "Build unit tests (native only)" OFF)
-option(EBLDR_REQUIRE_SIGNATURES "Require Ed25519 signatures for boot" OFF)
-option(EBLDR_RECOVERY_AUTH "Require authentication for recovery commands" OFF)
-option(EBLDR_VERIFY_STAGE1 "Verify Stage-1 hash before jump" OFF)
+option(EBLDR_REQUIRE_SIGNATURES "Require Ed25519 signatures for boot" ON)
+option(EBLDR_RECOVERY_AUTH "Require authentication for recovery commands" ON)
+option(EBLDR_VERIFY_STAGE1 "Verify Stage-1 hash before jump" ON)
 option(EBLDR_HARDENING "Enable compiler hardening flags" ON)
 option(EBLDR_SANITIZE "Enable ASAN/UBSAN for host builds" OFF)
 option(EBLDR_BUILD_FUZZ "Build libFuzzer fuzz targets" OFF)

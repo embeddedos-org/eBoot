@@ -108,17 +108,12 @@ int eos_image_verify_signature(const eos_image_header_t *hdr)
     if (!hdr)
         return EOS_ERR_INVALID;
 
-    /* Phase 1: No signature — accept CRC-only images */
-    if (hdr->sig_type == EOS_SIG_NONE || hdr->sig_type == EOS_SIG_CRC32)
-        return EOS_OK;
-
-    /* Phase 2: SHA-256 hash-only (no asymmetric signature) */
-    if (hdr->sig_type == EOS_SIG_SHA256)
-        return EOS_OK;
+    /* Only accept signed images in production */
+    if (hdr->sig_type == EOS_SIG_NONE || hdr->sig_type == EOS_SIG_CRC32 || hdr->sig_type == EOS_SIG_SHA256)
+        return EOS_ERR_SIGNATURE;
 
     /* Phase 2: Ed25519 signature verification */
     if (hdr->sig_type == EOS_SIG_ED25519) {
-#ifdef EBLDR_REQUIRE_SIGNATURES
         /* Get public key from keystore */
         extern int eos_keystore_get_compiled_key(const uint8_t **key, size_t *len);
         const uint8_t *pub_key = NULL;
@@ -145,10 +140,6 @@ int eos_image_verify_signature(const eos_image_header_t *hdr)
             return EOS_ERR_SIGNATURE;
 
         return EOS_OK;
-#else
-        /* Signatures present but not required — accept */
-        return EOS_OK;
-#endif
     }
 
     /* Unknown signature type */

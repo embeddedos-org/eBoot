@@ -97,20 +97,16 @@ static int recovery_send_nack(void)
  */
 static bool cmd_requires_auth(uint8_t cmd)
 {
-#ifdef EBLDR_RECOVERY_AUTH
     switch (cmd) {
     case RCVR_CMD_ERASE:
     case RCVR_CMD_WRITE:
+    case RCVR_CMD_VERIFY:
     case RCVR_CMD_BOOT:
     case RCVR_CMD_FACTORY:
         return true;
     default:
         return false;
     }
-#else
-    (void)cmd;
-    return false;
-#endif
 }
 
 /**
@@ -176,8 +172,11 @@ static int recovery_handle_auth(void)
         uint8_t shared_secret[32];
         rc = eos_hal_otp_read(0x180, shared_secret, sizeof(shared_secret));
         if (rc != EOS_OK) {
-            /* Use compiled-in development secret */
-            memset(shared_secret, 0x42, sizeof(shared_secret));
+            /* Fail authentication if OTP secret is unreadable */
+            auth_fail_count++;
+            auth_state = RCVR_AUTH_NONE;
+            eos_boot_log_append(0x21, EOS_SLOT_NONE, auth_fail_count); /* AUTH_FAIL */
+            return recovery_send_nack();
         }
 
         eos_sha256_update(&ctx, shared_secret, sizeof(shared_secret));
@@ -288,6 +287,10 @@ static int recovery_handle_verify(eos_slot_t slot)
     if (rc != EOS_OK)
         return recovery_send_nack();
 
+    rc = eos_image_verify_signature(&hdr);
+    if (rc != EOS_OK)
+        return recovery_send_nack();
+
     return recovery_send_ack();
 }
 
@@ -313,10 +316,15 @@ static int recovery_handle_boot(eos_slot_t slot, eos_bootctl_t *bctl)
 
 static int recovery_handle_factory_reset(eos_bootctl_t *bctl)
 {
-    eos_slot_erase(EOS_SLOT_A);
-    eos_slot_erase(EOS_SLOT_B);
+    int rc1 = eos_slot_erase(EOS_SLOT_A);
+    int rc2 = eos_slot_erase(EOS_SLOT_B);
     eos_bootctl_init_defaults(bctl);
-    eos_bootctl_save(bctl);
+    int rc3 = eos_bootctl_save(bctl);
+    
+    if (rc1 != EOS_OK || rc2 != EOS_OK || rc3 != EOS_OK) {
+        return recovery_send_nack();
+    }
+    
     eos_boot_log_append(EOS_LOG_FACTORY_RESET, EOS_SLOT_NONE, 0);
     return recovery_send_ack();
 }
