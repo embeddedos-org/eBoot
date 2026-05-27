@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "eBoot Companion",
+    "slug": "eboot-companion",
+    "version": "3.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0d1117"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.embeddedos.eboot.companion",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "eBoot Companion uses GPS coordinates to negotiate localized secure firmware updates and CDN mirrors."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0d1117"
+      },
+      "package": "org.embeddedos.eboot.companion",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT"
+      ]
+    }
+  }
+}

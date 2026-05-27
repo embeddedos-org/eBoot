@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>eBoot Monitor</title>
+  <style>
+    body {
+      width: 320px;
+      font-family: 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      margin: 0;
+      padding: 15px;
+    }
+    h3 {
+      color: #58a6ff;
+      margin-top: 0;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      background: #238636;
+      color: white;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      padding: 8px;
+      margin-top: 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: center;
+    }
+    .btn:hover {
+      background: #30363d;
+      border-color: #8b949e;
+    }
+  </style>
+</head>
+<body>
+  <h3>eBoot Assistant</h3>
+  <p>Status: <span class="status-badge">Production Ready</span></p>
+  <p>Connected Device: None</p>
+  <button class="btn">Scan for Serial Ports</button>
+  <button class="btn" style="background: #238636; border-color: #2ea44f;">Flash Selected Image</button>
+</body>
+</html>

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 project(eBootloader
-    VERSION 0.1.0
+    VERSION 3.0.1
     LANGUAGES C
     DESCRIPTION "Multi-platform modular bootloader with RTOS support"
 )

@@ -10,7 +10,7 @@
 #   (with cmake.defines.EBLDR_BOARD and cmake.toolchain_file set)
 
 name: eboot
-version: "0.1.0"
+version: "3.0.1"
 backend: cmake
 
 cmake:
