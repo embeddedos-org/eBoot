@@ -63,13 +63,15 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
     if (out->magic != EOS_IMG_MAGIC)
         return EOS_ERR_NO_IMAGE;
 
-    if (out->hdr_size < sizeof(eos_image_header_t))
+    if (out->hdr_size < sizeof(eos_image_header_t) || out->hdr_size > 4096)
         return EOS_ERR_INVALID;
 
-    if (out->image_size == 0)
+    if (out->image_size == 0 || out->image_size > 16 * 1024 * 1024)
         return EOS_ERR_INVALID;
 
-    if (out->entry_addr == 0)
+    uint32_t payload_start = addr + out->hdr_size;
+    uint32_t payload_end = payload_start + out->image_size;
+    if (out->entry_addr < payload_start || out->entry_addr >= payload_end)
         return EOS_ERR_INVALID;
 
     return EOS_OK;
@@ -80,18 +82,19 @@ int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr)
     if (!hdr)
         return EOS_ERR_INVALID;
 
+    uint32_t payload_addr = addr + hdr->hdr_size;
+
     /* SHA-256 verification when flag is set */
     if (hdr->flags & EOS_IMG_FLAG_HASH_SHA256) {
-        int rc = eos_crypto_verify_image(addr, hdr->image_size, hdr->hash);
+        int rc = eos_crypto_verify_image(payload_addr, hdr->image_size, hdr->hash);
         /* Double-check for fault injection resistance */
-        int rc2 = eos_crypto_verify_image(addr, hdr->image_size, hdr->hash);
+        int rc2 = eos_crypto_verify_image(payload_addr, hdr->image_size, hdr->hash);
         if (rc != EOS_OK || rc2 != EOS_OK)
             return EOS_ERR_CRC;
         return EOS_OK;
     }
 
     /* CRC32 fallback */
-    uint32_t payload_addr = addr;
     uint32_t computed_crc = eos_crc32(payload_addr, hdr->image_size);
 
     uint32_t stored_crc;
@@ -110,6 +113,9 @@ int eos_image_verify_signature(const eos_image_header_t *hdr)
 
     /* Only accept signed images in production */
     if (hdr->sig_type == EOS_SIG_NONE || hdr->sig_type == EOS_SIG_CRC32 || hdr->sig_type == EOS_SIG_SHA256)
+        return EOS_ERR_SIGNATURE;
+
+    if (hdr->sig_len == 0 || hdr->sig_len > EOS_SIG_MAX_SIZE)
         return EOS_ERR_SIGNATURE;
 
     /* Phase 2: Ed25519 signature verification */

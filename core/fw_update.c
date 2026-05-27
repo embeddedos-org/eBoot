@@ -85,7 +85,9 @@ int eos_fw_update_write(eos_fw_update_ctx_t *ctx, const uint8_t *data, size_t le
                 return EOS_ERR_NO_IMAGE;
             }
 
+            /* Bug Fix: Prevent integer overflow in size checks by checking bounds safely */
             if (ctx->header.image_size == 0 ||
+                ctx->slot_size < sizeof(eos_image_header_t) ||
                 ctx->header.image_size > ctx->slot_size - sizeof(eos_image_header_t)) {
                 ctx->state = EOS_FW_STATE_ERROR;
                 ctx->last_error = EOS_ERR_FULL;
@@ -215,11 +217,16 @@ uint8_t eos_fw_update_progress(const eos_fw_update_ctx_t *ctx)
     if (!ctx || ctx->payload_total == 0) return 0;
     if (ctx->state == EOS_FW_STATE_COMPLETE) return 100;
 
-    uint32_t total = (uint32_t)sizeof(eos_image_header_t) + ctx->payload_total;
+    /* Bug Fix: Prevent potential integer overflow when computing total size */
+    uint32_t total;
+    if (__builtin_add_overflow((uint32_t)sizeof(eos_image_header_t), ctx->payload_total, &total)) {
+        total = 0xFFFFFFFF;
+    }
+    
     uint32_t done = ctx->total_received;
     if (done > total) done = total;
 
-    return (uint8_t)((done * 100) / total);
+    return (uint8_t)(((uint64_t)done * 100) / total);
 }
 
 eos_fw_update_state_t eos_fw_update_get_state(const eos_fw_update_ctx_t *ctx)

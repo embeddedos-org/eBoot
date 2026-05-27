@@ -87,7 +87,8 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
     }
 
     /* ---- Step 2: Verify integrity (SHA-256 hash) ---- */
-    rc = eos_image_verify_integrity(&hdr, cfg->image_addr + hdr.hdr_size);
+    /* Bug Fix: Pass image_addr directly to verify_integrity since verify_integrity already adds hdr_size */
+    rc = eos_image_verify_integrity(&hdr, cfg->image_addr);
     if (rc != EOS_OK) {
         attest_record(2, hdr.image_version, hdr.hash, NULL, EOS_SBOOT_ERR_INTEGRITY);
         return EOS_SBOOT_ERR_INTEGRITY;
@@ -140,6 +141,9 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
          * 3. Decrypt image in-place
          * 4. Verify GCM tag
          */
+        
+        /* Fix critical bug: Return decryption error if decryption is requested but unsupported/unimplemented */
+        return EOS_SBOOT_ERR_DECRYPT;
     }
 
     /* ---- Step 7: Lock debug interfaces ---- */
