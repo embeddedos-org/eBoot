@@ -1,9 +1,9 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 EoS Project
 import unittest
-class TestEbootSimulation(unittest.TestCase):
-    def test_flash_memory_mapping(self):
-        print("Simulating NOR flash memory mapped I/O access...")
-        flash_addr = 0x08000000
-        memory = {flash_addr: 0xDEADBEEF}
-        self.assertEqual(memory[flash_addr], 0xDEADBEEF)
+
+class TesteBootSimulation(unittest.TestCase):
+    def test_nor_flash_memory_mapping(self):
+        # Simulate memory-mapped SPI NOR Flash
+        FLASH_BASE = 0x08000000
+        FIRMWARE_OFFSET = 0x00010000
+        target_addr = FLASH_BASE + FIRMWARE_OFFSET
+        assert target_addr == 0x08010000, "NOR flash memory mapping incorrect"
