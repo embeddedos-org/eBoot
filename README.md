@@ -23,7 +23,7 @@ We continuously benchmark eBoot — Secure Bootloader against the entire Embedde
 
 ---
 
-## 🎬 Product Marketing Video
+## 🎬 Product Marketing Video (App Store Proof of Production)
 
 Experience eBoot — Secure Bootloader in action! Watch our high-fidelity product demonstration and marketing video:
 
