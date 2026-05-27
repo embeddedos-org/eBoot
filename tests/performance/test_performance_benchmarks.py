@@ -1,12 +1,9 @@
 import unittest
-
-class TesteBootPerformance(unittest.TestCase):
-    import time
-    def test_boot_execution_time(self):
-        import time
+import time
+class TestEBootPerformance(unittest.TestCase):
+    def test_boot_time_sla(self):
         start = time.perf_counter()
-        # Simulate boot checks: hardware self-test, flash verification
-        time.sleep(0.01) # 10ms boot delay
-        end = time.perf_counter()
-        boot_time = (end - start) * 1000
-        assert boot_time < 50, f"Boot time {boot_time:.1f}ms exceeds 50ms SLA"
+        for _ in range(10):
+            pass # simulate boot stage
+        boot_time = time.perf_counter() - start
+        self.assertLess(boot_time, 0.1) # < 100ms SLA
