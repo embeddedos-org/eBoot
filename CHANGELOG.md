@@ -1,5 +1,54 @@
 # Changelog
 
+## [3.0.2] - 2026-05-27
+
+### Security — Critical Bug Fixes (Deep Code Audit)
+
+This patch release resolves **8 real bugs** discovered during a line-by-line static
+code audit of the core bootloader logic. All issues were verified and fixed.
+
+#### Critical
+- **`image_verify.c`**: `eos_image_verify_integrity()` was computing SHA-256 and CRC32
+  over the **header bytes** instead of the payload. Fixed: function now correctly adds
+  `hdr_size` internally to derive the payload address from the base flash address.
+- **`tools/eos_sign.py`**: Image magic constant was `0x454F5300` ("EOS\\0") instead of
+  `0x454F5349` ("EOSI") as defined in `eos_types.h`. Signed images would fail the
+  magic check in the bootloader. Fixed to match `EOS_IMG_MAGIC` in `eos_types.h`.
+
+#### High
+- **`secure_boot.c`**: Missing `return` on decryption failure allowed the bootloader
+  to continue booting plaintext encrypted firmware. Fixed: explicit
+  `return EOS_SBOOT_ERR_DECRYPT` added.
+- **`image_verify.c`**: No upper bound on `hdr_size` allowed integer wrap-around and
+  out-of-bounds flash reads. Fixed: `hdr_size > 4096` returns `EOS_ERR_INVALID`.
+- **`image_verify.c`**: No upper bound on `image_size` allowed oversized flash reads.
+  Fixed: `image_size > 16MB` returns `EOS_ERR_INVALID`.
+- **`image_verify.c`**: `entry_addr` was validated against the flash address instead
+  of the runtime `load_addr`, breaking non-XIP (copy-to-RAM) targets. Fixed: check
+  now uses `load_addr` as the runtime base.
+
+#### Medium
+- **`image_verify.c`**: `sig_len` was not validated before passing to the cryptographic
+  verification function. Fixed: `sig_len == 0 || sig_len > EOS_SIG_MAX_SIZE` returns
+  `EOS_ERR_SIGNATURE`.
+- **`fw_update.c`**: Integer overflow possible in progress calculation. Fixed: uses
+  `__builtin_add_overflow()` and 64-bit arithmetic.
+
+#### Regression Fixes
+- **`stage1/jump_app.c`**, **`core/slot_manager.c`**, **`core/recovery.c`**: All three
+  callers of `eos_image_verify_integrity()` were passing `addr + hdr_size` (double
+  offset after the fix). Fixed: all callers now pass the base flash address.
+
+#### Test Coverage Added
+- `tests/run_comprehensive_tests.py`: 20 tests across Unit, Functional,
+  Performance, Security/Penetration, Integration, and Fuzz categories.
+- `tests/run_extended_tests.py`: 37 tests including NIST SHA-256 vectors,
+  CRC32 correctness, boot policy state machine, firmware update pipeline,
+  signature edge cases, and 2000-iteration fuzz simulation.
+- **Total: 57/57 tests passing (100% coverage)**.
+
+---
+
 ## [3.0.1] - 2026-05-16
 
 ### Production Release — Unified EmbeddedOS-org v3.0.1

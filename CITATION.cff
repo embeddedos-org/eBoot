@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 type: software
 title: "eBoot"
-version: "3.0.1"
+version: "3.0.2"
 date-released: "2026-05-13"
 authors:
   - name: "EmbeddedOS Project Contributors"

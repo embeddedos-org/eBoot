@@ -282,8 +282,8 @@ static int recovery_handle_verify(eos_slot_t slot)
     if (rc != EOS_OK)
         return recovery_send_nack();
 
-    uint32_t payload_addr = addr + hdr.hdr_size;
-    rc = eos_image_verify_integrity(&hdr, payload_addr);
+    /* eos_image_verify_integrity() adds hdr_size internally — pass base addr only */
+    rc = eos_image_verify_integrity(&hdr, addr);
     if (rc != EOS_OK)
         return recovery_send_nack();
 

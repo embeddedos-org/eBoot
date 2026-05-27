@@ -23,7 +23,7 @@ import struct
 import sys
 
 # Image header constants (must match eos_image.h)
-EOS_IMG_MAGIC = 0x454F5300    # "EOS\0"
+EOS_IMG_MAGIC = 0x454F5349    # "EOSI" (matches eos_types.h)
 EOS_HDR_VERSION = 1
 EOS_HASH_SIZE = 32
 EOS_SIG_MAX_SIZE = 64

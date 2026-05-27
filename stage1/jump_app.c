@@ -32,8 +32,8 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
         return rc;
 
     /* Verify image integrity before jumping */
-    uint32_t payload_addr = addr + hdr.hdr_size;
-    rc = eos_image_verify_integrity(&hdr, payload_addr);
+    /* eos_image_verify_integrity() adds hdr_size internally — pass base addr only */
+    rc = eos_image_verify_integrity(&hdr, addr);
     if (rc != EOS_OK) {
         eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, rc);
         return rc;

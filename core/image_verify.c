@@ -69,10 +69,15 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
     if (out->image_size == 0 || out->image_size > 16 * 1024 * 1024)
         return EOS_ERR_INVALID;
 
-    uint32_t payload_start = addr + out->hdr_size;
-    uint32_t payload_end = payload_start + out->image_size;
-    if (out->entry_addr < payload_start || out->entry_addr >= payload_end)
-        return EOS_ERR_INVALID;
+    /* Validate entry_addr against the RUNTIME address space (load_addr), not the
+     * flash address, to correctly support both XIP and copy-to-RAM targets.
+     * If load_addr is 0 (unset), skip the check to remain compatible. */
+    if (out->load_addr != 0) {
+        uint32_t rt_start = out->load_addr;
+        uint32_t rt_end   = rt_start + out->image_size;
+        if (out->entry_addr < rt_start || out->entry_addr >= rt_end)
+            return EOS_ERR_INVALID;
+    }
 
     return EOS_OK;
 }
@@ -115,6 +120,11 @@ int eos_image_verify_signature(const eos_image_header_t *hdr)
     if (hdr->sig_type == EOS_SIG_NONE || hdr->sig_type == EOS_SIG_CRC32 || hdr->sig_type == EOS_SIG_SHA256)
         return EOS_ERR_SIGNATURE;
 
+    /* Ed25519 signatures are always exactly 64 bytes; any other length is invalid */
+    if (hdr->sig_type == EOS_SIG_ED25519 && hdr->sig_len != EOS_SIG_MAX_SIZE)
+        return EOS_ERR_SIGNATURE;
+
+    /* Generic bounds check for future signature types */
     if (hdr->sig_len == 0 || hdr->sig_len > EOS_SIG_MAX_SIZE)
         return EOS_ERR_SIGNATURE;
 

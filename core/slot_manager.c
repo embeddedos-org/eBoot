@@ -36,8 +36,8 @@ static int verify_slot(eos_slot_t slot)
         return rc;
     }
 
-    uint32_t payload_addr = addr + si->header.hdr_size;
-    rc = eos_image_verify_integrity(&si->header, payload_addr);
+    /* eos_image_verify_integrity() adds hdr_size internally — pass base addr only */
+    rc = eos_image_verify_integrity(&si->header, addr);
     if (rc != EOS_OK) {
         si->state = EOS_SLOT_STATE_INVALID;
         return rc;
