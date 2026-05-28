@@ -1,0 +1,2 @@
+/usr/bin/ar qc libeboot_stage1.a CMakeFiles/eboot_stage1.dir/stage1/main.c.o CMakeFiles/eboot_stage1.dir/stage1/boot_scan.c.o CMakeFiles/eboot_stage1.dir/stage1/boot_select.c.o CMakeFiles/eboot_stage1.dir/stage1/boot_log.c.o CMakeFiles/eboot_stage1.dir/stage1/jump_app.c.o
+/usr/bin/ranlib libeboot_stage1.a

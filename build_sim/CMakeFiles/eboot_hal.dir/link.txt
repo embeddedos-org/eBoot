@@ -1,0 +1,2 @@
+/usr/bin/ar qc libeboot_hal.a CMakeFiles/eboot_hal.dir/hal/hal_core.c.o CMakeFiles/eboot_hal.dir/hal/board_registry.c.o
+/usr/bin/ranlib libeboot_hal.a

@@ -1,0 +1,5 @@
+/home/ubuntu/embeddedos/eBoot/build_sim/CMakeFiles/eboot_hal.dir
+/home/ubuntu/embeddedos/eBoot/build_sim/CMakeFiles/eboot_core.dir
+/home/ubuntu/embeddedos/eBoot/build_sim/CMakeFiles/eboot_stage1.dir
+/home/ubuntu/embeddedos/eBoot/build_sim/CMakeFiles/edit_cache.dir
+/home/ubuntu/embeddedos/eBoot/build_sim/CMakeFiles/rebuild_cache.dir
