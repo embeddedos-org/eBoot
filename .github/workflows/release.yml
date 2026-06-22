@@ -19,7 +19,7 @@ jobs:
     name: Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build & Test
         run: |
           cmake -B build -DEBLDR_BUILD_TESTS=ON -DEBLDR_HARDENING=ON
@@ -38,7 +38,7 @@ jobs:
           - board: stm32h7
           - board: nrf52
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ARM Cortex-M toolchain
         run: |
           sudo apt-get update
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install aarch64 toolchain
         run: |
           sudo apt-get update
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install riscv64 toolchain
         run: |
           sudo apt-get update
@@ -127,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache ESP-IDF
         id: cache-idf
         uses: actions/cache@v4
@@ -171,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache ESP-IDF C3
         id: cache-idfc3
         uses: actions/cache@v4
@@ -214,7 +214,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install GNU-EFI toolchain
         run: |
           sudo apt-get update
@@ -248,7 +248,7 @@ jobs:
       - firmware-esp32c3-riscv
       - firmware-x86_64-efi
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Extract version
