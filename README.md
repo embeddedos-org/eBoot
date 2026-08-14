@@ -1,59 +1,91 @@
 # eBoot — Secure Bootloader
 
-[![Production Ready](https://img.shields.io/badge/Status-Production%20Ready-success?style=for-the-badge)](https://github.com/embeddedos-org/eBoot)
-[![Build Status](https://img.shields.io/badge/Build-Passing-success?style=for-the-badge)](https://github.com/embeddedos-org/eBoot/actions)
-[![Test Coverage](https://img.shields.io/badge/Coverage-100%25-success?style=for-the-badge)](https://github.com/embeddedos-org/eBoot)
-[![GPS API](https://img.shields.io/badge/GPS%20API-Integrated-blue?style=for-the-badge)](https://github.com/embeddedos-org/eBoot)
+[![CI](https://github.com/embeddedos-org/eBoot/actions/workflows/ci.yml/badge.svg)](https://github.com/embeddedos-org/eBoot/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/embeddedos-org/eBoot/actions/workflows/codeql.yml/badge.svg)](https://github.com/embeddedos-org/eBoot/actions/workflows/codeql.yml)
+[![Scorecard](https://github.com/embeddedos-org/eBoot/actions/workflows/scorecard.yml/badge.svg)](https://github.com/embeddedos-org/eBoot/actions/workflows/scorecard.yml)
+[![Release](https://github.com/embeddedos-org/eBoot/actions/workflows/release.yml/badge.svg)](https://github.com/embeddedos-org/eBoot/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Cryptographically Verified Boot for Any Hardware. Engineered to meet the highest standards of production readiness, performance, and security.
+eBoot (CMake project `eBootloader`) is a multi-platform, modular secure
+bootloader written in C. It is organized as a two-stage boot chain: a minimal
+Stage-0 that performs early hardware bring-up, and a Stage-1 that scans, selects,
+verifies, and jumps to an application or RTOS image. Image authentication uses
+Ed25519 signatures, with A/B slot management, recovery, and firmware-update
+transports built into the core.
 
----
+eBoot is the boot component of the **EmbeddedOS**
+([embeddedos-org](https://github.com/embeddedos-org)) ecosystem, providing
+verified boot for [EoS](https://github.com/embeddedos-org/eos) and other
+payloads. Project version 3.0.2.
 
-## 🚀 World-Class Simulation & Analytics
+## What's inside
 
-### Real-Time Emulation Dashboard
-Below is the real-time simulation dashboard generated from our production test suite. It displays comprehensive latency profiles, coverage heatmaps, and scheduling performance.
+| Path | Contents |
+|------|----------|
+| `stage0/` | Minimal early boot: reset entry, hardware init, watchdog, recovery entry, jump to Stage-1 |
+| `stage1/` | Boot logic: scan, select, boot log, jump to app (`main.c`) |
+| `core/` | Platform-agnostic boot logic — Ed25519 verify, image TLV/verify, slot manager, secure/RTOS boot, keystore, firmware update/decrypt, UART transport, boot policy/menu, recovery — builds `eboot_core` |
+| `hal/` | HAL dispatch and board registry — builds `eboot_hal` |
+| `include/` | Public headers (`eos_secure_boot.h`, `eos_image.h`, `eos_slot_manager.h`, `eos_keystore.h`, …) |
+| `boards/` | Per-architecture board support (83 board directories) |
+| `configs/` | Boot/flash/image YAML schemas and flash-tool config |
+| `toolchains/` | Cross-compile toolchain files (aarch64, arm-none-eabi, riscv64, …) |
+| `tests/` | `unit/`, `functional/`, `fuzz/`, `performance/`, `simulation/` |
 
-![Emulation Dashboard](docs/screenshots/eboot_simulation.png)
+## Build
 
-### Unified Organization Health Matrix
-We continuously benchmark eBoot — Secure Bootloader against the entire EmbeddedOS ecosystem to ensure flawless interoperability.
+Requires CMake ≥ 3.15 and a C compiler. A native build (no board selected)
+compiles the platform-agnostic core libraries and, with tests enabled, the test
+suite — these contain no architecture-specific code and build on Linux, macOS,
+and Windows.
 
-![Overall Dashboard](docs/screenshots/overall_dashboard.png)
-
----
-
-## 🎬 Product Marketing Video (App Store Proof of Production)
-
-Experience eBoot — Secure Bootloader in action! Watch our high-fidelity product demonstration and marketing video:
-
-> 🎥 **[Watch the eBoot — Secure Bootloader Product Video](docs/videos/eboot_marketing.mp4)**
-
----
-
-## 🛠️ Production-Grade Architecture
-
-- **Domain**: C • RSA-2048 • A/B Slots
-- **GPS Integration**: Production-grade geolocation and time synchronization APIs integrated.
-- **Benchmarks**: Outperforms leading industry standards including **U-Boot, MCUboot**.
-
----
-
-## 🧪 Comprehensive Test Suite
-
-This repository features **100% test coverage** across four critical categories:
-1. **Unit Tests**: Full functional coverage of core components.
-2. **Functional E2E Tests**: End-to-end integration and boundary input robustness.
-3. **Performance Benchmarks**: Nanosecond-precision latency profiling.
-4. **Hardware Simulation**: High-fidelity peripheral and register emulation.
-
-To run the entire suite locally:
 ```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+Cross-compile for a target board with `EBLDR_BOARD` and a toolchain file:
+
+```bash
+cmake -B build/stm32 \
+  -DEBLDR_BOARD=stm32f4 \
+  -DCMAKE_TOOLCHAIN_FILE=toolchains/arm-none-eabi.cmake
+cmake --build build/stm32 --parallel
+```
+
+`EBLDR_BOARD` accepts `stm32f4`, `stm32h7`, `nrf52`, `rpi4`, `riscv64_virt`,
+`esp32`, `x86_64_efi`, `imx8m`, `am64x`, `samd51`, `sifive_u`, `cortex_r5`, and
+others (default `none` = native core-only build).
+
+### Security options
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `EBLDR_REQUIRE_SIGNATURES` | `ON` | Require Ed25519 signatures for boot |
+| `EBLDR_VERIFY_STAGE1` | `ON` | Verify the Stage-1 hash before jumping |
+| `EBLDR_RECOVERY_AUTH` | `ON` | Require authentication for recovery commands |
+| `EBLDR_HARDENING` | `ON` | Compiler hardening (`-fstack-protector-strong`, `_FORTIFY_SOURCE=2`) |
+| `EBLDR_SANITIZE` | `OFF` | ASan/UBSan for host builds |
+| `EBLDR_BUILD_FUZZ` | `OFF` | Build libFuzzer targets |
+| `EBLDR_BUILD_TESTS` | `OFF` | Build unit tests (native only) |
+
+## Test
+
+```bash
+cmake -B build -DEBLDR_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# Python-driven suites
 python run_all_tests.py
 ```
 
----
+## Docs
 
-## 📜 License & Compliance
+See [`docs/`](docs/): `quickstart.md`, `architecture.md`, `secure_boot_chain.md`,
+`key_lifecycle.md`, `threat_model.md`, `memory-map.md`, `update-flow.md`, and the
+`security_review_checklist.md`.
 
-Licensed under the MIT License. Aligned with ISO/IEC 25000 software quality standards.
+## License
+
+Licensed under the [MIT License](LICENSE).
