@@ -56,6 +56,11 @@ add_executable(test_keystore unit/test_keystore.c)
 target_link_libraries(test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND test_keystore)
 
+# --- test_storage: Unified storage abstraction ---
+add_executable(test_storage unit/test_storage.c)
+target_link_libraries(test_storage PRIVATE eboot_core)
+add_test(NAME test_storage COMMAND test_storage)
+
 # --- Valgrind test targets ---
 find_program(VALGRIND valgrind)
 if(VALGRIND)
