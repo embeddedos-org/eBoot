@@ -246,6 +246,24 @@ static int recovery_handle_erase(eos_slot_t slot)
     return (rc == EOS_OK) ? recovery_send_ack() : recovery_send_nack();
 }
 
+/**
+ * Return EOS_OK if a recovery write of `len` bytes at `offset` stays
+ * inside the slot at `base`. Rejects wrap of base+offset.
+ * Used by the UART write handler and by host unit tests.
+ */
+int eos_recovery_write_in_range(uint32_t base, uint32_t slot_size,
+                                uint32_t offset, uint16_t len)
+{
+    if (base == 0 || slot_size == 0 || len == 0)
+        return EOS_ERR_INVALID;
+    /* Check len first so slot_size - len cannot underflow. */
+    if ((uint32_t)len > slot_size || offset > slot_size - (uint32_t)len)
+        return EOS_ERR_INVALID;
+    if (offset > UINT32_MAX - base)
+        return EOS_ERR_INVALID;
+    return EOS_OK;
+}
+
 static int recovery_handle_write(eos_slot_t slot, uint32_t offset, uint16_t len)
 {
     if (slot != EOS_SLOT_A && slot != EOS_SLOT_B)
@@ -253,18 +271,12 @@ static int recovery_handle_write(eos_slot_t slot, uint32_t offset, uint16_t len)
 
     uint32_t base = eos_hal_slot_addr(slot);
     uint32_t slot_size = eos_hal_slot_size(slot);
-    if (base == 0 || slot_size == 0)
-        return recovery_send_nack();
 
     uint8_t buf[RCVR_WRITE_CHUNK];
-    if (len == 0 || len > sizeof(buf))
+    if (len > sizeof(buf))
         return recovery_send_nack();
 
-    /* Reject writes that leave the slot. Check len first so
-     * slot_size - len cannot underflow; then reject base+offset wrap. */
-    if ((uint32_t)len > slot_size || offset > slot_size - (uint32_t)len)
-        return recovery_send_nack();
-    if (offset > UINT32_MAX - base)
+    if (eos_recovery_write_in_range(base, slot_size, offset, len) != EOS_OK)
         return recovery_send_nack();
 
     recovery_send_ack();
