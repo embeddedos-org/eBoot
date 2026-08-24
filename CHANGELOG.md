@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+- **`recovery.c`:** UART recovery writes now reject offsets/lengths that leave the target slot, including `uint32_t` wrap of `base + offset`.
+- **`image_verify.c`:** `eos_image_parse_header` rejects `load_addr + image_size` that overflows `uint32_t` instead of wrapping the runtime end address.
+
 ## [3.0.2] - 2026-05-27
 
 ### Security — Critical Bug Fixes (Deep Code Audit)

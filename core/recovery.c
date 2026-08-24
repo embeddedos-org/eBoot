@@ -19,6 +19,7 @@
 #include "eos_hal.h"
 #include "eos_crypto_boot.h"
 #include <string.h>
+#include <stdint.h>
 
 /* Recovery protocol commands */
 #define RCVR_CMD_PING       0x01
@@ -251,11 +252,19 @@ static int recovery_handle_write(eos_slot_t slot, uint32_t offset, uint16_t len)
         return recovery_send_nack();
 
     uint32_t base = eos_hal_slot_addr(slot);
-    if (base == 0)
+    uint32_t slot_size = eos_hal_slot_size(slot);
+    if (base == 0 || slot_size == 0)
         return recovery_send_nack();
 
     uint8_t buf[RCVR_WRITE_CHUNK];
-    if (len > sizeof(buf))
+    if (len == 0 || len > sizeof(buf))
+        return recovery_send_nack();
+
+    /* Reject writes that leave the slot. Check len first so
+     * slot_size - len cannot underflow; then reject base+offset wrap. */
+    if ((uint32_t)len > slot_size || offset > slot_size - (uint32_t)len)
+        return recovery_send_nack();
+    if (offset > UINT32_MAX - base)
         return recovery_send_nack();
 
     recovery_send_ack();
