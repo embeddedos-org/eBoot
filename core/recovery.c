@@ -43,6 +43,8 @@
 #define RCVR_MAX_AUTH_FAILS  5
 #define RCVR_BACKOFF_BASE_MS 1000
 
+#define RCVR_LOG_MAX_ENTRIES 8
+
 /* Recovery protocol packet header */
 #ifdef _MSC_VER
 #pragma pack(push, 1)
@@ -79,6 +81,8 @@ extern int  eos_slot_erase(eos_slot_t slot);
 
 /* Forward declarations from boot_log */
 extern void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail);
+extern int eos_boot_log_read(uint32_t index, eos_boot_log_entry_t *out);
+extern uint32_t eos_boot_log_get_head(void);
 
 static int recovery_send_ack(void)
 {
@@ -103,6 +107,7 @@ static bool cmd_requires_auth(uint8_t cmd)
     case RCVR_CMD_VERIFY:
     case RCVR_CMD_BOOT:
     case RCVR_CMD_FACTORY:
+    case RCVR_CMD_LOG:
         return true;
     default:
         return false;
@@ -329,6 +334,85 @@ static int recovery_handle_factory_reset(eos_bootctl_t *bctl)
     return recovery_send_ack();
 }
 
+static int recovery_collect_boot_log_entries(
+    eos_boot_log_entry_t *entries_out,
+    uint16_t *entry_count_out
+)
+{
+    eos_boot_log_entry_t raw_entries[EOS_BOOT_LOG_MAX];
+    uint32_t valid_entry_count = 0;
+    uint32_t log_head;
+    uint16_t written_count = 0;
+
+    if (!entries_out || !entry_count_out)
+        return EOS_ERR_INVALID;
+
+    for (uint32_t i = 0; i < EOS_BOOT_LOG_MAX; i++) {
+        int rc = eos_boot_log_read(i, &raw_entries[i]);
+        if (rc != EOS_OK)
+            return rc;
+
+        if (raw_entries[i].event != 0)
+            valid_entry_count++;
+    }
+
+    log_head = eos_boot_log_get_head() % EOS_BOOT_LOG_MAX;
+
+    for (uint32_t i = 0; i < valid_entry_count; i++) {
+        uint32_t entry_index = (valid_entry_count == EOS_BOOT_LOG_MAX) ?
+                               ((log_head + i) % EOS_BOOT_LOG_MAX) : i;
+
+        if (raw_entries[entry_index].event == 0)
+            continue;
+
+        entries_out[written_count++] = raw_entries[entry_index];
+    }
+
+    *entry_count_out = written_count;
+    return EOS_OK;
+}
+
+static int recovery_handle_boot_log(uint32_t start_index, uint16_t requested_count)
+{
+    eos_boot_log_entry_t boot_log_entries[EOS_BOOT_LOG_MAX];
+    uint16_t total_entries = 0;
+    uint16_t response_entry_count;
+    int rc;
+
+    if (requested_count == 0)
+        requested_count = RCVR_LOG_MAX_ENTRIES;
+    if (requested_count > RCVR_LOG_MAX_ENTRIES)
+        requested_count = RCVR_LOG_MAX_ENTRIES;
+
+    rc = recovery_collect_boot_log_entries(boot_log_entries, &total_entries);
+    if (rc != EOS_OK)
+        return recovery_send_nack();
+    
+    if (start_index >= total_entries) {
+        uint8_t empty_response_header[3] = { RCVR_ACK, 0, 0 };
+        return eos_hal_uart_send(empty_response_header, sizeof(empty_response_header));
+    }
+
+    response_entry_count = (uint16_t)(total_entries - start_index);
+    if (response_entry_count > requested_count)
+        response_entry_count = requested_count;
+    
+    uint8_t response_header[3] = {
+        RCVR_ACK,
+        (uint8_t)(response_entry_count & 0xFF),
+        (uint8_t)((response_entry_count >> 8) & 0xFF)
+    };
+
+    rc = eos_hal_uart_send(response_header, sizeof(response_header));
+    if (rc != EOS_OK)
+        return rc;
+    
+    return eos_hal_uart_send(
+        &boot_log_entries[start_index],
+        response_entry_count * sizeof(boot_log_entries[0])
+    );
+}
+
 int eos_recovery_enter(eos_bootctl_t *bctl)
 {
     eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE, 0);
@@ -392,6 +476,10 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
 
         case RCVR_CMD_FACTORY:
             recovery_handle_factory_reset(bctl);
+            break;
+
+        case RCVR_CMD_LOG:
+            recovery_handle_boot_log(pkt.offset, pkt.len);
             break;
 
         default:
