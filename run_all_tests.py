@@ -2,10 +2,20 @@
 import sys
 import subprocess
 
-def main():
+TEST_PATHS = (
+    "tests/unit",
+    "tests/functional",
+    "tests/performance",
+    "tests/simulation",
+)
+
+
+def run_tests():
     print("=== Running all production-ready tests via pytest ===")
-    result = subprocess.run(["pytest", "tests/unit", "tests/functional", "tests/performance", "tests/simulation", "-v"], capture_output=False)
-    sys.exit(result.returncode)
+    command = [sys.executable, "-m", "pytest", *TEST_PATHS, "-v"]
+    result = subprocess.run(command, capture_output=False)
+    return result.returncode
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_tests())
