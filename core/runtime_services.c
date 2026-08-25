@@ -60,14 +60,16 @@ int eos_rtsvc_set_variable(const char *name, const void *data, uint32_t size)
     if (!rtsvc_initialized) return EOS_ERR_GENERIC;
     if (size > EOS_RTSVC_MAX_VAR_SIZE) return EOS_ERR_FULL;
 
+    size_t name_len = strlen(name);
+    if (name_len == 0 || name_len >= EOS_RTSVC_MAX_VAR_NAME)
+        return EOS_ERR_INVALID;
+
     eos_runtime_var_t *var = find_var(name);
     if (!var) {
         if (var_count >= EOS_RTSVC_MAX_VARS) return EOS_ERR_FULL;
         var = &var_store[var_count++];
-        size_t nlen = strlen(name);
-        if (nlen >= EOS_RTSVC_MAX_VAR_NAME) nlen = EOS_RTSVC_MAX_VAR_NAME - 1;
-        memcpy(var->name, name, nlen);
-        var->name[nlen] = '\0';
+        memcpy(var->name, name, name_len);
+        var->name[name_len] = '\0';
     }
 
     memcpy(var->data, data, size);

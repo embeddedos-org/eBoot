@@ -32,7 +32,7 @@ int eos_storage_init(eos_storage_dev_t *dev)
 int eos_storage_read(eos_storage_dev_t *dev, uint32_t off, void *buf, uint32_t len)
 {
     if (!dev || !dev->initialized || !dev->ops->read) return -1;
-    if (off + len > dev->total_size) return -1;
+    if (off > dev->total_size || len > dev->total_size - off) return -1;
     return dev->ops->read(dev->ctx, off, buf, len);
 }
 
@@ -40,7 +40,7 @@ int eos_storage_write(eos_storage_dev_t *dev, uint32_t off, const void *buf, uin
 {
     if (!dev || !dev->initialized || !dev->ops->write) return -1;
     if (dev->write_protect) return -1;
-    if (off + len > dev->total_size) return -1;
+    if (off > dev->total_size || len > dev->total_size - off) return -1;
     return dev->ops->write(dev->ctx, off, buf, len);
 }
 
@@ -48,6 +48,7 @@ int eos_storage_erase(eos_storage_dev_t *dev, uint32_t off, uint32_t len)
 {
     if (!dev || !dev->initialized || !dev->ops->erase) return -1;
     if (dev->write_protect) return -1;
+    if (off > dev->total_size || len > dev->total_size - off) return -1;
     return dev->ops->erase(dev->ctx, off, len);
 }
 

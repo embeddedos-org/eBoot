@@ -11,6 +11,16 @@ add_executable(test_crypto unit/test_crypto.c)
 target_link_libraries(test_crypto PRIVATE eboot_core)
 add_test(NAME test_crypto COMMAND test_crypto)
 
+# --- test_image_verify: Image header parse bounds ---
+add_executable(test_image_verify unit/test_image_verify.c)
+target_link_libraries(test_image_verify PRIVATE eboot_core)
+add_test(NAME test_image_verify COMMAND test_image_verify)
+
+# --- test_recovery: UART recovery write range ---
+add_executable(test_recovery unit/test_recovery.c)
+target_link_libraries(test_recovery PRIVATE eboot_core)
+add_test(NAME test_recovery COMMAND test_recovery)
+
 # --- test_device_table: UEFI-style device table ---
 add_executable(test_device_table unit/test_device_table.c)
 target_link_libraries(test_device_table PRIVATE eboot_core)
@@ -56,6 +66,11 @@ add_executable(test_keystore unit/test_keystore.c)
 target_link_libraries(test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND test_keystore)
 
+# --- test_storage: Unified storage abstraction ---
+add_executable(test_storage unit/test_storage.c)
+target_link_libraries(test_storage PRIVATE eboot_core)
+add_test(NAME test_storage COMMAND test_storage)
+
 # --- Valgrind test targets ---
 find_program(VALGRIND valgrind)
 if(VALGRIND)
@@ -63,7 +78,7 @@ if(VALGRIND)
     foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
-                      test_boot_log)
+                      test_boot_log test_image_verify test_recovery)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:${TEST_NAME}>

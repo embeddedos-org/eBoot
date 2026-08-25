@@ -45,6 +45,7 @@ int eos_rtsvc_get_variable(const char *name, void *data, uint32_t *size);
 
 /**
  * Set a runtime variable.
+ * Names must contain 1 to EOS_RTSVC_MAX_VAR_NAME - 1 characters.
  */
 int eos_rtsvc_set_variable(const char *name, const void *data, uint32_t size);
 
