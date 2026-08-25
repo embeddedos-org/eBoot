@@ -258,6 +258,13 @@ static int recovery_handle_write(eos_slot_t slot, uint32_t offset, uint16_t len)
     if (len > sizeof(buf))
         return recovery_send_nack();
 
+    /* offset/len come straight from the wire; without this check a
+     * recovery client can write past the slot boundary into the other
+     * slot, boot-control blocks, or the boot log. */
+    uint32_t slot_size = eos_hal_slot_size(slot);
+    if (slot_size == 0 || (uint64_t)offset + len > (uint64_t)slot_size)
+        return recovery_send_nack();
+
     recovery_send_ack();
 
     int rc = eos_hal_uart_recv(buf, len, RCVR_TIMEOUT_MS);
