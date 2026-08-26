@@ -36,6 +36,25 @@ static int verify_slot(eos_slot_t slot)
         return rc;
     }
 
+    /* Bug fix: eos_image_parse_header() only bounds image_size against a
+     * fixed 16MB ceiling -- it has no notion of this board's actual slot
+     * capacity. Without this check, a header claiming an image_size that
+     * is large but still under 16MB (and larger than the real slot) makes
+     * eos_image_verify_integrity() below stream image_size bytes starting
+     * at addr + hdr_size straight past the slot boundary, into whatever
+     * follows in flash (the other slot, the recovery slot, or unmapped
+     * memory) -- on every boot scan, unconditionally. fw_update.c already
+     * guards the streaming firmware-update path this way (ctx->slot_size);
+     * this path, which verifies whatever is already sitting in a slot at
+     * boot, did not. */
+    uint32_t slot_size = eos_hal_slot_size(slot);
+    if (slot_size == 0 ||
+        si->header.hdr_size > slot_size ||
+        si->header.image_size > slot_size - si->header.hdr_size) {
+        si->state = EOS_SLOT_STATE_INVALID;
+        return EOS_ERR_INVALID;
+    }
+
     /* eos_image_verify_integrity() adds hdr_size internally — pass base addr only */
     rc = eos_image_verify_integrity(&si->header, addr);
     if (rc != EOS_OK) {
