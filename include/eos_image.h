@@ -54,7 +54,8 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out);
  * @brief Verify image integrity using CRC32 or hash.
  * @param hdr   Parsed image header.
  * @param addr  Flash address of the image payload (after header).
- * @return EOS_OK if integrity check passes, EOS_ERR_CRC on failure.
+ * @return EOS_OK if integrity check passes, EOS_ERR_CRC on hash or CRC
+ *         mismatch, EOS_ERR_FLASH if the payload could not be read.
  */
 int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr);
 
@@ -74,12 +75,19 @@ int eos_image_verify_signature(const eos_image_header_t *hdr);
 int eos_image_check_version(uint32_t candidate_version, uint32_t min_version);
 
 /**
- * @brief Compute CRC32 over a memory region.
+ * @brief Compute CRC32 over a flash region.
+ *
+ * Reports read failures separately from the computed value. A CRC returned
+ * in-band cannot do this: every 32-bit value is a legal CRC, so there is no
+ * value left over to mean "the read failed".
+ *
  * @param addr  Start address.
  * @param len   Length in bytes.
- * @return CRC32 value.
+ * @param out   Receives the CRC32 value on success; untouched on failure.
+ * @return EOS_OK on success, EOS_ERR_FLASH if the region could not be read,
+ *         EOS_ERR_INVALID if @p out is NULL.
  */
-uint32_t eos_crc32(uint32_t addr, size_t len);
+int eos_crc32(uint32_t addr, size_t len, uint32_t *out);
 
 #ifdef __cplusplus
 }
