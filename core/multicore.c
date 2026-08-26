@@ -147,6 +147,9 @@ int eos_multicore_send_ipi(uint8_t core_id, uint32_t message)
 
     /* Fallback: write to mailbox if configured */
     if (core_table[core_id].mailbox_addr != 0) {
+        if ((core_table[core_id].mailbox_addr & (sizeof(uint32_t) - 1U)) != 0) {
+            return EOS_ERR_INVALID;
+        }
         volatile uint32_t *mailbox = (volatile uint32_t *)(uintptr_t)core_table[core_id].mailbox_addr;
         *mailbox = message;
         return EOS_OK;

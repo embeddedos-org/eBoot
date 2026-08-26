@@ -168,6 +168,32 @@ TEST(test_invalid_core_id)
     ASSERT(eos_multicore_stop(EOS_MAX_CORES) == EOS_ERR_INVALID);
 }
 
+TEST(test_ipi_mailbox_fallback)
+{
+    mc_setup();
+    uint32_t dummy_mailbox = 0;
+    
+    eos_core_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.core_id = 1;
+    cfg.entry_addr = 0x08020000;
+    cfg.mailbox_addr = (uint32_t)(uintptr_t)&dummy_mailbox;
+    
+    int rc = eos_multicore_start(&cfg);
+    ASSERT(rc == EOS_OK);
+    
+    rc = eos_multicore_send_ipi(1, 0xDEADBEEF);
+    ASSERT(rc == EOS_OK);
+    ASSERT(dummy_mailbox == 0xDEADBEEF);
+
+    /* Test unaligned mailbox_addr */
+    cfg.mailbox_addr = ((uint32_t)(uintptr_t)&dummy_mailbox) | 1;
+    eos_multicore_start(&cfg);
+    
+    rc = eos_multicore_send_ipi(1, 0xCAFEBABE);
+    ASSERT(rc == EOS_ERR_INVALID);
+}
+
 int main(void)
 {
     printf("=== eBootloader: Multicore Unit Tests ===\n\n");
@@ -181,8 +207,9 @@ int main(void)
     run_test_start_requires_entry_addr();
     run_test_boot_all();
     run_test_invalid_core_id();
+    run_test_ipi_mailbox_fallback();
 
-    tests_run = 9;
+    tests_run = 10;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
