@@ -13,6 +13,7 @@
 #include "eos_multicore.h"
 #include "eos_hal.h"
 #include "eos_image.h"
+#include "eos_os_adapter.h"
 #include <string.h>
 
 static const eos_multicore_ops_t *mc_ops = NULL;
@@ -150,8 +151,9 @@ int eos_multicore_send_ipi(uint8_t core_id, uint32_t message)
         if ((core_table[core_id].mailbox_addr & (sizeof(uint32_t) - 1U)) != 0) {
             return EOS_ERR_INVALID;
         }
-        volatile uint32_t *mailbox = (volatile uint32_t *)(uintptr_t)core_table[core_id].mailbox_addr;
+        volatile uint32_t *mailbox = (volatile uint32_t *)core_table[core_id].mailbox_addr;
         *mailbox = message;
+        eos_boot_memory_barrier();
         return EOS_OK;
     }
 

@@ -11,6 +11,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include "eos_boot_log.h"
+
+/* Mock implementations for unresolved symbols */
+void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail) { (void)event; (void)slot; (void)detail; }
+int eos_boot_log_read(uint32_t index, eos_boot_log_entry_t *out) { (void)index; (void)out; return EOS_OK; }
+uint32_t eos_boot_log_get_head(void) { return 0; }
 
 extern int eos_recovery_write_in_range(uint32_t base, uint32_t slot_size,
                                        uint32_t offset, uint16_t len);

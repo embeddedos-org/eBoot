@@ -25,10 +25,17 @@ def run_tests():
         ], 
         capture_output=False
     )
-    sys.exit(result.returncode)
-    command = [sys.executable, "-m", "pytest", *TEST_PATHS, "-v"]
-    result = subprocess.run(command, capture_output=False)
-    return result.returncode
+    if result.returncode != 0:
+        return result.returncode
+        
+    print("\n=== Running native C tests via CMake/CTest ===")
+    try:
+        subprocess.run(["cmake", "-S", ".", "-B", "build", "-DEBLDR_BUILD_TESTS=ON"], check=True)
+        subprocess.run(["cmake", "--build", "build"], check=True)
+        ctest_result = subprocess.run(["ctest", "--test-dir", "build", "-C", "Debug", "--output-on-failure"])
+        return ctest_result.returncode
+    except subprocess.CalledProcessError as e:
+        return e.returncode
   
 if __name__ == "__main__":
     raise SystemExit(run_tests())

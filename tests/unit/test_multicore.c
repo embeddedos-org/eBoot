@@ -177,7 +177,7 @@ TEST(test_ipi_mailbox_fallback)
     memset(&cfg, 0, sizeof(cfg));
     cfg.core_id = 1;
     cfg.entry_addr = 0x08020000;
-    cfg.mailbox_addr = (uint32_t)(uintptr_t)&dummy_mailbox;
+    cfg.mailbox_addr = (uintptr_t)&dummy_mailbox;
     
     int rc = eos_multicore_start(&cfg);
     ASSERT(rc == EOS_OK);
@@ -187,7 +187,7 @@ TEST(test_ipi_mailbox_fallback)
     ASSERT(dummy_mailbox == 0xDEADBEEF);
 
     /* Test unaligned mailbox_addr */
-    cfg.mailbox_addr = ((uint32_t)(uintptr_t)&dummy_mailbox) | 1;
+    cfg.mailbox_addr = ((uintptr_t)&dummy_mailbox) | 1;
     rc = eos_multicore_start(&cfg);
     ASSERT(rc == EOS_OK);
     
