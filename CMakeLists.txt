@@ -90,6 +90,7 @@ add_library(eboot_core STATIC
     core/rtos_boot.c
     core/rtos_params.c
     core/boot_menu.c
+    core/boot_log.c
     core/device_table.c
     core/runtime_services.c
     core/crypto_boot.c
@@ -118,7 +119,6 @@ add_library(eboot_stage1 STATIC
     stage1/main.c
     stage1/boot_scan.c
     stage1/boot_select.c
-    stage1/boot_log.c
     stage1/jump_app.c
 )
 target_include_directories(eboot_stage1 PUBLIC ${EBLDR_INCLUDE_DIR})
