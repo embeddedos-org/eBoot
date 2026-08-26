@@ -75,6 +75,8 @@ int eos_device_table_validate(const eos_device_table_t *table)
     if (!table) return EOS_ERR_INVALID;
     if (table->magic != EOS_DEVTABLE_MAGIC) return EOS_ERR_INVALID;
     if (table->version != EOS_DEVTABLE_VERSION) return EOS_ERR_VERSION;
+    if (table->mem_region_count > EOS_MAX_MEM_REGIONS) return EOS_ERR_INVALID;
+    if (table->periph_count > EOS_MAX_PERIPHERALS) return EOS_ERR_INVALID;
 
     uint32_t expected = compute_table_crc(table);
     if (table->crc32 != expected) return EOS_ERR_CRC;

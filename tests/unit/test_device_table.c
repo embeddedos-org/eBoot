@@ -116,6 +116,22 @@ TEST(test_corrupt_crc_fails)
     ASSERT(eos_device_table_validate(&table) == EOS_ERR_CRC);
 }
 
+TEST(test_oversized_counts_fail)
+{
+    eos_device_table_t table;
+    eos_device_table_init(&table, "Oversized");
+    table.mem_region_count = EOS_MAX_MEM_REGIONS + 1;
+    eos_device_table_finalize(&table);
+
+    ASSERT(eos_device_table_validate(&table) == EOS_ERR_INVALID);
+
+    table.mem_region_count = 0;
+    table.periph_count = EOS_MAX_PERIPHERALS + 1;
+    eos_device_table_finalize(&table);
+
+    ASSERT(eos_device_table_validate(&table) == EOS_ERR_INVALID);
+}
+
 int main(void)
 {
     printf("=== eBootloader: Device Table Unit Tests ===\n\n");
@@ -127,8 +143,9 @@ int main(void)
     run_test_memory_overflow();
     run_test_finalize_and_validate();
     run_test_corrupt_crc_fails();
+    run_test_oversized_counts_fail();
 
-    tests_run = 7;
+    tests_run = 8;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
