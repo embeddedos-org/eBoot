@@ -11,6 +11,7 @@
 
 #include "eos_secure_boot.h"
 #include "eos_image.h"
+#include "eos_rollback.h"
 #include "eos_crypto_boot.h"
 #include "eos_hal.h"
 #include <string.h>
@@ -118,7 +119,9 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
         }
     }
 
-    /* ---- Step 5: Anti-rollback check ---- */
+    /* ---- Step 5: Anti-rollback checks ---- */
+
+    /* 5a. Static floor from the boot configuration. */
     if (cfg->min_version > 0) {
         rc = eos_image_check_version(hdr.image_version, cfg->min_version);
         if (rc != EOS_OK) {
@@ -126,6 +129,25 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
             return EOS_SBOOT_ERR_ROLLBACK;
         }
     }
+
+    /* 5b. Persistent floor from the device monotonic counter. Unlike
+     * cfg->min_version, this one rises in response to an update. */
+    uint32_t img_counter = 0;
+    rc = eos_rollback_read_image_counter(cfg->image_addr, &img_counter);
+    if (rc != EOS_OK) {
+        attest_record(2, hdr.image_version, hdr.hash, NULL, EOS_SBOOT_ERR_BAD_HEADER);
+        return EOS_SBOOT_ERR_BAD_HEADER;
+    }
+
+    rc = eos_rollback_verify(img_counter);
+    if (rc != EOS_OK) {
+        attest_record(2, hdr.image_version, hdr.hash, NULL, EOS_SBOOT_ERR_ROLLBACK);
+        return EOS_SBOOT_ERR_ROLLBACK;
+    }
+
+    /* The floor is raised only once the image is confirmed good; see
+     * eos_bootctl_confirm(). */
+    eos_rollback_stage(img_counter);
 
     /* ---- Step 6: Decrypt if required ---- */
     if (cfg->require_encryption && (hdr.flags & EOS_IMG_FLAG_ENCRYPTED)) {
