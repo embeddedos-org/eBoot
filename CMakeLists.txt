@@ -83,6 +83,7 @@ add_library(eboot_core STATIC
     core/image_verify.c
     core/slot_manager.c
     core/boot_policy.c
+    core/boot_log.c
     core/recovery.c
     core/fw_services.c
     core/fw_update.c
@@ -118,7 +119,6 @@ add_library(eboot_stage1 STATIC
     stage1/main.c
     stage1/boot_scan.c
     stage1/boot_select.c
-    stage1/boot_log.c
     stage1/jump_app.c
 )
 target_include_directories(eboot_stage1 PUBLIC ${EBLDR_INCLUDE_DIR})
