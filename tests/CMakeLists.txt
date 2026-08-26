@@ -18,7 +18,7 @@ add_test(NAME test_image_verify COMMAND test_image_verify)
 
 # --- test_recovery: UART recovery write range ---
 add_executable(test_recovery unit/test_recovery.c)
-target_link_libraries(test_recovery PRIVATE eboot_core)
+target_link_libraries(test_recovery PRIVATE eboot_core eboot_stage1)
 add_test(NAME test_recovery COMMAND test_recovery)
 
 # --- test_device_table: UEFI-style device table ---
