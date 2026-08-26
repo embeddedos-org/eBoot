@@ -25,6 +25,8 @@ static eos_slot_state_t slot_states[3] = {
     EOS_SLOT_STATE_EMPTY, EOS_SLOT_STATE_EMPTY, EOS_SLOT_STATE_EMPTY
 };
 static uint32_t slot_versions[3] = {0, 0, 0};
+static uint8_t slot_boot_attempts[3] = {0, 0, 0};
+static bool slot_confirmed[3] = {false, false, false};
 
 /* ---- Stub implementations ---- */
 int eos_slot_scan_all(void) {
@@ -67,7 +69,37 @@ int eos_slot_erase(eos_slot_t slot) {
     if (slot > EOS_SLOT_RECOVERY) return EOS_ERR_INVALID;
     slot_states[slot] = EOS_SLOT_STATE_EMPTY;
     slot_versions[slot] = 0;
+    slot_boot_attempts[slot] = 0;
+    slot_confirmed[slot] = false;
     return EOS_OK;
+}
+
+int eos_slot_mark_booting(eos_slot_t slot) {
+    if (slot > EOS_SLOT_RECOVERY) return EOS_ERR_INVALID;
+    if (slot_boot_attempts[slot] < 255) {
+        slot_boot_attempts[slot]++;
+    }
+    return EOS_OK;
+}
+
+int eos_slot_confirm(eos_slot_t slot) {
+    if (slot > EOS_SLOT_RECOVERY) return EOS_ERR_INVALID;
+    slot_boot_attempts[slot] = 0;
+    slot_confirmed[slot] = true;
+    if (slot_states[slot] == EOS_SLOT_STATE_VALID) {
+        slot_states[slot] = EOS_SLOT_STATE_CONFIRMED;
+    }
+    return EOS_OK;
+}
+
+bool eos_slot_needs_rollback(eos_slot_t slot, uint8_t max_attempts) {
+    if (slot > EOS_SLOT_RECOVERY || max_attempts == 0) return false;
+    return slot_boot_attempts[slot] >= max_attempts;
+}
+
+uint8_t eos_slot_get_boot_attempts(eos_slot_t slot) {
+    if (slot > EOS_SLOT_RECOVERY) return 0;
+    return slot_boot_attempts[slot];
 }
 
 /* ---- Helper ---- */
@@ -76,6 +108,8 @@ static void reset_slots(void) {
     for (int i = 0; i < 3; i++) {
         slot_states[i] = EOS_SLOT_STATE_EMPTY;
         slot_versions[i] = 0;
+        slot_boot_attempts[i] = 0;
+        slot_confirmed[i] = false;
     }
 }
 
@@ -253,6 +287,41 @@ static void test_slot_enum_values(void) {
     PASS("slot_enum_values");
 }
 
+static void test_boot_attempts_and_rollback(void) {
+    reset_slots();
+    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 0);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
+
+    // Attempt 1
+    assert(eos_slot_mark_booting(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 1);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
+
+    // Attempt 2
+    assert(eos_slot_mark_booting(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 2);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
+
+    // Attempt 3 (hits max allowed 3)
+    assert(eos_slot_mark_booting(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 3);
+    assert(eos_slot_needs_rollback(EOS_SLOT_A, 3));
+
+    // Confirm slot (resets boot attempts and confirms)
+    assert(eos_slot_confirm(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 0);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
+    assert(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_CONFIRMED);
+
+    // Invalid slot handles
+    assert(eos_slot_mark_booting((eos_slot_t)0xFE) == EOS_ERR_INVALID);
+    assert(eos_slot_confirm((eos_slot_t)0xFE) == EOS_ERR_INVALID);
+    assert(eos_slot_get_boot_attempts((eos_slot_t)0xFE) == 0);
+    assert(!eos_slot_needs_rollback((eos_slot_t)0xFE, 3));
+    PASS("boot_attempts_and_rollback");
+}
+
 int main(void) {
     printf("=== eboot Slot Manager Tests ===\n");
     test_scan_no_valid_slots();
@@ -276,6 +345,7 @@ int main(void) {
     test_version_macro_encoding();
     test_version_macro_max_values();
     test_slot_enum_values();
+    test_boot_attempts_and_rollback();
     printf("\n=== ALL %d TESTS PASSED ===\n", passed);
     return 0;
 }
