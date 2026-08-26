@@ -70,14 +70,18 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
     eos_mpu_set_default(&mpu_ctx);
     eos_mpu_apply(&mpu_ctx);
 
-    /* Perform the jump via HAL */
-    uint32_t vector_addr = hdr.load_addr;
-    if (vector_addr == 0)
-        vector_addr = addr + hdr.hdr_size;
+    /* Perform the jump via HAL. Use the validated entry point, not load_addr:
+     * copy-to-RAM images may enter at an offset inside the loaded image.
+     * Fall back to load_addr, then to the on-flash payload, if unset. */
+    uint32_t jump_addr = hdr.entry_addr;
+    if (jump_addr == 0)
+        jump_addr = hdr.load_addr;
+    if (jump_addr == 0)
+        jump_addr = addr + hdr.hdr_size;
 
     eos_hal_disable_interrupts();
     eos_hal_deinit_peripherals();
-    eos_hal_jump(vector_addr);
+    eos_hal_jump(jump_addr);
 
     /* Should never reach here */
     return EOS_ERR_GENERIC;

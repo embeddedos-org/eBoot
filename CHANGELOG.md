@@ -5,6 +5,10 @@
 ### Security
 - **`recovery.c`:** UART recovery writes now reject offsets and lengths that leave the target slot, including wrap of `base + offset`.
 - **`image_verify.c`:** `eos_image_parse_header` rejects a `load_addr + image_size` that overflows `uint32_t` instead of wrapping the runtime end address.
+- **`image_verify.c`:** Integrity checks now skip a well-formed TLV area (`[header][TLV][payload]`, as produced by `tools/eos_sign.py`) so SHA-256/CRC32 is computed over the payload only. A corrupt TLV (valid magic, illegal length) fails closed.
+
+### Fixed
+- **`jump_app.c`:** Stage-1 jumps to `entry_addr` (falling back to `load_addr`) so copy-to-RAM images with an offset entry point boot at the validated vector, not the load base.
 
 ## [3.0.2] - 2026-05-27
 

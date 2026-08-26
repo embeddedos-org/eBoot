@@ -8,6 +8,7 @@
  */
 
 #include "eos_image.h"
+#include "eos_image_tlv.h"
 #include "eos_hal.h"
 #include <stdio.h>
 #include <string.h>
@@ -160,6 +161,89 @@ TEST(test_parse_load_plus_size_overflow)
     ASSERT(eos_image_parse_header(0x1000, &out) == EOS_ERR_INVALID);
 }
 
+TEST(test_verify_integrity_without_tlv)
+{
+    eos_image_header_t hdr;
+    uint32_t base = 0x1000;
+    uint32_t payload_addr;
+    uint32_t crc;
+    uint8_t payload[64];
+
+    fill_valid_header(&hdr);
+    hdr.image_size = sizeof(payload);
+    hdr.flags = 0; /* CRC32 path */
+    payload_addr = base + hdr.hdr_size;
+    memset(payload, 0xA5, sizeof(payload));
+    memcpy(&sim_flash[payload_addr], payload, sizeof(payload));
+    crc = eos_crc32(payload_addr, sizeof(payload));
+    memcpy(hdr.hash, &crc, sizeof(crc));
+    write_header(base, &hdr);
+
+    ASSERT(eos_image_verify_integrity(&hdr, base) == EOS_OK);
+}
+
+TEST(test_verify_integrity_skips_tlv_area)
+{
+    /* Layout used by tools/eos_sign.py: [header][TLV][payload].
+     * Hash/CRC covers payload only. Hashing from hdr_size would mix in TLV. */
+    eos_image_header_t hdr;
+    eos_tlv_info_t info;
+    uint32_t base = 0x1000;
+    uint32_t tlv_addr;
+    uint16_t tlv_len = 16;
+    uint32_t payload_addr;
+    uint32_t crc;
+    uint8_t payload[64];
+
+    fill_valid_header(&hdr);
+    hdr.image_size = sizeof(payload);
+    hdr.flags = 0;
+    tlv_addr = base + hdr.hdr_size;
+    payload_addr = tlv_addr + tlv_len;
+
+    memset(&info, 0, sizeof(info));
+    info.magic = EOS_TLV_INFO_MAGIC;
+    info.tlv_total_len = tlv_len;
+    memcpy(&sim_flash[tlv_addr], &info, sizeof(info));
+    memset(&sim_flash[tlv_addr + sizeof(info)], 0x11, tlv_len - sizeof(info));
+
+    memset(payload, 0xA5, sizeof(payload));
+    memcpy(&sim_flash[payload_addr], payload, sizeof(payload));
+    crc = eos_crc32(payload_addr, sizeof(payload));
+    memcpy(hdr.hash, &crc, sizeof(crc));
+    write_header(base, &hdr);
+
+    ASSERT(eos_image_verify_integrity(&hdr, base) == EOS_OK);
+}
+
+TEST(test_verify_integrity_rejects_corrupt_tlv)
+{
+    eos_image_header_t hdr;
+    eos_tlv_info_t info;
+    uint32_t base = 0x1000;
+    uint32_t tlv_addr;
+    uint8_t payload[16];
+    uint32_t crc;
+
+    fill_valid_header(&hdr);
+    hdr.image_size = sizeof(payload);
+    hdr.flags = 0;
+    tlv_addr = base + hdr.hdr_size;
+
+    memset(&info, 0, sizeof(info));
+    info.magic = EOS_TLV_INFO_MAGIC;
+    info.tlv_total_len = EOS_TLV_MAX_SIZE + 1; /* illegal */
+    memcpy(&sim_flash[tlv_addr], &info, sizeof(info));
+
+    memset(payload, 0x5A, sizeof(payload));
+    memcpy(&sim_flash[tlv_addr + sizeof(info)], payload, sizeof(payload));
+    crc = eos_crc32(tlv_addr + sizeof(info), sizeof(payload));
+    memcpy(hdr.hash, &crc, sizeof(crc));
+    write_header(base, &hdr);
+
+    ASSERT(eos_image_verify_integrity(&hdr, base) == EOS_ERR_INVALID);
+}
+
 int main(void)
 {
     printf("=== eBootloader: Image Header Parse Tests ===\n\n");
@@ -168,7 +252,10 @@ int main(void)
     run_test_parse_bad_magic();
     run_test_parse_entry_outside_image();
     run_test_parse_load_plus_size_overflow();
-    tests_run = 5;
+    run_test_verify_integrity_without_tlv();
+    run_test_verify_integrity_skips_tlv_area();
+    run_test_verify_integrity_rejects_corrupt_tlv();
+    tests_run = 8;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
