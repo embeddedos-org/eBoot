@@ -188,10 +188,12 @@ TEST(test_ipi_mailbox_fallback)
 
     /* Test unaligned mailbox_addr */
     cfg.mailbox_addr = ((uint32_t)(uintptr_t)&dummy_mailbox) | 1;
-    eos_multicore_start(&cfg);
+    rc = eos_multicore_start(&cfg);
+    ASSERT(rc == EOS_OK);
     
     rc = eos_multicore_send_ipi(1, 0xCAFEBABE);
     ASSERT(rc == EOS_ERR_INVALID);
+    ASSERT(dummy_mailbox == 0xDEADBEEF);
 }
 
 int main(void)
