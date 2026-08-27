@@ -29,7 +29,7 @@
 #include "eos_crypto_boot.h"
 #include "eos_types.h"
 #include <string.h>
-#include "eos_sha512.h"
+
 
 /* ================================================================
  * Field arithmetic mod p = 2^255 - 19
@@ -428,19 +428,21 @@ int eos_ed25519_verify(const uint8_t signature[64],
     eos_sha512_final(&ctx, k);
     reduce_hash(k);
 
-    /* Step 3: Compute k = SHA-256(R || A || M) reduced mod L */
-    /* Step 3: Compute k = SHA-512(R || A || M) reduced mod L */
-uint8_t k_hash[64];
-sha512_ctx_t ctx;
+    /* Compute [k](-A) + [S]B, which equals R for a valid signature. */
+    gf kA[4], sB[4];
+    scalarmult(kA, A, k);
+    scalarbase(sB, &signature[32]);
+    point_add(kA, (const gf *)sB);
 
-sha512_init(&ctx);
-sha512_update(&ctx, signature, 32);       /* R */
-sha512_update(&ctx, public_key, 32);      /* A */
-sha512_update(&ctx, message, msg_len);    /* M */
-sha512_final(&ctx, k_hash);
+    uint8_t recovered[32];
+    point_pack(recovered, kA);
 
-uint8_t k[32];
-sc_reduce(k, k_hash);
+    uint8_t diff = 0;
+    for (int i = 0; i < 32; i++) diff |= (uint8_t)(recovered[i] ^ signature[i]);
+
+    /* Wipe the challenge scalar rather than leave it in boot-path memory. */
+    memset(k, 0, sizeof(k));
+
 
     return diff == 0 ? EOS_OK : EOS_ERR_SIGNATURE;
 }

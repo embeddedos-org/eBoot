@@ -146,7 +146,7 @@ int eos_crc32_checked(uint32_t addr, size_t len, uint32_t *out_crc);
  * @param len   Length in bytes.
  * @return CRC32 value, or 0 if the region could not be read.
  */
-int eos_crc32(uint32_t addr, size_t len, uint32_t *out);
+uint32_t eos_crc32(uint32_t addr, size_t len);
 
 #ifdef __cplusplus
 }
