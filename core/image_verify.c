@@ -75,7 +75,9 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
      * If load_addr is 0 (unset), skip the check to remain compatible. */
     if (out->load_addr != 0) {
         uint32_t rt_start = out->load_addr;
-        uint32_t rt_end   = rt_start + out->image_size;
+        if (out->image_size > UINT32_MAX - rt_start)
+            return EOS_ERR_INVALID;
+        uint32_t rt_end = rt_start + out->image_size;
         if (out->entry_addr < rt_start || out->entry_addr >= rt_end)
             return EOS_ERR_INVALID;
     }

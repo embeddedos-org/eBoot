@@ -155,14 +155,20 @@ void main(void) {
 ### Step 5: Pack and sign firmware image
 
 ```bash
+# Install Python tool dependencies
+python3 -m pip install -r requirements.txt
+
 # Pack firmware with eboot image header
 python tools/imgpack.py firmware.bin --output firmware.packed.bin
 
 # Sign the image
 python tools/sign_image.py firmware.packed.bin --key signing_key.pem
 
-# Flash to board
-python tools/uart_recovery.py --port /dev/ttyUSB0 firmware.packed.bin
+# Set the recovery shared secret used by the UART tool
+export EBOOT_RECOVERY_SECRET_HEX=<64-hex-char-secret>
+
+# Upload the image to slot B over UART recovery
+python tools/uart_recovery.py --port /dev/ttyUSB0 upload --slot B --image firmware.packed.bin
 ```
 
 ### Step 6: Confirm boot (in your app)

@@ -104,7 +104,10 @@ add_library(eboot_core STATIC
     core/ecc_scrub.c
     core/bmc_handoff.c
     core/os_adapter.c
+    core/sha512.c
     core/ed25519_verify.c
+    core/secure_boot.c
+    core/fdt_loader.c
     core/keystore.c
     core/debug_lock.c
     core/fw_decrypt.c

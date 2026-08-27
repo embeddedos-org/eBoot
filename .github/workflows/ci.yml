@@ -36,7 +36,7 @@ jobs:
             -DCMAKE_C_COMPILER=gcc-12 \
             -DCMAKE_CXX_COMPILER=g++-12 \
             -DENABLE_COVERAGE=ON \
-            -DBUILD_TESTS=ON
+            -DEBLDR_BUILD_TESTS=ON
 
       - name: Build (host)
         run: cmake --build build/host --parallel $(nproc)
@@ -44,7 +44,9 @@ jobs:
       - name: Run C unit tests
         run: |
           cd build/host
-          ctest --output-on-failure --parallel $(nproc)
+          # --no-tests=error: ctest exits 0 when it finds no tests at all, so
+          # without this a misnamed -D flag makes this job pass having run none.
+          ctest --output-on-failure --no-tests=error --parallel $(nproc)
 
       - name: Run Python tests
         run: |

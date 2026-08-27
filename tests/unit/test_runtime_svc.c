@@ -94,6 +94,24 @@ TEST(test_string_variable)
     ASSERT(strcmp(out, "hello boot") == 0);
 }
 
+TEST(test_reject_invalid_variable_names)
+{
+    uint32_t value = 42;
+    char long_name[EOS_RTSVC_MAX_VAR_NAME + 1];
+    memset(long_name, 'a', sizeof(long_name));
+    long_name[sizeof(long_name) - 1] = '\0';
+
+    ASSERT(eos_rtsvc_set_variable("", &value, sizeof(value)) == EOS_ERR_INVALID);
+    ASSERT(eos_rtsvc_set_variable(long_name, &value, sizeof(value)) == EOS_ERR_INVALID);
+
+    /* Invalid names must not consume slots in the fixed-size variable store. */
+    for (int i = 0; i < EOS_RTSVC_MAX_VARS; i++) {
+        char name[EOS_RTSVC_MAX_VAR_NAME];
+        snprintf(name, sizeof(name), "valid-%d", i);
+        ASSERT(eos_rtsvc_set_variable(name, &value, sizeof(value)) == EOS_OK);
+    }
+}
+
 TEST(test_next_boot_slot)
 {
     ASSERT(eos_rtsvc_get_next_boot() == EOS_SLOT_NONE);
@@ -118,10 +136,11 @@ int main(void)
     run_test_get_nonexistent();
     run_test_null_args();
     run_test_string_variable();
+    run_test_reject_invalid_variable_names();
     run_test_next_boot_slot();
     run_test_time();
 
-    tests_run = 8;
+    tests_run = 9;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

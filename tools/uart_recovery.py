@@ -24,6 +24,8 @@ import argparse
 import struct
 import sys
 import time
+import hashlib
+import os
 
 try:
     import serial
@@ -52,7 +54,38 @@ TIMEOUT = 5.0
 
 SLOT_MAP = {'A': 0, 'B': 1, 'a': 0, 'b': 1}
 
+CMD_AUTH = 0x10
+CHALLENGE_SIZE = 32
+RECOVERY_SECRET_SIZE = 32
+BOOT_LOG_ENTRY_SIZE = 16
 
+BOOT_LOG_EVENT_NAMES = {
+    0x01: "BOOT_START",
+    0x02: "IMAGE_VALID",
+    0x03: "IMAGE_INVALID",
+    0x04: "SLOT_SELECTED",
+    0x05: "ROLLBACK",
+    0x06: "RECOVERY_ENTER",
+    0x07: "UPGRADE_START",
+    0x08: "UPGRADE_DONE",
+    0x09: "CONFIRM",
+    0x0A: "FACTORY_RESET",
+    0x0B: "WATCHDOG_RESET",
+    0x0C: "BOOT_FAIL",
+    0x20: "AUTH_SUCCESS",
+    0x21: "AUTH_FAIL",
+}
+
+BOOT_LOG_SLOT_NAMES = {
+    0: "A",
+    1: "B",
+    2: "RECOVERY",
+    0xFF: "NONE",
+}
+
+def _boot_log_event_name(event: int) -> str:
+    return BOOT_LOG_EVENT_NAMES.get(event, f"UNKNOWN(0x{event:02X})")
+   
 class RecoveryClient:
     def __init__(self, port: str, baud: int = 115200):
         self.ser = serial.Serial(port, baud, timeout=TIMEOUT)
@@ -176,11 +209,78 @@ class RecoveryClient:
         print("Factory reset failed")
         return False
 
+    def authenticate(self, secret_hex: str) -> bool:
+        try:
+            shared_secret = bytes.fromhex(secret_hex)
+        except ValueError:
+            print("Recovery secret must be valid hex")
+            return False
+
+        if len(shared_secret) != RECOVERY_SECRET_SIZE:
+            print("Recovery secret must be exactly 32 bytes")
+            return False
+
+        self._send_packet(CMD_AUTH)
+        response = self.ser.read(1 + CHALLENGE_SIZE)
+        if len(response) != 1 + CHALLENGE_SIZE or response[0] != ACK:
+            print("Failed to get auth challenge")
+            return False
+
+        challenge = response[1:]
+        response_digest = hashlib.sha256(challenge + shared_secret).digest()
+
+        self.ser.write(response_digest)
+
+        if self._read_ack():
+            print("Authenticated")
+            return True
+
+        print("Authentication failed")
+        return False
+
+    def read_boot_log(self, start_index: int = 0, max_entries: int = 8) -> bool:
+        self._send_packet(CMD_LOG, length=max_entries, offset=start_index)
+
+        header = self.ser.read(3)
+        if len(header) != 3 or header[0] != ACK:
+            print("Log request failed")
+            return False
+
+        entry_count = struct.unpack('<H', header[1:3])[0]
+        payload = self.ser.read(entry_count * BOOT_LOG_ENTRY_SIZE)
+        if len(payload) != entry_count * BOOT_LOG_ENTRY_SIZE:
+            print("Incomplete log response")
+            return False
+
+        if entry_count == 0:
+            print("No log entries returned")
+            return True
+
+        for i in range(entry_count):
+            chunk = payload[
+                i * BOOT_LOG_ENTRY_SIZE:(i + 1) * BOOT_LOG_ENTRY_SIZE
+            ]
+            timestamp, event, slot, detail = struct.unpack('<IIII', chunk)
+
+            print(
+                f"[{start_index + i:02d}] "
+                f"t={timestamp:>8} "
+                f"event={_boot_log_event_name(event):<15} "
+                f"slot={BOOT_LOG_SLOT_NAMES.get(slot, hex(slot)):<8} "
+                f"detail=0x{detail:08X}"
+            )
+
+        return True
 
 def main():
     parser = argparse.ArgumentParser(description='eBootloader UART Recovery Tool')
     parser.add_argument('--port', '-p', required=True, help='Serial port (e.g., COM3 or /dev/ttyUSB0)')
     parser.add_argument('--baud', '-b', type=int, default=115200, help='Baud rate')
+    parser.add_argument(
+        '--secret-hex',
+        default=os.environ.get('EBOOT_RECOVERY_SECRET_HEX'),
+        help='32-byte recovery secret as hex; defaults to EBOOT_RECOVERY_SECRET_HEX'
+    )
 
     subparsers = parser.add_subparsers(dest='command', required=True)
 
@@ -202,9 +302,23 @@ def main():
     boot_p = subparsers.add_parser('boot', help='Boot into slot')
     boot_p.add_argument('--slot', '-s', required=True, choices=['A', 'B'], help='Target slot')
 
+    log_p = subparsers.add_parser('log', help='Read boot log')
+    log_p.add_argument('--start', type=int, default=0, help='Start log index')
+    log_p.add_argument('--count', type=int, default=8, help='Number of entries to request')
+
     args = parser.parse_args()
 
     client = RecoveryClient(args.port, args.baud)
+
+    protected_commands = {'erase', 'upload', 'verify', 'boot', 'factory-reset', 'log'}
+
+    if args.command in protected_commands:
+        if not args.secret_hex:
+            print("This command requires --secret-hex or EBOOT_RECOVERY_SECRET_HEX", file=sys.stderr)
+            sys.exit(1)
+
+        if not client.authenticate(args.secret_hex):
+            sys.exit(1)
 
     try:
         if args.command == 'ping':
@@ -228,6 +342,8 @@ def main():
             success = client.reset()
         elif args.command == 'factory-reset':
             success = client.factory_reset()
+        elif args.command == 'log':
+            success = client.read_boot_log(args.start, args.count)
         else:
             success = False
 
@@ -235,7 +351,6 @@ def main():
 
     finally:
         client.close()
-
 
 if __name__ == '__main__':
     main()

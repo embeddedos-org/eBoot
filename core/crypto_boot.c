@@ -145,6 +145,15 @@ int eos_crypto_safe_compare(const uint8_t *a, const uint8_t *b, size_t len)
  * SHA-256 Hashing API
  * ================================================================ */
 
+void eos_sha256(const void *data, size_t len,
+                uint8_t digest[EOS_SHA256_DIGEST_SIZE])
+{
+    eos_sha256_ctx_t ctx;
+    eos_sha256_init(&ctx);
+    eos_sha256_update(&ctx, (const uint8_t *)data, len);
+    eos_sha256_final(&ctx, digest);
+}
+
 int eos_crypto_hash(const uint8_t *data, size_t len,
                      uint8_t digest[EOS_SHA256_DIGEST_SIZE])
 {
@@ -208,11 +217,6 @@ int eos_crypto_verify_image(uint32_t image_addr, uint32_t image_size,
  * is a valid Ed25519 signature over the provided data. The
  * underlying curve arithmetic is in core/ed25519_verify.c.
  * ================================================================ */
-
-/* Forward declaration — implemented in ed25519_verify.c */
-extern int eos_ed25519_verify(const uint8_t signature[64],
-                               const uint8_t public_key[32],
-                               const uint8_t *message, size_t msg_len);
 
 int eos_crypto_verify_signature(const uint8_t *data, size_t data_len,
                                  const uint8_t *signature, size_t sig_len,

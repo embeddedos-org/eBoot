@@ -87,7 +87,7 @@ Planned for future releases.
 | Feature | Module | API | Status | Acceptance Criteria |
 |---|---|---|---|---|
 | SHA-256 image hash | `core/crypto_boot.c` | `eos_crypto_hash()`, `eos_crypto_verify_image()` | ✅ Implemented (FIPS 180-4) | Hash matches NIST CAVP test vectors; image verification rejects single-bit payload corruption |
-| Ed25519 signature verification | `core/crypto_boot.c` | `eos_crypto_verify_signature()` | ✅ Implemented (RFC 8032) | Passes RFC 8032 §7.1 test vectors; rejects forged signatures; constant-time execution |
+| Ed25519 signature verification | `core/ed25519_verify.c` | `eos_ed25519_verify()`, via `eos_crypto_verify_signature()` | ✅ Implemented (RFC 8032) | RFC 8032 §7.1 vectors 1–3 accepted; every single-bit flip of a valid signature (512 cases) rejected; wrong key, tampered message, all-zero key/signature and non-canonical S (S+L) rejected — all asserted in `tests/unit/test_ed25519.c`. Scalar multiplication is branch-free; **timing has not been measured**, and verification handles only public inputs. |
 | Image signature check | `core/image_verify.c` | `eos_image_verify_signature()` | ✅ Implemented | Valid signatures accepted; invalid rejected with `EOS_ERR_SIGNATURE`; all return codes checked |
 | Key hash in TLV | `include/eos_image.h` | TLV extension (planned) | 🔲 Not started | Key hash selects correct verification key slot; unknown key hash returns error |
 | Anti-rollback counter | `include/eos_bootctl.h` | `eos_image_check_version()` | 🔶 API defined | Counter stored in OTP/flash; images with lower counter rejected; counter survives factory reset |

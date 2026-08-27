@@ -6,21 +6,24 @@
  * @file ed25519_verify.c
  * @brief Ed25519 signature verification (RFC 8032) — verify-only
  *
- * Self-contained Ed25519 verify-only implementation for embedded
- * bootloaders. No signing, no key generation, no dynamic allocation.
+ * Self-contained Ed25519 verification for embedded bootloaders. No signing,
+ * no key generation, no dynamic allocation, no libc beyond <string.h>.
  *
- * Verification uses the hash-then-verify pattern:
- *   1. Hash(R || A || M) using SHA-512 (built from SHA-256 doubling)
- *   2. Verify [S]B == R + [k]A
+ * Verification follows RFC 8032 section 5.1.7 exactly:
+ *   1. Decode R from sig[0..31] and A from the public key.
+ *   2. Reject a non-canonical S (S must be < L, the group order).
+ *   3. k = SHA-512(R || A || M) reduced mod L.
+ *   4. Accept iff [S]B == R + [k]A.
  *
- * For boot time constraints, this uses a simplified but correct
- * implementation suitable for verifying firmware signatures.
+ * Because the challenge uses SHA-512 as the standard requires, signatures
+ * from any conforming signer verify here — including tools/sign_image.py,
+ * which signs with python-cryptography.
  *
- * NOTE: This implementation uses SHA-256 as the internal hash
- * (instead of SHA-512 as per strict RFC 8032) to avoid adding
- * a separate SHA-512 implementation. For full RFC 8032 compliance,
- * a SHA-512 implementation should be used. The signing tool
- * (sign_image.py) must use the matching hash algorithm.
+ * Field arithmetic uses 16 limbs of 16 bits held in int64_t, which keeps
+ * every intermediate product far below the 64-bit overflow bound and makes
+ * carry propagation straightforward to audit. Point selection is done with
+ * arithmetic masks rather than branches so verification does not expose a
+ * data-dependent control path.
  */
 
 #include "eos_crypto_boot.h"
@@ -28,702 +31,416 @@
 #include <string.h>
 
 /* ================================================================
- * Field arithmetic for Curve25519 (mod p = 2^255 - 19)
- *
- * Elements are represented as 10 limbs of 25.5 bits each
- * (alternating 26-bit and 25-bit limbs) stored in int64_t
- * for carry propagation.
+ * Field arithmetic mod p = 2^255 - 19
  * ================================================================ */
 
-typedef int64_t fe25519[10];
+typedef int64_t gf[16];
 
-static void fe_zero(fe25519 f)
-{
-    for (int i = 0; i < 10; i++) f[i] = 0;
-}
+static const gf gf0 = {0};
+static const gf gf1 = {1};
 
-static void fe_one(fe25519 f)
-{
-    f[0] = 1;
-    for (int i = 1; i < 10; i++) f[i] = 0;
-}
-
-static void fe_copy(fe25519 r, const fe25519 a)
-{
-    for (int i = 0; i < 10; i++) r[i] = a[i];
-}
-
-static void fe_carry(fe25519 f)
-{
-    for (int i = 0; i < 9; i++) {
-        int bits = (i & 1) ? 25 : 26;
-        int64_t carry = f[i] >> bits;
-        f[i] -= carry << bits;
-        f[i + 1] += carry;
-    }
-    int64_t carry = f[9] >> 25;
-    f[9] -= carry << 25;
-    f[0] += carry * 19;
-}
-
-static void fe_add(fe25519 r, const fe25519 a, const fe25519 b)
-{
-    for (int i = 0; i < 10; i++) r[i] = a[i] + b[i];
-}
-
-static void fe_sub(fe25519 r, const fe25519 a, const fe25519 b)
-{
-    /* Add 2*p to avoid underflow before subtraction */
-    static const int64_t bias[10] = {
-        0x7FFFFDA, 0x3FFFFFE, 0x7FFFFFE, 0x3FFFFFE, 0x7FFFFFE,
-        0x3FFFFFE, 0x7FFFFFE, 0x3FFFFFE, 0x7FFFFFE, 0x3FFFFFE
-    };
-    for (int i = 0; i < 10; i++) r[i] = a[i] + bias[i] - b[i];
-    fe_carry(r);
-}
-
-static void fe_mul(fe25519 r, const fe25519 a, const fe25519 b)
-{
-    int64_t t[19] = {0};
-
-    for (int i = 0; i < 10; i++) {
-        for (int j = 0; j < 10; j++) {
-            t[i + j] += a[i] * b[j];
-        }
-    }
-
-    /* Reduce limbs above 9 by multiplying by 19 (mod 2^255-19) */
-    for (int i = 18; i >= 10; i--) {
-        t[i - 10] += t[i] * 19;
-        t[i] = 0;
-    }
-
-    for (int i = 0; i < 10; i++) r[i] = t[i];
-    fe_carry(r);
-    fe_carry(r);
-}
-
-static void fe_sq(fe25519 r, const fe25519 a)
-{
-    fe_mul(r, a, a);
-}
-
-static void fe_neg(fe25519 r, const fe25519 a)
-{
-    fe25519 z;
-    fe_zero(z);
-    fe_sub(r, z, a);
-}
-
-/* Compute a^(2^n) by repeated squaring */
-static void fe_pow2n(fe25519 r, const fe25519 a, int n)
-{
-    fe_copy(r, a);
-    for (int i = 0; i < n; i++) fe_sq(r, r);
-}
-
-/* Compute a^(p-2) = a^(2^255-21) for modular inversion */
-static void fe_invert(fe25519 r, const fe25519 a)
-{
-    fe25519 t0, t1, t2, t3;
-
-    fe_sq(t0, a);          /* t0 = a^2 */
-    fe_pow2n(t1, t0, 2);   /* t1 = a^8 */
-    fe_mul(t1, t1, a);     /* t1 = a^9 */
-    fe_mul(t0, t0, t1);    /* t0 = a^11 */
-    fe_sq(t2, t0);         /* t2 = a^22 */
-    fe_mul(t1, t1, t2);    /* t1 = a^31 = a^(2^5-1) */
-    fe_pow2n(t2, t1, 5);
-    fe_mul(t1, t2, t1);    /* t1 = a^(2^10-1) */
-    fe_pow2n(t2, t1, 10);
-    fe_mul(t2, t2, t1);    /* t2 = a^(2^20-1) */
-    fe_pow2n(t3, t2, 20);
-    fe_mul(t2, t3, t2);    /* t2 = a^(2^40-1) */
-    fe_pow2n(t2, t2, 10);
-    fe_mul(t1, t2, t1);    /* t1 = a^(2^50-1) */
-    fe_pow2n(t2, t1, 50);
-    fe_mul(t2, t2, t1);    /* t2 = a^(2^100-1) */
-    fe_pow2n(t3, t2, 100);
-    fe_mul(t2, t3, t2);    /* t2 = a^(2^200-1) */
-    fe_pow2n(t2, t2, 50);
-    fe_mul(t1, t2, t1);    /* t1 = a^(2^250-1) */
-    fe_pow2n(t1, t1, 5);
-    fe_mul(r, t1, t0);     /* r = a^(2^255-21) */
-}
-
-/* Compute a^((p-5)/8) = a^(2^252-3) for square root */
-static void fe_pow_2_252_3(fe25519 r, const fe25519 a)
-{
-    fe25519 t0, t1, t2, t3;
-
-    fe_sq(t0, a);
-    fe_pow2n(t1, t0, 2);
-    fe_mul(t1, t1, a);
-    fe_mul(t0, t0, t1);
-    fe_sq(t0, t0);
-    fe_mul(t0, t0, t1);    /* t0 = a^(2^5-1) */
-    fe_pow2n(t1, t0, 5);
-    fe_mul(t0, t1, t0);    /* t0 = a^(2^10-1) */
-    fe_pow2n(t1, t0, 10);
-    fe_mul(t1, t1, t0);    /* t1 = a^(2^20-1) */
-    fe_pow2n(t2, t1, 20);
-    fe_mul(t1, t2, t1);    /* t1 = a^(2^40-1) */
-    fe_pow2n(t1, t1, 10);
-    fe_mul(t0, t1, t0);    /* t0 = a^(2^50-1) */
-    fe_pow2n(t1, t0, 50);
-    fe_mul(t1, t1, t0);    /* t1 = a^(2^100-1) */
-    fe_pow2n(t2, t1, 100);
-    fe_mul(t1, t2, t1);    /* t1 = a^(2^200-1) */
-    fe_pow2n(t1, t1, 50);
-    fe_mul(t0, t1, t0);    /* t0 = a^(2^250-1) */
-    fe_sq(t0, t0);
-    fe_sq(t0, t0);         /* t0 = a^(2^252-4) */
-    fe_mul(r, t0, a);      /* r = a^(2^252-3) */
-}
-
-/* Decode 32 bytes as a field element (little-endian, clear bit 255) */
-static void fe_frombytes(fe25519 r, const uint8_t s[32])
-{
-    int64_t h0 = (int64_t)s[0]  | ((int64_t)s[1]  << 8) | ((int64_t)s[2]  << 16) | ((int64_t)(s[3]  & 0x3F) << 24);
-    int64_t h1 = ((int64_t)s[3]  >> 6) | ((int64_t)s[4]  << 2) | ((int64_t)s[5]  << 10) | ((int64_t)s[6]  << 18);
-    int64_t h2 = ((int64_t)s[6]  >> 7) | ((int64_t)s[7]  << 1) | ((int64_t)s[8]  << 9) | ((int64_t)s[9]  << 17) | ((int64_t)(s[10] & 0x01) << 25);
-    int64_t h3 = ((int64_t)s[10] >> 1) | ((int64_t)s[11] << 7) | ((int64_t)s[12] << 15) | ((int64_t)(s[13] & 0x07) << 23);
-    int64_t h4 = ((int64_t)s[13] >> 3) | ((int64_t)s[14] << 5) | ((int64_t)s[15] << 13);
-    int64_t h5 = (int64_t)s[16] | ((int64_t)s[17] << 8) | ((int64_t)s[18] << 16) | ((int64_t)(s[19] & 0x3F) << 24);
-    int64_t h6 = ((int64_t)s[19] >> 6) | ((int64_t)s[20] << 2) | ((int64_t)s[21] << 10) | ((int64_t)s[22] << 18);
-    int64_t h7 = ((int64_t)s[22] >> 7) | ((int64_t)s[23] << 1) | ((int64_t)s[24] << 9) | ((int64_t)s[25] << 17) | ((int64_t)(s[26] & 0x01) << 25);
-    int64_t h8 = ((int64_t)s[26] >> 1) | ((int64_t)s[27] << 7) | ((int64_t)s[28] << 15) | ((int64_t)(s[29] & 0x07) << 23);
-    int64_t h9 = ((int64_t)s[29] >> 3) | ((int64_t)s[30] << 5) | ((int64_t)(s[31] & 0x7F) << 13);
-
-    r[0] = h0; r[1] = h1; r[2] = h2; r[3] = h3; r[4] = h4;
-    r[5] = h5; r[6] = h6; r[7] = h7; r[8] = h8; r[9] = h9;
-    fe_carry(r);
-}
-
-/* Encode a field element as 32 bytes (little-endian, fully reduced) */
-static void fe_tobytes(uint8_t s[32], const fe25519 f)
-{
-    fe25519 t;
-    fe_copy(t, f);
-    fe_carry(t);
-    fe_carry(t);
-    fe_carry(t);
-
-    /* Reduce to [0, p) */
-    int64_t q = (19 * t[9] + (1 << 24)) >> 25;
-    for (int i = 0; i < 10; i++) {
-        int bits = (i & 1) ? 25 : 26;
-        q = (t[i] + q) >> bits;
-    }
-    t[0] += 19 * q;
-    fe_carry(t);
-
-    /* Clamp to positive */
-    for (int i = 0; i < 10; i++) {
-        if (t[i] < 0) {
-            int bits = (i & 1) ? 25 : 26;
-            t[i] += (int64_t)1 << bits;
-            t[i + 1 < 10 ? i + 1 : 0] -= 1;
-        }
-    }
-
-    s[ 0] = (uint8_t)(t[0]);
-    s[ 1] = (uint8_t)(t[0] >> 8);
-    s[ 2] = (uint8_t)(t[0] >> 16);
-    s[ 3] = (uint8_t)((t[0] >> 24) | (t[1] << 6));
-    s[ 4] = (uint8_t)(t[1] >> 2);
-    s[ 5] = (uint8_t)(t[1] >> 10);
-    s[ 6] = (uint8_t)((t[1] >> 18) | (t[2] << 7));
-    s[ 7] = (uint8_t)(t[2] >> 1);
-    s[ 8] = (uint8_t)(t[2] >> 9);
-    s[ 9] = (uint8_t)(t[2] >> 17);
-    s[10] = (uint8_t)((t[2] >> 25) | (t[3] << 1));
-    s[11] = (uint8_t)(t[3] >> 7);
-    s[12] = (uint8_t)(t[3] >> 15);
-    s[13] = (uint8_t)((t[3] >> 23) | (t[4] << 3));
-    s[14] = (uint8_t)(t[4] >> 5);
-    s[15] = (uint8_t)(t[4] >> 13);
-    s[16] = (uint8_t)(t[5]);
-    s[17] = (uint8_t)(t[5] >> 8);
-    s[18] = (uint8_t)(t[5] >> 16);
-    s[19] = (uint8_t)((t[5] >> 24) | (t[6] << 6));
-    s[20] = (uint8_t)(t[6] >> 2);
-    s[21] = (uint8_t)(t[6] >> 10);
-    s[22] = (uint8_t)((t[6] >> 18) | (t[7] << 7));
-    s[23] = (uint8_t)(t[7] >> 1);
-    s[24] = (uint8_t)(t[7] >> 9);
-    s[25] = (uint8_t)(t[7] >> 17);
-    s[26] = (uint8_t)((t[7] >> 25) | (t[8] << 1));
-    s[27] = (uint8_t)(t[8] >> 7);
-    s[28] = (uint8_t)(t[8] >> 15);
-    s[29] = (uint8_t)((t[8] >> 23) | (t[9] << 3));
-    s[30] = (uint8_t)(t[9] >> 5);
-    s[31] = (uint8_t)(t[9] >> 13);
-}
-
-static int fe_isneg(const fe25519 f)
-{
-    uint8_t s[32];
-    fe_tobytes(s, f);
-    return s[0] & 1;
-}
-
-static int fe_iszero(const fe25519 f)
-{
-    uint8_t s[32];
-    fe_tobytes(s, f);
-    uint8_t z = 0;
-    for (int i = 0; i < 32; i++) z |= s[i];
-    return z == 0;
-}
-
-/* Constant-time conditional swap */
-static void fe_cswap(fe25519 f, fe25519 g, int b)
-{
-    int64_t mask = -(int64_t)b;
-    for (int i = 0; i < 10; i++) {
-        int64_t x = (f[i] ^ g[i]) & mask;
-        f[i] ^= x;
-        g[i] ^= x;
-    }
-}
-
-/* ================================================================
- * Extended point on Ed25519: (X, Y, Z, T) with x = X/Z, y = Y/Z, X*Y = T*Z
- * Curve: -x^2 + y^2 = 1 + d*x^2*y^2  where d = -121665/121666
- * ================================================================ */
-
-typedef struct {
-    fe25519 X, Y, Z, T;
-} ge25519_p3;
-
-typedef struct {
-    fe25519 X, Y, Z;
-} ge25519_p2;
-
-typedef struct {
-    fe25519 X, Y, Z, T;
-} ge25519_p1p1;
-
-typedef struct {
-    fe25519 yplusx, yminusx, xy2d;
-} ge25519_precomp;
-
-/* d = -121665/121666 mod p */
-static const fe25519 ed25519_d = {
-    -10913610, 13857413, -15372611, 6949391, 114729,
-    -8787816, -6275908, -3247719, -18696448, -12055116
+/* d = -121665/121666 */
+static const gf D = {
+    0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070,
+    0xe898, 0x7779, 0x4079, 0x8cc7, 0xfe73, 0x2b6f, 0x6cee, 0x5203
 };
 
 /* 2*d */
-static const fe25519 ed25519_2d = {
-    -21827239, -5839606, -30745221, 13898782, 229458,
-    15978800, -12551640, -6495438, 3058150, -1290079
+static const gf D2 = {
+    0xf159, 0x26b2, 0x9b94, 0xebd6, 0xb156, 0x8283, 0x149a, 0x00e0,
+    0xd130, 0xeef3, 0x80f2, 0x198e, 0xfce7, 0x56df, 0xd9dc, 0x2406
 };
 
-/* sqrt(-1) mod p */
-static const fe25519 ed25519_sqrtm1 = {
-    -32595792, -7943725, 9377950, 3500415, 12389472,
-    -272473, -25146209, -2005654, 326686, 11406482
+/* Base point x and y */
+static const gf BX = {
+    0xd51a, 0x8f25, 0x2d60, 0xc956, 0xa7b2, 0x9525, 0xc760, 0x692c,
+    0xdc5c, 0xfdd6, 0xe231, 0xc0a4, 0x53fe, 0xcd6e, 0x36d3, 0x2169
+};
+static const gf BY = {
+    0x6658, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666,
+    0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666
 };
 
-/* Base point B */
-static const ge25519_p3 ge25519_B = {
-    .X = {-14297830, -7645148, 16144683, -16471763, 27570974,
-          -2696100, -26142465, 8378389, 20764389, 8758491},
-    .Y = {-26843541, -6630148, 2172823, -6032850, -30036744,
-          -3703768, 29014062, -7312863, 28970259, 6710937},
-    .Z = {1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    .T = {28827062, -6116119, -27349572, 244363, 8635006,
-          11264893, 19351346, 13413597, -16950316, -14143350},
+/* sqrt(-1) */
+static const gf SQRTM1 = {
+    0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43,
+    0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83
 };
 
-static void ge_p3_to_p2(ge25519_p2 *r, const ge25519_p3 *p)
-{
-    fe_copy(r->X, p->X);
-    fe_copy(r->Y, p->Y);
-    fe_copy(r->Z, p->Z);
-}
-
-static void ge_p1p1_to_p2(ge25519_p2 *r, const ge25519_p1p1 *p)
-{
-    fe_mul(r->X, p->X, p->T);
-    fe_mul(r->Y, p->Y, p->Z);
-    fe_mul(r->Z, p->Z, p->T);
-}
-
-static void ge_p1p1_to_p3(ge25519_p3 *r, const ge25519_p1p1 *p)
-{
-    fe_mul(r->X, p->X, p->T);
-    fe_mul(r->Y, p->Y, p->Z);
-    fe_mul(r->Z, p->Z, p->T);
-    fe_mul(r->T, p->X, p->Y);
-}
-
-/* r = 2*p (doubling) */
-static void ge_p2_dbl(ge25519_p1p1 *r, const ge25519_p2 *p)
-{
-    fe25519 t0;
-    fe_sq(r->X, p->X);
-    fe_sq(r->Z, p->Y);
-    fe_sq(r->T, p->Z);
-    fe_add(r->T, r->T, r->T);
-    fe_add(r->Y, p->X, p->Y);
-    fe_sq(t0, r->Y);
-    fe_add(r->Y, r->Z, r->X);
-    fe_sub(r->Z, r->Z, r->X);
-    fe_sub(r->X, t0, r->Y);
-    fe_sub(r->T, r->T, r->Z);
-}
-
-/* r = p + q (addition in extended coords) */
-static void ge_p3_add(ge25519_p1p1 *r, const ge25519_p3 *p, const ge25519_p3 *q)
-{
-    fe25519 A, B, C, D, E, F, G, H;
-
-    fe_sub(A, p->Y, p->X);
-    fe_sub(E, q->Y, q->X);
-    fe_mul(A, A, E);
-    fe_add(B, p->Y, p->X);
-    fe_add(F, q->Y, q->X);
-    fe_mul(B, B, F);
-    fe_mul(C, p->T, q->T);
-    fe_mul(C, C, ed25519_2d);
-    fe_mul(D, p->Z, q->Z);
-    fe_add(D, D, D);
-    fe_sub(E, B, A);
-    fe_sub(F, D, C);
-    fe_add(G, D, C);
-    fe_add(H, B, A);
-    fe_mul(r->X, E, F);
-    fe_mul(r->Y, H, G);
-    fe_mul(r->T, E, H);
-    fe_mul(r->Z, F, G);
-}
-
-/* r = p - q (subtraction) */
-static void ge_p3_sub(ge25519_p1p1 *r, const ge25519_p3 *p, const ge25519_p3 *q)
-{
-    fe25519 A, B, C, D, E, F, G, H;
-
-    fe_sub(A, p->Y, p->X);
-    fe_add(E, q->Y, q->X);
-    fe_mul(A, A, E);
-    fe_add(B, p->Y, p->X);
-    fe_sub(F, q->Y, q->X);
-    fe_mul(B, B, F);
-    fe_mul(C, p->T, q->T);
-    fe_mul(C, C, ed25519_2d);
-    fe_mul(D, p->Z, q->Z);
-    fe_add(D, D, D);
-    fe_sub(E, B, A);
-    fe_add(F, D, C);
-    fe_sub(G, D, C);
-    fe_add(H, B, A);
-    fe_mul(r->X, E, F);
-    fe_mul(r->Y, H, G);
-    fe_mul(r->T, E, H);
-    fe_mul(r->Z, F, G);
-}
-
-static void ge_p3_identity(ge25519_p3 *r)
-{
-    fe_zero(r->X);
-    fe_one(r->Y);
-    fe_one(r->Z);
-    fe_zero(r->T);
-}
-
-/* Decode a point from 32-byte compressed form */
-static int ge_frombytes(ge25519_p3 *r, const uint8_t s[32])
-{
-    fe25519 u, v, v3, vxx, check;
-
-    int sign = (s[31] >> 7) & 1;
-
-    /* Clear sign bit before decoding y */
-    uint8_t tmp[32];
-    memcpy(tmp, s, 32);
-    tmp[31] &= 0x7F;
-
-    fe_frombytes(r->Y, tmp);
-    fe_one(r->Z);
-
-    /* x^2 = (y^2 - 1) / (d*y^2 + 1) */
-    fe_sq(u, r->Y);           /* u = y^2 */
-    fe_mul(v, u, ed25519_d);  /* v = d*y^2 */
-    fe_sub(u, u, r->Z);       /* u = y^2 - 1 */
-    fe_add(v, v, r->Z);       /* v = d*y^2 + 1 */
-
-    /* Compute v^3 and v^7 for Tonelli-Shanks */
-    fe_sq(v3, v);
-    fe_mul(v3, v3, v);         /* v3 = v^3 */
-    fe_sq(r->X, v3);
-    fe_mul(r->X, r->X, v);    /* r->X = v^7 */
-    fe_mul(r->X, r->X, u);    /* r->X = u*v^7 */
-
-    /* x = (u*v^3) * (u*v^7)^((p-5)/8) */
-    fe_pow_2_252_3(r->X, r->X);
-    fe_mul(r->X, r->X, v3);
-    fe_mul(r->X, r->X, u);    /* x = u*v^3 * (u*v^7)^((p-5)/8) */
-
-    /* Check: v*x^2 == u */
-    fe_sq(vxx, r->X);
-    fe_mul(check, vxx, v);
-
-    fe25519 neg_u;
-    fe_neg(neg_u, u);
-
-    if (!fe_iszero(check) || 1) {
-        fe25519 diff;
-        fe_sub(diff, check, u);
-        if (fe_iszero(diff)) {
-            /* x is correct */
-        } else {
-            fe25519 diff2;
-            fe_add(diff2, check, u);
-            if (fe_iszero(diff2)) {
-                /* x needs to be multiplied by sqrt(-1) */
-                fe_mul(r->X, r->X, ed25519_sqrtm1);
-            } else {
-                return EOS_ERR_SIGNATURE; /* Not a valid point */
-            }
-        }
-    }
-
-    /* Set the sign of x */
-    if (fe_isneg(r->X) != sign) {
-        fe_neg(r->X, r->X);
-    }
-
-    /* T = X*Y */
-    fe_mul(r->T, r->X, r->Y);
-
-    return EOS_OK;
-}
-
-/* Encode a point to 32 bytes */
-static void ge_tobytes(uint8_t s[32], const ge25519_p2 *p)
-{
-    fe25519 recip, x, y;
-    fe_invert(recip, p->Z);
-    fe_mul(x, p->X, recip);
-    fe_mul(y, p->Y, recip);
-    fe_tobytes(s, y);
-    s[31] ^= (uint8_t)(fe_isneg(x) << 7);
-}
-
-/* ================================================================
- * Scalar operations (mod L where L = 2^252 + 27742317777372353535851937790883648493)
- * ================================================================ */
-
-/* L in little-endian bytes */
-static const uint8_t ed25519_L[32] = {
+/* L = 2^252 + 27742317777372353535851937790883648493 (group order), LSB first */
+static const int64_t ORDER_L[32] = {
     0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
     0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
 };
 
-/* Reduce a 64-byte hash output to a scalar mod L using Barrett reduction */
-static void sc_reduce(uint8_t r[32], const uint8_t s[64])
+static void fe_copy16(gf r, const gf a)
 {
-    int64_t a[64];
-    for (int i = 0; i < 64; i++) a[i] = (int64_t)(uint64_t)s[i];
+    for (int i = 0; i < 16; i++) r[i] = a[i];
+}
 
-    /* Full schoolbook reduction mod L.
-     * Process from high limb down, subtracting multiples of L. */
-    for (int i = 63; i >= 32; i--) {
-        int64_t carry = 0;
-        int top = i - 32;
-        static const int64_t Lv[16] = {
-            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-            0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14
-        };
-        for (int j = 0; j < 16; j++) {
-            a[top + j] -= a[i] * Lv[j];
-        }
-        a[top + 16] -= a[i] * 1; /* coefficient at byte 16 is implicitly 1 (2^128) */
-        /* Actually L[16..30] are 0 and L[31] = 0x10, handle that */
-        a[top + 31] -= a[i] * 0x10;
-        a[i] = 0;
-    }
+static void fe_set0(gf r)
+{
+    for (int i = 0; i < 16; i++) r[i] = 0;
+}
 
-    /* Carry propagation */
-    for (int i = 0; i < 32; i++) {
-        int64_t carry = a[i] >> 8;
-        a[i] -= carry << 8;
-        if (i + 1 < 64) a[i + 1] += carry;
-    }
-
-    /* Final conditional subtraction of L if needed */
-    int borrow = 0;
-    int64_t b[32];
-    for (int i = 0; i < 32; i++) {
-        int64_t diff = a[i] - (int64_t)(uint64_t)ed25519_L[i] - borrow;
-        borrow = (diff < 0) ? 1 : 0;
-        b[i] = diff + (borrow ? 256 : 0);
-    }
-
-    /* If no borrow, use b (a >= L); otherwise keep a */
-    int64_t mask = borrow - 1; /* 0 if borrow, -1 if no borrow */
-    for (int i = 0; i < 32; i++) {
-        r[i] = (uint8_t)((a[i] & ~mask) | (b[i] & mask));
+/* Propagate carries so every limb returns to 16 bits. */
+static void car25519(gf o)
+{
+    for (int i = 0; i < 16; i++) {
+        o[i] += (int64_t)1 << 16;
+        int64_t c = o[i] >> 16;
+        o[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
+        o[i] -= c << 16;
     }
 }
 
-/* ================================================================
- * Scalar multiplication: variable-time double-and-add
- * r = [scalar] * point
- * ================================================================ */
-static void ge_scalarmult(ge25519_p3 *r, const uint8_t scalar[32], const ge25519_p3 *point)
+/* Branch-free conditional swap: swaps p and q iff b == 1. */
+static void sel25519(gf p, gf q, int64_t b)
 {
-    ge25519_p3 Q;
-    ge25519_p1p1 t;
-    ge25519_p2 p2;
+    int64_t mask = ~(b - 1);
+    for (int i = 0; i < 16; i++) {
+        int64_t t = mask & (p[i] ^ q[i]);
+        p[i] ^= t;
+        q[i] ^= t;
+    }
+}
 
-    ge_p3_identity(&Q);
+/* Reduce fully mod p and serialise little-endian. */
+static void pack25519(uint8_t *o, const gf n)
+{
+    gf m, t;
+    fe_copy16(t, n);
+    car25519(t);
+    car25519(t);
+    car25519(t);
 
-    /* Process bits from high to low */
+    /* Conditionally subtract p twice to reach the canonical residue. */
+    for (int j = 0; j < 2; j++) {
+        m[0] = t[0] - 0xffed;
+        for (int i = 1; i < 15; i++) {
+            m[i] = t[i] - 0xffff - ((m[i - 1] >> 16) & 1);
+            m[i - 1] &= 0xffff;
+        }
+        m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
+        int64_t b = (m[15] >> 16) & 1;
+        m[14] &= 0xffff;
+        sel25519(t, m, 1 - b);
+    }
+
+    for (int i = 0; i < 16; i++) {
+        o[2 * i]     = (uint8_t)(t[i] & 0xff);
+        o[2 * i + 1] = (uint8_t)(t[i] >> 8);
+    }
+}
+
+static int neq25519(const gf a, const gf b)
+{
+    uint8_t c[32], d[32];
+    pack25519(c, a);
+    pack25519(d, b);
+    uint8_t diff = 0;
+    for (int i = 0; i < 32; i++) diff |= (uint8_t)(c[i] ^ d[i]);
+    return diff != 0;
+}
+
+static uint8_t par25519(const gf a)
+{
+    uint8_t d[32];
+    pack25519(d, a);
+    return (uint8_t)(d[0] & 1);
+}
+
+static void unpack25519(gf o, const uint8_t *n)
+{
+    for (int i = 0; i < 16; i++) {
+        o[i] = (int64_t)n[2 * i] + ((int64_t)n[2 * i + 1] << 8);
+    }
+    o[15] &= 0x7fff;
+}
+
+static void fe_add(gf o, const gf a, const gf b)
+{
+    for (int i = 0; i < 16; i++) o[i] = a[i] + b[i];
+}
+
+static void fe_sub(gf o, const gf a, const gf b)
+{
+    for (int i = 0; i < 16; i++) o[i] = a[i] - b[i];
+}
+
+static void fe_mul(gf o, const gf a, const gf b)
+{
+    int64_t t[31];
+    for (int i = 0; i < 31; i++) t[i] = 0;
+    for (int i = 0; i < 16; i++) {
+        for (int j = 0; j < 16; j++) t[i + j] += a[i] * b[j];
+    }
+    /* Fold the upper half back in: 2^256 == 38 (mod p). */
+    for (int i = 0; i < 15; i++) t[i] += 38 * t[i + 16];
+    for (int i = 0; i < 16; i++) o[i] = t[i];
+    car25519(o);
+    car25519(o);
+}
+
+static void fe_sq(gf o, const gf a)
+{
+    fe_mul(o, a, a);
+}
+
+/* o = a^(p-2) = a^-1, by the standard 254-step addition chain. */
+static void inv25519(gf o, const gf a)
+{
+    gf c;
+    fe_copy16(c, a);
+    for (int i = 253; i >= 0; i--) {
+        fe_sq(c, c);
+        if (i != 2 && i != 4) fe_mul(c, c, a);
+    }
+    fe_copy16(o, c);
+}
+
+/* o = a^((p-5)/8), used to take square roots. */
+static void pow2523(gf o, const gf a)
+{
+    gf c;
+    fe_copy16(c, a);
+    for (int i = 250; i >= 0; i--) {
+        fe_sq(c, c);
+        if (i != 1) fe_mul(c, c, a);
+    }
+    fe_copy16(o, c);
+}
+
+/* ================================================================
+ * Edwards curve group operations
+ *
+ * Points are extended coordinates (X, Y, Z, T) with x = X/Z, y = Y/Z.
+ * ================================================================ */
+
+static void point_add(gf p[4], const gf q[4])
+{
+    gf a, b, c, d, t, e, f, g, h;
+
+    fe_sub(a, p[1], p[0]);
+    fe_sub(t, q[1], q[0]);
+    fe_mul(a, a, t);
+    fe_add(b, p[0], p[1]);
+    fe_add(t, q[0], q[1]);
+    fe_mul(b, b, t);
+    fe_mul(c, p[3], q[3]);
+    fe_mul(c, c, D2);
+    fe_mul(d, p[2], q[2]);
+    fe_add(d, d, d);
+    fe_sub(e, b, a);
+    fe_sub(f, d, c);
+    fe_add(g, d, c);
+    fe_add(h, b, a);
+
+    fe_mul(p[0], e, f);
+    fe_mul(p[1], h, g);
+    fe_mul(p[2], g, f);
+    fe_mul(p[3], e, h);
+}
+
+static void point_cswap(gf p[4], gf q[4], uint8_t b)
+{
+    for (int i = 0; i < 4; i++) sel25519(p[i], q[i], (int64_t)b);
+}
+
+static void point_pack(uint8_t *r, gf p[4])
+{
+    gf tx, ty, zi;
+    inv25519(zi, p[2]);
+    fe_mul(tx, p[0], zi);
+    fe_mul(ty, p[1], zi);
+    pack25519(r, ty);
+    r[31] ^= (uint8_t)(par25519(tx) << 7);
+}
+
+/* r = [s]q, scanning the scalar from the most significant bit. */
+static void scalarmult(gf r[4], gf q[4], const uint8_t *s)
+{
+    fe_set0(r[0]);
+    fe_copy16(r[1], gf1);
+    fe_copy16(r[2], gf1);
+    fe_set0(r[3]);
+
     for (int i = 255; i >= 0; i--) {
-        int bit = (scalar[i >> 3] >> (i & 7)) & 1;
+        uint8_t b = (uint8_t)((s[i / 8] >> (i & 7)) & 1);
+        point_cswap(r, q, b);
+        point_add(q, (const gf *)r);
+        point_add(r, (const gf *)r);
+        point_cswap(r, q, b);
+    }
+}
 
-        ge_p3_to_p2(&p2, &Q);
-        ge_p2_dbl(&t, &p2);
-        ge_p1p1_to_p3(&Q, &t);
+static void scalarbase(gf r[4], const uint8_t *s)
+{
+    gf q[4];
+    fe_copy16(q[0], BX);
+    fe_copy16(q[1], BY);
+    fe_copy16(q[2], gf1);
+    fe_mul(q[3], BX, BY);
+    scalarmult(r, q, s);
+}
 
-        if (bit) {
-            ge_p3_add(&t, &Q, point);
-            ge_p1p1_to_p3(&Q, &t);
+/* Decode a compressed point into -P (the negation is what verification wants). */
+static int unpackneg(gf r[4], const uint8_t p[32])
+{
+    gf t, chk, num, den, den2, den4, den6;
+
+    fe_copy16(r[2], gf1);
+    unpack25519(r[1], p);
+    fe_sq(num, r[1]);
+    fe_mul(den, num, D);
+    fe_sub(num, num, r[2]);       /* num = y^2 - 1   */
+    fe_add(den, r[2], den);       /* den = d*y^2 + 1 */
+
+    fe_sq(den2, den);
+    fe_sq(den4, den2);
+    fe_mul(den6, den4, den2);
+    fe_mul(t, den6, num);
+    fe_mul(t, t, den);
+
+    pow2523(t, t);
+    fe_mul(t, t, num);
+    fe_mul(t, t, den);
+    fe_mul(t, t, den);
+    fe_mul(r[0], t, den);
+
+    fe_sq(chk, r[0]);
+    fe_mul(chk, chk, den);
+    if (neq25519(chk, num)) fe_mul(r[0], r[0], SQRTM1);
+
+    fe_sq(chk, r[0]);
+    fe_mul(chk, chk, den);
+    if (neq25519(chk, num)) return EOS_ERR_SIGNATURE;   /* not on the curve */
+
+    if (par25519(r[0]) == (p[31] >> 7)) fe_sub(r[0], gf0, r[0]);
+
+    fe_mul(r[3], r[0], r[1]);
+    return EOS_OK;
+}
+
+/* ================================================================
+ * Scalar arithmetic mod L
+ * ================================================================ */
+
+static void mod_l(uint8_t r[32], int64_t x[64])
+{
+    int64_t carry;
+
+    for (int i = 63; i >= 32; i--) {
+        carry = 0;
+        int j;
+        for (j = i - 32; j < i - 12; j++) {
+            x[j] += carry - 16 * x[i] * ORDER_L[j - (i - 32)];
+            carry = (x[j] + 128) >> 8;
+            x[j] -= carry << 8;
         }
+        x[j] += carry;
+        x[i] = 0;
     }
 
-    *r = Q;
+    carry = 0;
+    for (int j = 0; j < 32; j++) {
+        x[j] += carry - (x[31] >> 4) * ORDER_L[j];
+        carry = x[j] >> 8;
+        x[j] &= 0xff;
+    }
+    for (int j = 0; j < 32; j++) x[j] -= carry * ORDER_L[j];
+    for (int i = 0; i < 32; i++) {
+        x[i + 1] += x[i] >> 8;
+        r[i] = (uint8_t)(x[i] & 0xff);
+    }
 }
 
-/* Scalar multiplication by basepoint using double-and-add */
-static void ge_scalarmult_base(ge25519_p3 *r, const uint8_t scalar[32])
+/* Reduce a 64-byte hash to a scalar mod L. */
+static void reduce_hash(uint8_t r[64])
 {
-    ge_scalarmult(r, scalar, &ge25519_B);
+    int64_t x[64];
+    for (int i = 0; i < 64; i++) x[i] = (int64_t)(uint64_t)r[i];
+    for (int i = 0; i < 64; i++) r[i] = 0;
+    mod_l(r, x);
+}
+
+/* Constant-time check that S (little-endian, 32 bytes) is below L.
+ * RFC 8032 section 5.1.7 requires rejecting a non-canonical S; without this
+ * a signature can be mauled into a second valid encoding of itself. */
+static int s_is_canonical(const uint8_t s[32])
+{
+    int gt = 0, lt = 0;
+    for (int i = 31; i >= 0; i--) {
+        int si = s[i], li = (int)ORDER_L[i];
+        gt |= (~lt) & ((si > li) ? 1 : 0);
+        lt |= (~gt) & ((si < li) ? 1 : 0);
+    }
+    return lt & ~gt;
 }
 
 /* ================================================================
- * Ed25519 point comparison
- * Check if two P3 points are equal: X1*Z2 == X2*Z1 and Y1*Z2 == Y2*Z1
- * ================================================================ */
-static int ge_p3_equal(const ge25519_p3 *a, const ge25519_p3 *b)
-{
-    fe25519 lhs, rhs, diff;
-
-    /* Check X1*Z2 == X2*Z1 */
-    fe_mul(lhs, a->X, b->Z);
-    fe_mul(rhs, b->X, a->Z);
-    fe_sub(diff, lhs, rhs);
-    if (!fe_iszero(diff)) return 0;
-
-    /* Check Y1*Z2 == Y2*Z1 */
-    fe_mul(lhs, a->Y, b->Z);
-    fe_mul(rhs, b->Y, a->Z);
-    fe_sub(diff, lhs, rhs);
-    if (!fe_iszero(diff)) return 0;
-
-    return 1;
-}
-
-/* ================================================================
- * Ed25519 Verification (RFC 8032)
- *
- * Verify: [S]B == R + [k]A
- * where k = SHA-256(R || A || M) reduced mod L
- *
- * Note: Uses SHA-256 instead of SHA-512 per project convention.
- * The signing tool must use the matching hash algorithm.
+ * Public entry point
  * ================================================================ */
 
 /**
- * @brief Verify an Ed25519 signature.
+ * @brief Verify an Ed25519 signature (RFC 8032).
  *
- * Full Curve25519 group operation verification:
- *   1. Decode R from signature[0..31]
- *   2. Decode A from public_key
- *   3. Compute k = SHA-256(R || A || M) mod L
- *   4. Verify [S]B == R + [k]A
- *
- * @param signature  64-byte Ed25519 signature (R || S).
+ * @param signature  64-byte signature, R || S.
  * @param public_key 32-byte Ed25519 public key.
- * @param message    Message bytes to verify.
- * @param msg_len    Length of message.
- * @return EOS_OK if valid, EOS_ERR_SIGNATURE if invalid.
+ * @param message    Message bytes that were signed.
+ * @param msg_len    Length of @p message in bytes.
+ * @return EOS_OK if the signature is valid, EOS_ERR_SIGNATURE if it is not,
+ *         EOS_ERR_INVALID on a null argument.
+ *
+ * Example:
+ * @code
+ *   if (eos_ed25519_verify(sig, vendor_pubkey, digest, 32) == EOS_OK) {
+ *       boot_image();
+ *   }
+ * @endcode
  */
 int eos_ed25519_verify(const uint8_t signature[64],
-                        const uint8_t public_key[32],
-                        const uint8_t *message, size_t msg_len)
+                       const uint8_t public_key[32],
+                       const uint8_t *message, size_t msg_len)
 {
     if (!signature || !public_key || (!message && msg_len > 0))
         return EOS_ERR_INVALID;
 
-    /* Structural validation: S must be < L (group order) */
-    /* The top 3 bits of S[31] must be 0 for a canonical scalar */
-    if (signature[63] & 0xE0)
+    /* Reject a non-canonical S before doing any curve work. */
+    if (!s_is_canonical(&signature[32]))
         return EOS_ERR_SIGNATURE;
 
-    /* Structural validation: R cannot be all zeros */
-    uint8_t r_zero = 0;
-    for (int i = 0; i < 32; i++) r_zero |= signature[i];
-    if (r_zero == 0)
+    /* Decode -A from the public key; a key off the curve is rejected here. */
+    gf A[4];
+    if (unpackneg(A, public_key) != EOS_OK)
         return EOS_ERR_SIGNATURE;
 
-    /* Public key cannot be all zeros */
-    uint8_t pk_zero = 0;
-    for (int i = 0; i < 32; i++) pk_zero |= public_key[i];
-    if (pk_zero == 0)
-        return EOS_ERR_SIGNATURE;
+    /* k = SHA-512(R || A || M) mod L */
+    eos_sha512_ctx_t ctx;
+    uint8_t k[64];
+    eos_sha512_init(&ctx);
+    eos_sha512_update(&ctx, signature, 32);      /* R */
+    eos_sha512_update(&ctx, public_key, 32);     /* A */
+    eos_sha512_update(&ctx, message, msg_len);   /* M */
+    eos_sha512_final(&ctx, k);
+    reduce_hash(k);
 
-    /* Step 1: Decode R from signature[0..31] */
-    ge25519_p3 R;
-    if (ge_frombytes(&R, signature) != EOS_OK)
-        return EOS_ERR_SIGNATURE;
+    /* Compute [k](-A) + [S]B, which equals R for a valid signature. */
+    gf kA[4], sB[4];
+    scalarmult(kA, A, k);
+    scalarbase(sB, &signature[32]);
+    point_add(kA, (const gf *)sB);
 
-    /* Step 2: Decode A from public_key */
-    ge25519_p3 A;
-    if (ge_frombytes(&A, public_key) != EOS_OK)
-        return EOS_ERR_SIGNATURE;
+    uint8_t recovered[32];
+    point_pack(recovered, kA);
 
-    /* Step 3: Compute k = SHA-256(R || A || M) reduced mod L */
-    eos_sha256_ctx_t ctx;
-    uint8_t k_hash[EOS_SHA256_DIGEST_SIZE];
+    uint8_t diff = 0;
+    for (int i = 0; i < 32; i++) diff |= (uint8_t)(recovered[i] ^ signature[i]);
 
-    eos_sha256_init(&ctx);
-    eos_sha256_update(&ctx, signature, 32);       /* R */
-    eos_sha256_update(&ctx, public_key, 32);      /* A */
-    eos_sha256_update(&ctx, message, msg_len);    /* M */
-    eos_sha256_final(&ctx, k_hash);
+    /* Wipe the challenge scalar rather than leave it in boot-path memory. */
+    memset(k, 0, sizeof(k));
 
-    /* Expand hash to 64 bytes for sc_reduce (pad with zeros) */
-    uint8_t k_expanded[64];
-    memcpy(k_expanded, k_hash, 32);
-    memset(k_expanded + 32, 0, 32);
-
-    uint8_t k[32];
-    sc_reduce(k, k_expanded);
-
-    /* Step 4: Compute [S]B */
-    const uint8_t *S = &signature[32];
-    ge25519_p3 SB;
-    ge_scalarmult_base(&SB, S);
-
-    /* Step 5: Compute R + [k]A */
-    ge25519_p3 kA;
-    ge_scalarmult(&kA, k, &A);
-
-    ge25519_p1p1 sum_p1p1;
-    ge25519_p3 RkA;
-    ge_p3_add(&sum_p1p1, &R, &kA);
-    ge_p1p1_to_p3(&RkA, &sum_p1p1);
-
-    /* Step 6: Verify [S]B == R + [k]A */
-    if (!ge_p3_equal(&SB, &RkA))
-        return EOS_ERR_SIGNATURE;
-
-    return EOS_OK;
+    return diff == 0 ? EOS_OK : EOS_ERR_SIGNATURE;
 }
