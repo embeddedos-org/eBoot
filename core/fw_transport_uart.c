@@ -53,6 +53,9 @@ cleanup:
  * Protocol:
  *   Sender → [4 bytes: total_len LE] [total_len bytes: firmware data]
  *   Receiver → [1 byte: 0x06 ACK or 0x15 NAK]
+ *
+ * total_len must be non-zero and no larger than the destination slot;
+ * anything else is NAK'd with EOS_ERR_FULL before any data is read.
  * ================================================================ */
 
 #define UART_RAW_ACK  0x06
@@ -82,6 +85,15 @@ static int uart_raw_receive(eos_fw_transport_t *tp, eos_fw_update_ctx_t *ctx)
                           ((uint32_t)len_buf[1] << 8) |
                           ((uint32_t)len_buf[2] << 16) |
                           ((uint32_t)len_buf[3] << 24);
+
+    /* The length prefix comes from an untrusted peer. Anything larger than
+     * the destination slot cannot produce a valid image, so reject it here
+     * rather than spinning through millions of chunk reads first. */
+    if (total_len == 0 || total_len > ctx->slot_size) {
+        uint8_t nak = UART_RAW_NAK;
+        eos_hal_uart_send(&nak, 1);
+        return EOS_ERR_FULL;
+    }
 
     /* Receive firmware in chunks */
     uint8_t chunk[UART_RAW_CHUNK];
@@ -258,6 +270,18 @@ const eos_fw_transport_ops_t *eos_fw_transport_uart_xmodem(void)
 
 /* ================================================================
  * YMODEM Transport — 1024-byte blocks, filename/size header
+ *
+ * Protocol:
+ *   Receiver sends 'C' to request CRC mode
+ *   Sender → block 0: [SOH][0][~0]["name\0<decimal size>" …][CRC-H][CRC-L]
+ *   Sender → data:    [SOH|STX][blk#][~blk#][128|1024 bytes][CRC-H][CRC-L]
+ *   Sender → EOT twice when done
+ *
+ * Block numbers are validated against their complement and against the
+ * expected sequence. An exact retransmission of the previous block is
+ * acknowledged but not written again; any other mismatch is NAK'd. The
+ * block-0 filename and size fields are parsed with explicit bounds, as
+ * the block is attacker-supplied and need not contain a NUL.
  * ================================================================ */
 
 #define YMODEM_STX  0x02
@@ -319,24 +343,67 @@ static int ymodem_receive(eos_fw_transport_t *tp, eos_fw_update_ctx_t *ctx)
             continue;
         }
 
-        if (first_block && expected_blk == 0) {
-            /* Block 0 = filename + size string */
-            /* Parse file size from after null-terminated filename */
-            const char *name = (const char *)block;
-            size_t name_len = strlen(name);
-            if (name_len > 0 && name_len < block_size - 1) {
-                const char *size_str = name + name_len + 1;
+        /* Validate the block number against its complement, as the XMODEM
+         * path does. Without this the sequence number is never checked at
+         * all, so a retransmitted block is written to flash twice. */
+        uint8_t blk_num = blk_hdr[0];
+        if (blk_hdr[1] != (uint8_t)~blk_num) {
+            c = XMODEM_NAK;
+            eos_hal_uart_send(&c, 1);
+            continue;
+        }
+
+        if (first_block) {
+            /* Block 0 = NUL-terminated filename followed by a decimal size.
+             * The block holds untrusted bytes and is not guaranteed to
+             * contain a NUL, so both scans are explicitly bounded; the
+             * previous strlen() ran off the end of the buffer. */
+            if (blk_num != 0) {
+                c = XMODEM_NAK;
+                eos_hal_uart_send(&c, 1);
+                continue;
+            }
+
+            size_t name_len = 0;
+            while (name_len < block_size && block[name_len] != '\0') {
+                name_len++;
+            }
+
+            if (name_len > 0 && name_len + 1 < block_size) {
                 file_size = 0;
-                while (*size_str >= '0' && *size_str <= '9') {
-                    file_size = file_size * 10 + (*size_str - '0');
-                    size_str++;
+                for (size_t i = name_len + 1; i < block_size; i++) {
+                    uint8_t digit = block[i];
+                    if (digit < '0' || digit > '9') break;
+                    /* Guard the accumulation: a long digit run would
+                     * otherwise wrap and yield a nonsense size. */
+                    if (file_size > (UINT32_MAX - (uint32_t)(digit - '0')) / 10u) {
+                        file_size = 0;
+                        break;
+                    }
+                    file_size = file_size * 10u + (uint32_t)(digit - '0');
                 }
             }
+
             first_block = false;
             expected_blk = 1;
             c = XMODEM_ACK;
             eos_hal_uart_send(&c, 1);
             c = XMODEM_CRC;
+            eos_hal_uart_send(&c, 1);
+            continue;
+        }
+
+        /* A sender that missed our ACK retransmits the previous block.
+         * Acknowledge it again, but do not write it a second time. */
+        if (blk_num == (uint8_t)(expected_blk - 1u)) {
+            c = XMODEM_ACK;
+            eos_hal_uart_send(&c, 1);
+            eos_hal_watchdog_feed();
+            continue;
+        }
+
+        if (blk_num != expected_blk) {
+            c = XMODEM_NAK;
             eos_hal_uart_send(&c, 1);
             continue;
         }

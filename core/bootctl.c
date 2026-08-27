@@ -10,6 +10,7 @@
 #include "eos_bootctl.h"
 #include "eos_hal.h"
 #include "eos_image.h"
+#include "eos_rollback.h"
 #include <string.h>
 
 /* Compute CRC32 over a byte buffer (software implementation) */
@@ -143,7 +144,18 @@ int eos_bootctl_confirm(eos_bootctl_t *bctl)
     bctl->flags |= EOS_FLAG_CONFIRMED;
     bctl->flags &= ~EOS_FLAG_TEST_BOOT;
     bctl->boot_attempts = 0;
-    return eos_bootctl_save(bctl);
+
+    int rc = eos_bootctl_save(bctl);
+    if (rc != EOS_OK) return rc;
+
+    /* The image has proven itself, so the previous one is no longer needed as
+     * a fallback and the anti-rollback floor can safely be raised.
+     *
+     * A failure is not propagated: the slot is confirmed and that must stick.
+     * The condition is observable via eos_rollback_get_device_counter(). */
+    (void)eos_rollback_commit();
+
+    return EOS_OK;
 }
 
 int eos_bootctl_request_recovery(eos_bootctl_t *bctl)

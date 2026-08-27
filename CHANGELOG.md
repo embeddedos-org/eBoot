@@ -3,8 +3,16 @@
 ## [Unreleased]
 
 ### Security
+- **Image header is now authenticated (header format v2).** `eos_image_verify_signature()` signed `hdr->hash` only — 32 of the header's 156 bytes. Everything else (`image_size`, `load_addr`, `entry_addr`, `flags`, `sig_type`, `image_version`) sat outside the signature, so an attacker holding a legitimately signed image could relocate it, move its entry point, or clear `EOS_IMG_FLAG_HASH_SHA256` to downgrade integrity checking from SHA-256 to forgeable CRC32 — all while keeping the signature valid. The signature now covers `EOS_IMG_SIGNED_LEN` (92) bytes: the whole header except `signature[]` itself. **Existing signed images must be re-signed.**
+- **`eos_image_parse_header`:** validates `hdr_version`, rejecting 0 and anything newer than this build understands.
+- **`tools/eos_sign.py`:** `SIG_TYPE_ED25519` was `1` — that is `EOS_SIG_CRC32` in `eos_types.h`, which `eos_image_verify_signature()` rejects outright — and `IMG_FLAG_SIGNED` was `1 << 2`, which is `EOS_IMG_FLAG_DEBUG`. It also never set `EOS_IMG_FLAG_HASH_SHA256`, so the bootloader read the stored SHA-256 as a CRC32. Constants now match `include/eos_types.h`.
 - **`recovery.c`:** UART recovery writes now reject offsets and lengths that leave the target slot, including wrap of `base + offset`.
 - **`image_verify.c`:** `eos_image_parse_header` rejects a `load_addr + image_size` that overflows `uint32_t` instead of wrapping the runtime end address.
+- **`image_verify.c`:** The CRC32 integrity path now fails closed on a flash read error. `eos_crc32()` returned `0` when `eos_hal_flash_read()` failed, which is indistinguishable from a region that genuinely hashes to `0`, so an image whose payload could not be read passed `eos_image_verify_integrity()` when the stored CRC was `0`. The stored CRC lives in the unauthenticated header, so setting it to `0` is trivial. The SHA-256 path already propagated the read error; the two now behave the same.
+- **`image_verify.c`:** `eos_image_verify_integrity` rejects a zero `image_size`, and an `addr + hdr_size` that wraps `uint32_t`, instead of computing a payload address that is not the payload.
+
+### Added
+- **`eos_crc32_checked()`** — CRC32 over a flash region that reports read failures through its return value. `eos_crc32()` is retained for API compatibility and documented as unsuitable for verification decisions.
 
 ## [3.0.2] - 2026-05-27
 

@@ -38,7 +38,47 @@ typedef struct {
     uint8_t  signature[EOS_SIG_MAX_SIZE]; /* Digital signature */
 } eos_image_header_t;
 
-#define EOS_IMAGE_HDR_VERSION  1
+/* Header format version.
+ *
+ * v1 — the digital signature covered hash[] only.
+ * v2 — the signature covers the whole header prefix (see EOS_IMG_SIGNED_LEN).
+ *      v1 images must be re-signed; their signatures do not verify under v2.
+ */
+#define EOS_IMAGE_HDR_VERSION  2
+
+/**
+ * @brief Length of the header prefix covered by the digital signature.
+ *
+ * Everything except the signature field itself: magic, hdr_version, hdr_size,
+ * image_size, load_addr, entry_addr, image_version, flags, hash, sig_type,
+ * sig_len and reserved.
+ *
+ * Signing hash[] alone leaves every other field unauthenticated. An attacker
+ * could keep a legitimately signed image's signature and still change the load
+ * address, move the entry point, or clear EOS_IMG_FLAG_HASH_SHA256 to downgrade
+ * integrity checking from SHA-256 to forgeable CRC32. hash[] sits inside this
+ * prefix, so the payload remains covered transitively.
+ */
+#define EOS_IMG_SIGNED_LEN  offsetof(eos_image_header_t, signature)
+
+/* The signing tools address these fields by absolute byte offset, so the layout
+ * is part of the on-disk format and must not drift. */
+#if defined(__cplusplus)
+#  define EOS_IMG_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  define EOS_IMG_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+#  define EOS_IMG_STATIC_ASSERT(cond, msg) /* unavailable before C11 */
+#endif
+
+EOS_IMG_STATIC_ASSERT(sizeof(eos_image_header_t) == 156,
+                      "image header is 156 bytes on the wire");
+EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, hash) == 28,
+                      "hash[] must stay at offset 28");
+EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, sig_type) == 60,
+                      "sig_type must stay at offset 60");
+EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, signature) == 92,
+                      "signature[] must stay at offset 92");
 
 /* ---------------- Image Validation API ---------------- */
 
@@ -53,15 +93,21 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out);
 /**
  * @brief Verify image integrity using CRC32 or hash.
  * @param hdr   Parsed image header.
- * @param addr  Flash address of the image payload (after header).
+ * @param addr  Flash address of the image (header base). Payload starts after
+ *              hdr_size and an optional TLV area, matching eos_sign.py.
  * @return EOS_OK if integrity check passes, EOS_ERR_CRC on failure.
  */
 int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr);
 
 /**
- * @brief Verify image digital signature.
+ * @brief Verify the image's digital signature.
+ *
+ * The signature is checked over the first EOS_IMG_SIGNED_LEN bytes of the
+ * header — all metadata plus the payload hash — not over hash[] alone.
+ *
  * @param hdr   Parsed image header.
- * @return EOS_OK if signature is valid, EOS_ERR_SIGNATURE on failure.
+ * @return EOS_OK if signature is valid, EOS_ERR_SIGNATURE on failure,
+ *         EOS_ERR_KEY if no usable verification key is available.
  */
 int eos_image_verify_signature(const eos_image_header_t *hdr);
 
@@ -74,12 +120,33 @@ int eos_image_verify_signature(const eos_image_header_t *hdr);
 int eos_image_check_version(uint32_t candidate_version, uint32_t min_version);
 
 /**
+ * @brief Compute CRC32 over a flash region, reporting read failures.
+ *
+ * Preferred over eos_crc32() anywhere the result is used to decide whether an
+ * image is intact: a flash read failure is returned as an error instead of
+ * being folded into the CRC value.
+ *
+ * @param addr     Start address.
+ * @param len      Length in bytes.
+ * @param out_crc  Receives the CRC32. Untouched unless EOS_OK is returned.
+ * @return EOS_OK on success, EOS_ERR_FLASH if the region could not be read,
+ *         EOS_ERR_INVALID if @p out_crc is NULL.
+ */
+int eos_crc32_checked(uint32_t addr, size_t len, uint32_t *out_crc);
+
+/**
  * @brief Compute CRC32 over a memory region.
+ *
+ * @warning This form cannot report a flash read failure — it returns 0, which
+ * is indistinguishable from a region that genuinely hashes to 0. Do not use it
+ * to decide whether an image is intact; use eos_crc32_checked() instead.
+ * Retained for API compatibility.
+ *
  * @param addr  Start address.
  * @param len   Length in bytes.
- * @return CRC32 value.
+ * @return CRC32 value, or 0 if the region could not be read.
  */
-uint32_t eos_crc32(uint32_t addr, size_t len);
+int eos_crc32(uint32_t addr, size_t len, uint32_t *out);
 
 #ifdef __cplusplus
 }

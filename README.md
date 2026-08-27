@@ -24,7 +24,7 @@ payloads. Project version 3.0.2.
 |------|----------|
 | `stage0/` | Minimal early boot: reset entry, hardware init, watchdog, recovery entry, jump to Stage-1 |
 | `stage1/` | Boot logic: scan, select, boot log, jump to app (`main.c`) |
-| `core/` | Platform-agnostic boot logic — Ed25519 verify, image TLV/verify, slot manager, secure/RTOS boot, keystore, firmware update/decrypt, UART transport, boot policy/menu, recovery — builds `eboot_core` |
+| `core/` | Platform-agnostic boot logic — Ed25519 verify, image TLV/verify, slot manager, secure/RTOS boot, keystore, anti-rollback counter, firmware update/decrypt, UART transport, boot policy/menu, recovery — builds `eboot_core` |
 | `hal/` | HAL dispatch and board registry — builds `eboot_hal` |
 | `include/` | Public headers (`eos_secure_boot.h`, `eos_image.h`, `eos_slot_manager.h`, `eos_keystore.h`, …) |
 | `boards/` | Per-architecture board support (83 board directories) |
