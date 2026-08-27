@@ -5,6 +5,14 @@
 """
 eos_sign.py — Firmware image signing tool for eBoot secure boot
 
+KNOWN LIMITATION: this tool emits [header][TLV][payload], but the bootloader
+computes the payload address as `addr + hdr_size` (core/image_verify.c) and has
+no caller for eos_tlv_parse(). Images produced here therefore still fail
+integrity verification on-device because the TLV block sits where the payload
+is expected. Use sign_image.py for images intended to boot. Resolving this means
+either moving the TLV after the payload or teaching the boot path to parse it —
+a format decision, not a tooling fix.
+
 Usage:
     python eos_sign.py sign --key private.pem --input firmware.bin --output firmware.signed.bin
     python eos_sign.py verify --key public.pem --input firmware.signed.bin
@@ -24,19 +32,34 @@ import sys
 
 # Image header constants (must match eos_image.h)
 EOS_IMG_MAGIC = 0x454F5349    # "EOSI" (matches eos_types.h)
-EOS_HDR_VERSION = 1
+EOS_HDR_VERSION = 2
 EOS_HASH_SIZE = 32
 EOS_SIG_MAX_SIZE = 64
 
-# Signature types
-SIG_TYPE_NONE = 0
-SIG_TYPE_ED25519 = 1
-SIG_TYPE_RSA2048 = 2
+# Header layout (include/eos_image.h static-asserts these offsets).
+SIG_TYPE_OFFSET = 60
+SIG_LEN_OFFSET = 61
+SIGNATURE_OFFSET = 92
 
-# Image flags
+# Bytes [0, SIGNED_LEN) of the header are covered by the signature: everything
+# except signature[] itself.
+SIGNED_LEN = SIGNATURE_OFFSET
+
+# Signature types — must match eos_sig_type_t in include/eos_types.h.
+SIG_TYPE_NONE = 0
+SIG_TYPE_CRC32 = 1
+SIG_TYPE_SHA256 = 2
+SIG_TYPE_ED25519 = 3
+SIG_TYPE_ECDSA = 4
+
+# Image flags — must match EOS_IMG_FLAG_* in include/eos_types.h.
 IMG_FLAG_ENCRYPTED = (1 << 0)
 IMG_FLAG_COMPRESSED = (1 << 1)
-IMG_FLAG_SIGNED = (1 << 2)
+IMG_FLAG_DEBUG = (1 << 2)
+IMG_FLAG_RTOS = (1 << 3)
+IMG_FLAG_LINUX = (1 << 4)
+IMG_FLAG_SIGNED = (1 << 5)
+IMG_FLAG_HASH_SHA256 = (1 << 6)
 
 # TLV constants
 TLV_INFO_MAGIC = 0x6907
@@ -53,7 +76,12 @@ def build_header(payload: bytes, entry_addr: int, load_addr: int,
                  version: int, sig: bytes, sig_type: int) -> bytes:
     """Build the eos_image_header_t structure."""
     payload_hash = sha256(payload)
-    flags = IMG_FLAG_SIGNED if sig else 0
+
+    # EOS_IMG_FLAG_HASH_SHA256 is what makes eos_image_verify_integrity() take
+    # the SHA-256 path; without it the bootloader treats hash[] as a CRC32.
+    flags = IMG_FLAG_HASH_SHA256
+    if sig_type != SIG_TYPE_NONE:
+        flags |= IMG_FLAG_SIGNED
 
     # Header: magic(4) + hdr_version(2) + hdr_size(2) + image_size(4) +
     #          load_addr(4) + entry_addr(4) + image_version(4) + flags(4) +
@@ -69,7 +97,11 @@ def build_header(payload: bytes, entry_addr: int, load_addr: int,
     hdr += struct.pack('<I', flags)
     hdr += payload_hash  # 32 bytes
     hdr += struct.pack('B', sig_type)
-    hdr += struct.pack('B', len(sig) if sig else 0)
+    # Ed25519 signatures are always 64 bytes. sig_len sits inside the signed
+    # region, so it has to be final before the prefix is signed — it cannot
+    # wait for the signature to exist.
+    hdr += struct.pack('B', EOS_SIG_MAX_SIZE if sig_type == SIG_TYPE_ED25519
+                       else (len(sig) if sig else 0))
     hdr += b'\x00' * 30  # reserved
 
     # Signature field (padded to 64 bytes)
@@ -172,9 +204,6 @@ def cmd_sign(args):
     # Compute hash
     payload_hash = sha256(payload)
 
-    # Sign the hash
-    sig = private_key.sign(payload_hash)
-
     # Get public key hash for TLV
     pub_raw = private_key.public_key().public_bytes(
         serialization.Encoding.Raw,
@@ -187,7 +216,17 @@ def cmd_sign(args):
     entry = getattr(args, 'entry', 0x08020000)
     load = getattr(args, 'load', 0x08020000)
 
-    header = build_header(payload, entry, load, version, sig, SIG_TYPE_ED25519)
+    # Build the header with a zeroed signature, sign its prefix, then splice
+    # the signature in. Signing the header rather than payload_hash alone binds
+    # image_size, load_addr, entry_addr and flags to the signature, so none of
+    # them can be altered without invalidating it.
+    header = bytearray(build_header(payload, entry, load, version, b'',
+                                    SIG_TYPE_ED25519))
+    sig = private_key.sign(bytes(header[:SIGNED_LEN]))
+    assert len(sig) == EOS_SIG_MAX_SIZE
+    header[SIGNATURE_OFFSET:SIGNATURE_OFFSET + EOS_SIG_MAX_SIZE] = sig
+    header = bytes(header)
+
     tlv = build_tlv(payload_hash, key_hash, sig)
 
     # Output: [header][tlv][payload]
@@ -255,9 +294,9 @@ def cmd_verify(args):
         sys.exit(1)
     print("  Hash:      OK")
 
-    # Verify signature
+    # Verify signature over the header prefix (see SIGNED_LEN).
     try:
-        public_key.verify(sig, computed_hash)
+        public_key.verify(sig, image[:SIGNED_LEN])
         print("  Signature: OK")
     except Exception as e:
         print(f"  Signature: FAILED ({e})")

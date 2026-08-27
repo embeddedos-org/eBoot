@@ -136,7 +136,7 @@ typedef struct {
     bool     mpu_enabled;            /* Enable MPU for this core */
 
     /* IPC */
-    uint32_t mailbox_addr;           /* Shared mailbox address for inter-core comm */
+    uintptr_t mailbox_addr;          /* Shared mailbox address for inter-core comm */
     uint32_t mailbox_size;           /* Mailbox region size */
 
     /* Context (opaque, passed to entry point) */

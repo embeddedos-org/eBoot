@@ -11,6 +11,7 @@
 
 #include "eos_secure_boot.h"
 #include "eos_image.h"
+#include "eos_rollback.h"
 #include "eos_crypto_boot.h"
 #include "eos_hal.h"
 #include <string.h>
@@ -24,13 +25,11 @@
 /* Global attestation log — persisted in RAM for kernel to read */
 static eos_attest_log_t g_attest_log;
 
-/* ---- SHA-256 (from crypto_boot.c) ---- */
-extern void eos_sha256(const void *data, size_t len, uint8_t hash[32]);
-
-/* ---- Ed25519 verify (from ed25519_verify.c) ---- */
-extern int eos_ed25519_verify(const uint8_t *msg, size_t msg_len,
-                               const uint8_t sig[64],
-                               const uint8_t pubkey[32]);
+/* eos_sha256() and eos_ed25519_verify() come from eos_crypto_boot.h.
+ * They are deliberately not re-declared here: the local `extern` this file
+ * used to carry listed eos_ed25519_verify's arguments in a different order
+ * than the definition, which no compiler could diagnose across translation
+ * units and would have passed a length where a key pointer was expected. */
 
 /* ---- Constant-time compare ---- */
 static int secure_compare(const uint8_t *a, const uint8_t *b, size_t len)
@@ -118,7 +117,9 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
         }
     }
 
-    /* ---- Step 5: Anti-rollback check ---- */
+    /* ---- Step 5: Anti-rollback checks ---- */
+
+    /* 5a. Static floor from the boot configuration. */
     if (cfg->min_version > 0) {
         rc = eos_image_check_version(hdr.image_version, cfg->min_version);
         if (rc != EOS_OK) {
@@ -126,6 +127,25 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
             return EOS_SBOOT_ERR_ROLLBACK;
         }
     }
+
+    /* 5b. Persistent floor from the device monotonic counter. Unlike
+     * cfg->min_version, this one rises in response to an update. */
+    uint32_t img_counter = 0;
+    rc = eos_rollback_read_image_counter(cfg->image_addr, &img_counter);
+    if (rc != EOS_OK) {
+        attest_record(2, hdr.image_version, hdr.hash, NULL, EOS_SBOOT_ERR_BAD_HEADER);
+        return EOS_SBOOT_ERR_BAD_HEADER;
+    }
+
+    rc = eos_rollback_verify(img_counter);
+    if (rc != EOS_OK) {
+        attest_record(2, hdr.image_version, hdr.hash, NULL, EOS_SBOOT_ERR_ROLLBACK);
+        return EOS_SBOOT_ERR_ROLLBACK;
+    }
+
+    /* The floor is raised only once the image is confirmed good; see
+     * eos_bootctl_confirm(). */
+    eos_rollback_stage(img_counter);
 
     /* ---- Step 6: Decrypt if required ---- */
     if (cfg->require_encryption && (hdr.flags & EOS_IMG_FLAG_ENCRYPTED)) {
