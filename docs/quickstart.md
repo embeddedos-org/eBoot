@@ -82,12 +82,28 @@ This produces:
 ```bash
 cd EoS/eboot/tools
 
-# Generate a signing key (first time only)
-python3 sign_image.py --generate-key my-key.pem
+# Generate an Ed25519 keypair (first time only).
+# Writes keys/private.pem, keys/public.pem and keys/public_key.h.
+python3 sign_image.py --genkey --output keys/
 
-# Sign a firmware binary
-python3 sign_image.py --key my-key.pem --input firmware.bin --output signed.bin
+# Pack a raw firmware binary into an .eimg container.
+python3 imgpack.py --input firmware.bin --output firmware.eimg \
+    --load-addr 0x08010000 --entry-addr 0x08010100 --version 1.0.0
+
+# Sign it. This also sets the SHA-256 flag and marks the header as v2.
+python3 sign_image.py --image firmware.eimg --method ed25519 \
+    --key keys/private.pem
+
+# Verify before flashing: recomputes the payload hash and checks the
+# signature over the header prefix.
+python3 sign_image.py --image firmware.eimg --verify --key keys/public.pem
 ```
+
+The signature covers the first 92 bytes of the header — every field the
+bootloader acts on, including `load_addr`, `entry_addr`, `image_size` and
+`flags` — not just the payload hash. Editing any of them invalidates it.
+Images signed under the v1 format (signature over `hash[]` alone) must be
+re-signed.
 
 ## Boot Flow
 

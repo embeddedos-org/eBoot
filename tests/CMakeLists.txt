@@ -18,7 +18,7 @@ add_test(NAME test_image_verify COMMAND test_image_verify)
 
 # --- test_recovery: UART recovery write range ---
 add_executable(test_recovery unit/test_recovery.c)
-target_link_libraries(test_recovery PRIVATE eboot_core)
+target_link_libraries(test_recovery PRIVATE eboot_core eboot_stage1)
 add_test(NAME test_recovery COMMAND test_recovery)
 
 # --- test_slot_size_bounds: verify_slot() must reject image_size > slot capacity ---
@@ -70,6 +70,11 @@ add_test(NAME test_ed25519 COMMAND test_ed25519)
 add_executable(test_keystore unit/test_keystore.c)
 target_link_libraries(test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND test_keystore)
+
+# --- test_rollback: Anti-rollback security counter ---
+add_executable(test_rollback unit/test_rollback.c)
+target_link_libraries(test_rollback PRIVATE eboot_core)
+add_test(NAME test_rollback COMMAND test_rollback)
 
 # --- test_storage: Unified storage abstraction ---
 add_executable(test_storage unit/test_storage.c)

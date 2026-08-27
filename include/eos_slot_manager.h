@@ -54,6 +54,35 @@ eos_slot_state_t eos_slot_get_state(eos_slot_t slot);
  */
 int eos_slot_erase(eos_slot_t slot);
 
+/**
+ * @brief Record a boot attempt on the specified slot (increments counter).
+ * @param slot  Slot identifier.
+ * @return EOS_OK on success, EOS_ERR_INVALID on error.
+ */
+int eos_slot_mark_booting(eos_slot_t slot);
+
+/**
+ * @brief Mark the currently running slot as confirmed/stable (resets boot attempts).
+ * @param slot  Slot identifier.
+ * @return EOS_OK on success, EOS_ERR_INVALID on error.
+ */
+int eos_slot_confirm(eos_slot_t slot);
+
+/**
+ * @brief Check if a slot has exceeded the maximum allowed boot attempts and needs rollback.
+ * @param slot          Slot identifier.
+ * @param max_attempts  Maximum allowed consecutive failed attempts (e.g., 3).
+ * @return true if boot attempts >= max_attempts.
+ */
+bool eos_slot_needs_rollback(eos_slot_t slot, uint8_t max_attempts);
+
+/**
+ * @brief Get the number of consecutive boot attempts for a slot.
+ * @param slot  Slot identifier.
+ * @return Number of boot attempts, or 0 if invalid.
+ */
+uint8_t eos_slot_get_boot_attempts(eos_slot_t slot);
+
 #ifdef __cplusplus
 }
 #endif

@@ -12,6 +12,7 @@ Usage:
     python sign_image.py --image firmware.eimg --method crc32
     python sign_image.py --image firmware.eimg --method sha256
     python sign_image.py --image firmware.eimg --method ed25519 --key private.pem
+    python sign_image.py --image firmware.eimg --verify --key public.pem
     python sign_image.py --genkey --output keys/
 
 Key Generation:
@@ -30,6 +31,22 @@ from pathlib import Path
 EOS_IMG_MAGIC = 0x454F5349
 EOS_HASH_SIZE = 32
 EOS_SIG_MAX_SIZE = 64
+
+# Header layout (must match include/eos_image.h, which static-asserts these).
+HDR_VERSION_OFFSET = 4
+FLAGS_OFFSET = 24
+HASH_OFFSET = 28
+SIG_TYPE_OFFSET = 60
+SIG_LEN_OFFSET = 61
+SIGNATURE_OFFSET = 92
+EOS_IMAGE_HDR_VERSION = 2
+
+# Bytes [0, SIGNED_LEN) of the header are covered by the Ed25519 signature:
+# everything except the signature field itself. Signing hash[] alone would
+# leave image_size, load_addr, entry_addr and flags unauthenticated.
+SIGNED_LEN = SIGNATURE_OFFSET
+
+IMG_FLAG_HASH_SHA256 = (1 << 6)
 
 SIG_NONE = 0
 SIG_CRC32 = 1
@@ -71,12 +88,10 @@ def sign_crc32(image_path: Path):
     payload = data[hdr_size:hdr_size + image_size]
     crc = zlib.crc32(bytes(payload)) & 0xFFFFFFFF
 
-    hash_offset = 28
-    struct.pack_into('<I', data, hash_offset, crc)
+    struct.pack_into('<I', data, HASH_OFFSET, crc)
 
-    sig_type_offset = hash_offset + EOS_HASH_SIZE
-    data[sig_type_offset] = SIG_CRC32
-    data[sig_type_offset + 1] = 0
+    data[SIG_TYPE_OFFSET] = SIG_CRC32
+    data[SIG_LEN_OFFSET] = 0
 
     image_path.write_bytes(bytes(data))
     print(f"CRC32 signature applied: 0x{crc:08X}")
@@ -92,12 +107,10 @@ def sign_sha256(image_path: Path):
     payload = data[hdr_size:hdr_size + image_size]
     sha = hashlib.sha256(bytes(payload)).digest()
 
-    hash_offset = 28
-    data[hash_offset:hash_offset + EOS_HASH_SIZE] = sha
+    data[HASH_OFFSET:HASH_OFFSET + EOS_HASH_SIZE] = sha
 
-    sig_type_offset = hash_offset + EOS_HASH_SIZE
-    data[sig_type_offset] = SIG_SHA256
-    data[sig_type_offset + 1] = 0
+    data[SIG_TYPE_OFFSET] = SIG_SHA256
+    data[SIG_LEN_OFFSET] = 0
 
     image_path.write_bytes(bytes(data))
     print(f"SHA-256 hash applied: {sha.hex()}")
@@ -135,30 +148,138 @@ def sign_ed25519(image_path: Path, key_path: Path):
     sha = hashlib.sha256(bytes(payload)).digest()
 
     # Store SHA-256 hash in header
-    hash_offset = 28
-    data[hash_offset:hash_offset + EOS_HASH_SIZE] = sha
+    data[HASH_OFFSET:HASH_OFFSET + EOS_HASH_SIZE] = sha
 
     # Set flags to indicate SHA-256 hash
-    flags_offset = 24
-    flags = struct.unpack_from('<I', data, flags_offset)[0]
-    flags |= (1 << 6)  # EOS_IMG_FLAG_HASH_SHA256
-    struct.pack_into('<I', data, flags_offset, flags)
+    flags = struct.unpack_from('<I', data, FLAGS_OFFSET)[0]
+    flags |= IMG_FLAG_HASH_SHA256
+    struct.pack_into('<I', data, FLAGS_OFFSET, flags)
 
-    # Sign the hash with Ed25519
-    signature = private_key.sign(sha)
+    # This header format signs the whole prefix.
+    struct.pack_into('<H', data, HDR_VERSION_OFFSET, EOS_IMAGE_HDR_VERSION)
 
-    # Store signature in header
-    sig_type_offset = hash_offset + EOS_HASH_SIZE
-    data[sig_type_offset] = SIG_ED25519
-    data[sig_type_offset + 1] = len(signature)
+    # sig_type and sig_len are themselves inside the signed region, so they
+    # have to be final before the signature is computed. Ed25519 signatures
+    # are always 64 bytes, so sig_len is known up front.
+    data[SIG_TYPE_OFFSET] = SIG_ED25519
+    data[SIG_LEN_OFFSET] = EOS_SIG_MAX_SIZE
 
-    sig_offset = sig_type_offset + 2 + 30  # skip reserved bytes
-    data[sig_offset:sig_offset + len(signature)] = signature
+    # Sign the header prefix: everything except signature[] itself. This binds
+    # image_size, load_addr, entry_addr, flags and the payload hash together,
+    # so none of them can be changed without invalidating the signature.
+    signature = private_key.sign(bytes(data[:SIGNED_LEN]))
+    assert len(signature) == EOS_SIG_MAX_SIZE
+
+    data[SIGNATURE_OFFSET:SIGNATURE_OFFSET + len(signature)] = signature
 
     image_path.write_bytes(bytes(data))
     print(f"Ed25519 signature applied:")
     print(f"  SHA-256: {sha.hex()}")
     print(f"  Signature: {signature.hex()}")
+
+
+def _load_public_key(key_path: Path):
+    """Load a verification key from either a public or a private PEM."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey, Ed25519PublicKey,
+    )
+
+    key_data = key_path.read_bytes()
+    try:
+        return serialization.load_pem_public_key(key_data)
+    except Exception:
+        pass
+    key = serialization.load_pem_private_key(key_data, password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError("key is not an Ed25519 key")
+    return key.public_key()
+
+
+def verify_image(image_path: Path, key_path: Path) -> int:
+    """Verify an image's payload hash and Ed25519 signature.
+
+    Returns a process exit code: 0 if the image verifies, 1 otherwise.
+    """
+    try:
+        from cryptography.exceptions import InvalidSignature
+    except ImportError:
+        print("Error: 'cryptography' package required for verification.", file=sys.stderr)
+        return 1
+
+    data = image_path.read_bytes()
+    hdr = verify_header(data)
+    hdr_size = hdr['hdr_size']
+    image_size = hdr['image_size']
+
+    if len(data) < hdr_size + image_size:
+        print(f"FAIL: file is {len(data)} bytes, header declares "
+              f"{hdr_size + image_size}", file=sys.stderr)
+        return 1
+
+    print(f"Header version: {hdr['hdr_version']}")
+    print(f"Payload:        {image_size} bytes at offset {hdr_size}")
+
+    sig_type = data[SIG_TYPE_OFFSET]
+    sig_len = data[SIG_LEN_OFFSET]
+    stored_hash = data[HASH_OFFSET:HASH_OFFSET + EOS_HASH_SIZE]
+    payload = data[hdr_size:hdr_size + image_size]
+
+    # 1. Integrity — recompute whatever the flags say was used.
+    if hdr['flags'] & IMG_FLAG_HASH_SHA256:
+        computed = hashlib.sha256(payload).digest()
+        if computed != stored_hash:
+            print(f"FAIL: SHA-256 mismatch\n  stored:   {stored_hash.hex()}\n"
+                  f"  computed: {computed.hex()}", file=sys.stderr)
+            return 1
+        print(f"SHA-256:        OK ({computed.hex()})")
+    else:
+        computed = zlib.crc32(payload) & 0xFFFFFFFF
+        stored = struct.unpack_from('<I', data, HASH_OFFSET)[0]
+        if computed != stored:
+            print(f"FAIL: CRC32 mismatch (stored 0x{stored:08X}, "
+                  f"computed 0x{computed:08X})", file=sys.stderr)
+            return 1
+        print(f"CRC32:          OK (0x{computed:08X})")
+
+    # 2. Signature.
+    #
+    # Passing --key means "prove this image is signed by this key". Reporting
+    # success for an image whose sig_type says CRC32 would let a downgraded
+    # header pass the tool, so an unsigned image is a failure once a key is
+    # supplied. (The bootloader rejects sig_type CRC32/SHA256/NONE outright in
+    # eos_image_verify_signature(); this keeps the tool consistent with it.)
+    if sig_type != SIG_ED25519:
+        if key_path is None:
+            print(f"Signature:      none (sig_type={sig_type}) — integrity only")
+            return 0
+        print(f"FAIL: expected an Ed25519 signature but sig_type is {sig_type}",
+              file=sys.stderr)
+        return 1
+
+    if key_path is None:
+        print("FAIL: image is Ed25519-signed but no --key was given", file=sys.stderr)
+        return 1
+    if sig_len != EOS_SIG_MAX_SIZE:
+        print(f"FAIL: sig_len is {sig_len}, expected {EOS_SIG_MAX_SIZE}", file=sys.stderr)
+        return 1
+    if hdr['hdr_version'] < 2:
+        print(f"FAIL: header version {hdr['hdr_version']} signs hash[] only; "
+              f"re-sign to v{EOS_IMAGE_HDR_VERSION}", file=sys.stderr)
+        return 1
+
+    public_key = _load_public_key(key_path)
+    signature = data[SIGNATURE_OFFSET:SIGNATURE_OFFSET + EOS_SIG_MAX_SIZE]
+
+    try:
+        public_key.verify(signature, data[:SIGNED_LEN])
+    except InvalidSignature:
+        print("FAIL: Ed25519 signature does not verify over the header prefix "
+              f"(bytes 0..{SIGNED_LEN})", file=sys.stderr)
+        return 1
+
+    print(f"Ed25519:        OK (over header bytes 0..{SIGNED_LEN})")
+    return 0
 
 
 def generate_keypair(output_dir: Path):
@@ -289,7 +410,7 @@ def main():
         extract_pubkey(key_path, output_path)
         return
 
-    if not args.image or not args.method:
+    if not args.image or not (args.method or args.verify):
         parser.print_help()
         sys.exit(1)
 
@@ -297,6 +418,9 @@ def main():
     if not image_path.exists():
         print(f"Error: image not found: {args.image}", file=sys.stderr)
         sys.exit(1)
+
+    if args.verify:
+        sys.exit(verify_image(image_path, Path(args.key) if args.key else None))
 
     if args.method == 'crc32':
         sign_crc32(image_path)

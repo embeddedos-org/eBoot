@@ -78,7 +78,10 @@ static inline void eos_secure_zero(void *ptr, size_t len) {
 
 - [ ] **[IF APPLICABLE]** `eos_image_parse_header()` validates magic number, header version, and header size before populating the output structure
 - [ ] **[IF APPLICABLE]** Image verification follows the correct order: parse header → verify integrity → verify signature → check version
+- [ ] **[REQUIRED]** Verification fails closed on I/O error — a flash read that fails is propagated as an error, never folded into a computed digest or CRC. Use `eos_crc32_checked()`, not `eos_crc32()`, anywhere the result decides whether an image is intact
 - [ ] **[IF APPLICABLE]** Anti-rollback check (`eos_image_check_version()`) is not bypassed for any code path
+- [ ] **[REQUIRED]** Any header field the bootloader acts on lies inside the signed prefix (`EOS_IMG_SIGNED_LEN`). Adding a field after `signature[]` leaves it unauthenticated
+- [ ] **[REQUIRED]** Signature verification covers the header prefix, not `hash[]` alone — signing only the payload hash leaves `flags`, `load_addr`, `entry_addr` and `image_size` free to edit
 - [ ] **[IF APPLICABLE]** New image header fields are added to reserved space without changing struct layout or CRC offset
 - [ ] **[IF APPLICABLE]** `sign_image.py` changes are tested with `--verify` flag against known-good test vectors
 
@@ -148,6 +151,8 @@ static inline void eos_secure_zero(void *ptr, size_t len) {
 | `uint8_t buf[len]` (VLA on stack) | `uint8_t buf[MAX_BUF_SIZE]` (fixed-size) |
 | `ops->flash_write(addr, data, len)` (no NULL check) | `if (ops && ops->flash_write) ops->flash_write(...)` |
 | `eos_image_verify_signature(&hdr)` (return ignored) | `rc = eos_image_verify_signature(&hdr); if (rc != EOS_OK) return rc;` |
+| `crc = eos_crc32(addr, len)` (read failure becomes `0`) | `if (eos_crc32_checked(addr, len, &crc) != EOS_OK) return EOS_ERR_FLASH;` |
+| `verify_signature(hdr->hash, 32, ...)` (metadata unsigned) | `verify_signature((const uint8_t *)hdr, EOS_IMG_SIGNED_LEN, ...)` |
 | `sprintf(buf, "version: %d", ver)` | `snprintf(buf, sizeof(buf), "version: %d", ver)` |
 
 ---
