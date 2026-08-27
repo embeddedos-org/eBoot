@@ -134,8 +134,13 @@ void __stack_chk_fail(void)
 #ifdef EBOOT_ENABLE_PRINTF
     printf("FATAL: stack smashing detected\n");
 #endif
-    /* Trigger immediate system reset */
-    eos_rtsvc_reset_system(EOS_RESET_SOFTWARE);
+    /* Trigger immediate system reset.
+     * EOS_RESET_COLD is an eos_reset_type_t (the reset *action* to perform).
+     * Do not pass eos_reset_reason_t values such as EOS_RESET_SOFTWARE here:
+     * that enum reports why a reset already happened, and its value 2 aliases
+     * onto EOS_RESET_HALT, which would halt the device instead of resetting
+     * it. */
+    eos_rtsvc_reset_system(EOS_RESET_COLD);
     while (1); /* unreachable */
 }
 

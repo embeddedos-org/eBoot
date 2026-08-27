@@ -105,6 +105,7 @@ add_library(eboot_core STATIC
     core/bmc_handoff.c
     core/os_adapter.c
     core/ed25519_verify.c
+    core/sha512.c
     core/keystore.c
     core/debug_lock.c
     core/fw_decrypt.c
@@ -549,3 +550,18 @@ else()
     message(STATUS "  Mode        : Board port (${EBLDR_BOARD})")
 endif()
 message(STATUS "----------------------------------------------------")
+# ---- Ed25519 verification tests ----
+add_executable(test_ed25519
+    tests/unit/test_ed25519.c
+)
+
+target_link_libraries(test_ed25519
+    PRIVATE
+    eboot_core
+)
+enable_testing()
+
+add_test(
+    NAME ed25519_tests
+    COMMAND test_ed25519
+)

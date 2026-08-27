@@ -154,6 +154,7 @@ int stage0_verify_stage1(void) {
 | ROM → Stage-0 | Stage-0 corrupted | ROM verification or crash | JTAG/SWD reflash |
 | Stage-0 → Stage-1 | Stage-1 header invalid | `eos_image_parse_header()` returns error | Enter UART recovery mode |
 | Stage-0 → Stage-1 | Stage-1 integrity check fails | `eos_image_verify_integrity()` returns `EOS_ERR_CRC` | Enter UART recovery mode |
+| Stage-0 → Stage-1 | Stage-1 payload unreadable | `eos_image_verify_integrity()` returns `EOS_ERR_FLASH` | Enter UART recovery mode |
 | Stage-0 → Stage-1 | Stage-1 signature invalid | `eos_image_verify_signature()` returns `EOS_ERR_SIGNATURE` | Enter UART recovery mode |
 | Stage-0 → Stage-1 | Stage-1 version too old | `eos_image_check_version()` returns `EOS_ERR_VERSION` | Enter UART recovery mode |
 | Stage-1 → App | Active slot image invalid | Integrity/signature check fails | Try alternate slot (B→A or A→B) |
@@ -210,9 +211,45 @@ Each firmware image carries a `security_counter` field in its header. The device
 │             │        │                  │
 └─────────────┘        └─────────────────┘
 
-  If N >= M → ACCEPT, update M to N
+  If N >= M → ACCEPT (M is *not* raised yet — see below)
   If N <  M → REJECT (rollback attempt)
 ```
+
+Acceptance and raising the floor are deliberately separate steps.
+
+Raising `M` at verification time — the moment a new image is accepted — would
+make every older image unbootable while the new one is still unproven. If it
+then failed to run, the device would have no bootable fallback: an
+unrecoverable brick caused by the security control itself.
+
+`M` is therefore raised only once the booted image has been **confirmed**:
+
+| Step | Function | Effect on `M` |
+|---|---|---|
+| Image verified during boot | `eos_rollback_verify()` then `eos_rollback_stage()` | unchanged; `N` remembered |
+| Image runs and proves itself | `eos_bootctl_confirm()` → `eos_rollback_commit()` | raised to `N` |
+| Image fails its trial boot | slot rolled back by boot policy | unchanged |
+
+The device is protected throughout: between verification and confirmation the
+previous image can still boot, but nothing below the *existing* floor can.
+
+Because the counter is backed by one-time-programmable storage,
+`eos_rollback_commit()` also:
+
+- **never lowers `M`** — confirming an older-but-acceptable image burns nothing;
+- **is idempotent** — re-confirming the same image consumes no further fuses;
+- **refuses advances larger than `EOS_ROLLBACK_MAX_STEP` (16)** — a build
+  mistake or hostile image requesting a huge jump would exhaust the fuse bank
+  and permanently end the device's ability to accept future counter bumps;
+- **reads the counter back** after incrementing, because a fuse burn can fail
+  without reporting an error, and a counter that silently did not move would
+  leave the device believing it is protected when it is not.
+
+Boards whose `eos_board_ops_t` provides no `monotonic_read`/`monotonic_increment`
+report `EOS_ERR_NOT_SUPPORTED`; verification is permissive on those boards, since
+failing closed would make every device without OTP unbootable. Detect this at
+provisioning time with `eos_rollback_get_device_counter()` rather than relying on
+boot-time enforcement.
 
 ### 4.2 Counter Storage Options
 

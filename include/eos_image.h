@@ -75,12 +75,33 @@ int eos_image_verify_signature(const eos_image_header_t *hdr);
 int eos_image_check_version(uint32_t candidate_version, uint32_t min_version);
 
 /**
+ * @brief Compute CRC32 over a flash region, reporting read failures.
+ *
+ * Preferred over eos_crc32() anywhere the result is used to decide whether an
+ * image is intact: a flash read failure is returned as an error instead of
+ * being folded into the CRC value.
+ *
+ * @param addr     Start address.
+ * @param len      Length in bytes.
+ * @param out_crc  Receives the CRC32. Untouched unless EOS_OK is returned.
+ * @return EOS_OK on success, EOS_ERR_FLASH if the region could not be read,
+ *         EOS_ERR_INVALID if @p out_crc is NULL.
+ */
+int eos_crc32_checked(uint32_t addr, size_t len, uint32_t *out_crc);
+
+/**
  * @brief Compute CRC32 over a memory region.
+ *
+ * @warning This form cannot report a flash read failure — it returns 0, which
+ * is indistinguishable from a region that genuinely hashes to 0. Do not use it
+ * to decide whether an image is intact; use eos_crc32_checked() instead.
+ * Retained for API compatibility.
+ *
  * @param addr  Start address.
  * @param len   Length in bytes.
- * @return CRC32 value.
+ * @return CRC32 value, or 0 if the region could not be read.
  */
-uint32_t eos_crc32(uint32_t addr, size_t len);
+int eos_crc32(uint32_t addr, size_t len, uint32_t *out);
 
 #ifdef __cplusplus
 }

@@ -208,8 +208,8 @@ int eos_fw_update_finalize(eos_fw_update_ctx_t *ctx, eos_upgrade_mode_t mode)
 void eos_fw_update_abort(eos_fw_update_ctx_t *ctx)
 {
     if (!ctx) return;
-    ctx->state = EOS_FW_STATE_IDLE;
     memset(ctx, 0, sizeof(*ctx));
+    ctx->state = EOS_FW_STATE_IDLE;
 }
 
 uint8_t eos_fw_update_progress(const eos_fw_update_ctx_t *ctx)

@@ -29,6 +29,50 @@ void eos_sha256_init(eos_sha256_ctx_t *ctx);
 void eos_sha256_update(eos_sha256_ctx_t *ctx, const uint8_t *data, size_t len);
 void eos_sha256_final(eos_sha256_ctx_t *ctx, uint8_t digest[EOS_SHA256_DIGEST_SIZE]);
 
+#define EOS_SHA512_BLOCK_SIZE  128
+#define EOS_SHA512_DIGEST_SIZE 64
+
+typedef struct {
+    uint64_t state[8];
+    uint64_t count;
+    uint8_t  buffer[EOS_SHA512_BLOCK_SIZE];
+} eos_sha512_ctx_t;
+
+/**
+ * SHA-512 (FIPS 180-4). Required by Ed25519 (RFC 8032), which derives its
+ * challenge scalar from this hash; a verifier using any other hash cannot
+ * check a signature produced by a conforming signer.
+ */
+void eos_sha512_init(eos_sha512_ctx_t *ctx);
+void eos_sha512_update(eos_sha512_ctx_t *ctx, const uint8_t *data, size_t len);
+void eos_sha512_final(eos_sha512_ctx_t *ctx, uint8_t digest[EOS_SHA512_DIGEST_SIZE]);
+
+/** One-shot SHA-512 over a memory region. */
+void eos_sha512(const uint8_t *data, size_t len,
+                uint8_t digest[EOS_SHA512_DIGEST_SIZE]);
+
+/** One-shot SHA-256 over a memory region. */
+void eos_sha256(const void *data, size_t len,
+                uint8_t digest[EOS_SHA256_DIGEST_SIZE]);
+
+/**
+ * @brief Verify an Ed25519 signature (RFC 8032).
+ *
+ * Declared here so every caller shares one prototype. Two translation units
+ * previously each declared their own `extern`, and they disagreed on
+ * argument order -- a mismatch no compiler could see.
+ *
+ * @param signature  64-byte signature, R || S.
+ * @param public_key 32-byte Ed25519 public key.
+ * @param message    Message bytes that were signed.
+ * @param msg_len    Length of @p message in bytes.
+ * @return EOS_OK if valid, EOS_ERR_SIGNATURE if not, EOS_ERR_INVALID on a
+ *         null argument.
+ */
+int eos_ed25519_verify(const uint8_t signature[64],
+                       const uint8_t public_key[32],
+                       const uint8_t *message, size_t msg_len);
+
 /**
  * Compute SHA-256 hash of a memory region.
  */

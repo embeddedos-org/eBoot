@@ -116,7 +116,7 @@ External boundaries:
 | ID | STRIDE | Threat | Likelihood | Impact | Risk | Mitigation | Status |
 |---|---|---|---|---|---|---|---|
 | T-201 | Tampering | Attacker replaces stage-1 binary with malicious code | Medium | Critical | High | SHA-256 hash verification of stage-1 image (Phase 2); Ed25519 signature verification (Phase 2) | Planned |
-| T-202 | Spoofing | Attacker presents old stage-1 version to exploit known vulnerability | Medium | High | High | Anti-rollback monotonic counter; `eos_image_check_version()` | Planned |
+| T-202 | Spoofing | Attacker presents old stage-1 version to exploit known vulnerability | Medium | High | High | Anti-rollback security counter enforced against the device monotonic counter (`eos_rollback_verify()`), raised on slot confirmation (`eos_rollback_commit()`); `eos_image_check_version()` | Mitigated (boards with a monotonic counter) |
 | T-203 | Denial of Service | Corrupt stage-1 image prevents boot | Low | High | Medium | Recovery mode fallback; redundant boot control block | Mitigated |
 | T-204 | Elevation of Privilege | Stage-1 runs with same privilege as stage-0 (no isolation) | Medium | High | Medium | MPU configuration at stage boundary (Phase 3); `eos_mpu_boot.h` | Planned |
 

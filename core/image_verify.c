@@ -31,16 +31,22 @@ static uint32_t crc32_byte(uint32_t crc, uint8_t byte)
     return crc;
 }
 
-uint32_t eos_crc32(uint32_t addr, size_t len)
+int eos_crc32_checked(uint32_t addr, size_t len, uint32_t *out_crc)
 {
+    if (!out_crc)
+        return EOS_ERR_INVALID;
+
     uint32_t crc = 0xFFFFFFFF;
     uint8_t buf[256];
 
     while (len > 0) {
         size_t chunk = (len > sizeof(buf)) ? sizeof(buf) : len;
 
+        /* A flash read that fails is reported, never folded into the result.
+         * Returning a CRC value here would be indistinguishable from having
+         * genuinely computed one. */
         if (eos_hal_flash_read(addr, buf, chunk) != EOS_OK)
-            return 0;
+            return EOS_ERR_FLASH;
 
         for (size_t i = 0; i < chunk; i++) {
             crc = crc32_byte(crc, buf[i]);
@@ -50,7 +56,18 @@ uint32_t eos_crc32(uint32_t addr, size_t len)
         len -= chunk;
     }
 
-    return ~crc;
+    *out_crc = ~crc;
+    return EOS_OK;
+}
+
+uint32_t eos_crc32(uint32_t addr, size_t len)
+{
+    /* Retained for API compatibility. It cannot report a flash failure, so it
+     * must not be used to decide whether an image is intact — see the note in
+     * eos_image.h. Verification paths use eos_crc32_checked(). */
+    uint32_t crc = 0;
+    (void)eos_crc32_checked(addr, len, &crc);
+    return crc;
 }
 
 int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
