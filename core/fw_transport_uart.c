@@ -322,12 +322,17 @@ static int ymodem_receive(eos_fw_transport_t *tp, eos_fw_update_ctx_t *ctx)
         if (first_block && expected_blk == 0) {
             /* Block 0 = filename + size string */
             /* Parse file size from after null-terminated filename */
+            /* Only block_size (+2 CRC) bytes of `block` were actually
+             * received; the rest is uninitialized stack. Bound every scan
+             * to the received region so a header with no NUL terminator
+             * can't walk off the end of the buffer. */
             const char *name = (const char *)block;
-            size_t name_len = strlen(name);
+            size_t name_len = strnlen(name, block_size);
             if (name_len > 0 && name_len < block_size - 1) {
                 const char *size_str = name + name_len + 1;
+                const char *size_end = (const char *)block + block_size;
                 file_size = 0;
-                while (*size_str >= '0' && *size_str <= '9') {
+                while (size_str < size_end && *size_str >= '0' && *size_str <= '9') {
                     file_size = file_size * 10 + (*size_str - '0');
                     size_str++;
                 }

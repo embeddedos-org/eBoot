@@ -50,8 +50,9 @@ eBootloader follows a **90-day coordinated disclosure** policy:
 | Version comparison | Phase 1 | ✅ Implemented | `eos_image_check_version()` API |
 | Redundant metadata | Phase 1 | ✅ Implemented | Dual boot control block with CRC |
 | Anti-tearing writes | Phase 1 | ✅ Implemented | Power-safe metadata updates |
-| SHA-256 image hash | Phase 2 | 🔲 Planned | Full cryptographic hash for image verification |
-| Ed25519 signatures | Phase 2 | 🔲 Planned | Digital signature verification of firmware |
+| SHA-256 image hash | Phase 2 | ✅ Implemented | Full cryptographic hash for image verification |
+| SHA-512 | Phase 2 | ✅ Implemented | FIPS 180-4; required by Ed25519, `core/sha512.c` |
+| Ed25519 signatures | Phase 2 | ✅ Implemented | RFC 8032 verification of firmware signatures, `core/ed25519_verify.c` |
 | Anti-rollback counters | Phase 2 | 🔲 Planned | Monotonic counter prevents version downgrade |
 | Dual key slots | Phase 2 | 🔲 Planned | Primary + backup key for seamless rotation |
 | AES-256-GCM encryption | Phase 3 | 🔲 Planned | Encrypted firmware payloads |

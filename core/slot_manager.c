@@ -56,9 +56,10 @@ static int verify_slot(eos_slot_t slot)
 
 int eos_slot_scan_all(void)
 {
-    verify_slot(EOS_SLOT_A);
-    verify_slot(EOS_SLOT_B);
-    return EOS_OK;
+    int valid = 0;
+    if (verify_slot(EOS_SLOT_A) == EOS_OK) valid++;
+    if (verify_slot(EOS_SLOT_B) == EOS_OK) valid++;
+    return valid;
 }
 
 eos_slot_state_t eos_slot_get_state(eos_slot_t slot)
