@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 EoS Project
 // ISO/IEC 25000 | ISO/IEC/IEEE 15288:2023
+
 /**
  * @file test_slot_manager.c
- * @brief Unit tests for firmware slot manager
+ * @brief Unit tests for the production firmware slot manager
  */
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
-#include "eos_slot_manager.h"
 
-static int passed = 0;
-#define PASS(name) do { printf("[PASS] %s\n", name); passed++; } while(0)
+#include "eos_hal.h"
+#include "eos_slot_manager.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* ---- Simulated Flash Backend ---- */
 #define SIM_FLASH_SIZE   (256 * 1024)
@@ -25,6 +25,8 @@ static eos_slot_state_t slot_states[3] = {
     EOS_SLOT_STATE_EMPTY, EOS_SLOT_STATE_EMPTY, EOS_SLOT_STATE_EMPTY
 };
 static uint32_t slot_versions[3] = {0, 0, 0};
+static uint8_t slot_boot_attempts[3] = {0, 0, 0};
+static bool slot_confirmed[3] = {false, false, false};
 
 /* ---- Stub implementations ---- */
 int eos_slot_scan_all(void) {
@@ -34,40 +36,71 @@ int eos_slot_scan_all(void) {
             slot_states[i] == EOS_SLOT_STATE_CONFIRMED)
             valid++;
     }
-    return valid;
+    erase_result = EOS_OK;
+    erased_addr = 0;
+    erased_size = 0;
 }
 
-bool eos_slot_is_valid(eos_slot_t slot) {
-    if (slot > EOS_SLOT_RECOVERY) return false;
-    return (slot_states[slot] == EOS_SLOT_STATE_VALID ||
-            slot_states[slot] == EOS_SLOT_STATE_CONFIRMED);
+uint32_t eos_hal_slot_addr(eos_slot_t slot)
+{
+    if (slot == EOS_SLOT_A) return SLOT_A_ADDR;
+    if (slot == EOS_SLOT_B) return SLOT_B_ADDR;
+    return 0;
 }
 
-uint32_t eos_slot_get_version(eos_slot_t slot) {
-    if (slot > EOS_SLOT_RECOVERY) return 0;
-    if (slot_states[slot] == EOS_SLOT_STATE_EMPTY) return 0;
-    return slot_versions[slot];
+uint32_t eos_hal_slot_size(eos_slot_t slot)
+{
+    return slot <= EOS_SLOT_B ? SLOT_SIZE : 0;
 }
 
-int eos_slot_get_header(eos_slot_t slot, eos_image_header_t *out) {
-    if (slot > EOS_SLOT_RECOVERY || !out) return EOS_ERR_INVALID;
-    if (slot_states[slot] == EOS_SLOT_STATE_EMPTY) return EOS_ERR_NO_IMAGE;
-    memset(out, 0, sizeof(*out));
-    out->magic = EOS_IMG_MAGIC;
-    out->image_version = slot_versions[slot];
-    return EOS_OK;
+int eos_hal_flash_erase(uint32_t addr, size_t len)
+{
+    erased_addr = addr;
+    erased_size = len;
+    return erase_result;
 }
 
-eos_slot_state_t eos_slot_get_state(eos_slot_t slot) {
-    if (slot > EOS_SLOT_RECOVERY) return EOS_SLOT_STATE_EMPTY;
-    return slot_states[slot];
-}
+int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
+{
+    int slot = slot_index(addr);
+    if (slot < 0 || !out) return EOS_ERR_INVALID;
+    if (parse_result[slot] != EOS_OK) return parse_result[slot];
 
 int eos_slot_erase(eos_slot_t slot) {
     if (slot > EOS_SLOT_RECOVERY) return EOS_ERR_INVALID;
     slot_states[slot] = EOS_SLOT_STATE_EMPTY;
     slot_versions[slot] = 0;
+    slot_boot_attempts[slot] = 0;
+    slot_confirmed[slot] = false;
     return EOS_OK;
+}
+
+int eos_slot_mark_booting(eos_slot_t slot) {
+    if (slot > EOS_SLOT_RECOVERY) return EOS_ERR_INVALID;
+    if (slot_boot_attempts[slot] < 255) {
+        slot_boot_attempts[slot]++;
+    }
+    return EOS_OK;
+}
+
+int eos_slot_confirm(eos_slot_t slot) {
+    if (slot > EOS_SLOT_RECOVERY) return EOS_ERR_INVALID;
+    slot_boot_attempts[slot] = 0;
+    slot_confirmed[slot] = true;
+    if (slot_states[slot] == EOS_SLOT_STATE_VALID) {
+        slot_states[slot] = EOS_SLOT_STATE_CONFIRMED;
+    }
+    return EOS_OK;
+}
+
+bool eos_slot_needs_rollback(eos_slot_t slot, uint8_t max_attempts) {
+    if (slot > EOS_SLOT_RECOVERY || max_attempts == 0) return false;
+    return slot_boot_attempts[slot] >= max_attempts;
+}
+
+uint8_t eos_slot_get_boot_attempts(eos_slot_t slot) {
+    if (slot > EOS_SLOT_RECOVERY) return 0;
+    return slot_boot_attempts[slot];
 }
 
 /* ---- Helper ---- */
@@ -76,6 +109,8 @@ static void reset_slots(void) {
     for (int i = 0; i < 3; i++) {
         slot_states[i] = EOS_SLOT_STATE_EMPTY;
         slot_versions[i] = 0;
+        slot_boot_attempts[i] = 0;
+        slot_confirmed[i] = false;
     }
 }
 
@@ -87,170 +122,122 @@ static void test_scan_no_valid_slots(void) {
     PASS("scan_no_valid_slots");
 }
 
-static void test_scan_one_valid_slot(void) {
+int eos_image_verify_signature(const eos_image_header_t *hdr)
+{
+    if (!hdr || hdr->reserved[0] > EOS_SLOT_B) return EOS_ERR_INVALID;
+    return signature_result[hdr->reserved[0]];
+}
+
+static void make_valid(eos_slot_t slot, uint32_t version)
+{
+    parse_result[slot] = EOS_OK;
+    slot_version[slot] = version;
+}
+
+static void test_scan_no_valid_slots(void)
+{
+    ASSERT(eos_slot_scan_all() == 0);
+    ASSERT(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_EMPTY);
+    ASSERT(eos_slot_get_state(EOS_SLOT_B) == EOS_SLOT_STATE_EMPTY);
+}
+
+static void test_scan_one_valid_slot(void)
+{
+    make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 2, 3));
+
+    ASSERT(eos_slot_scan_all() == 1);
+    ASSERT(eos_slot_is_valid(EOS_SLOT_A));
+    ASSERT(!eos_slot_is_valid(EOS_SLOT_B));
+    ASSERT(eos_slot_get_version(EOS_SLOT_A) == EOS_VERSION_MAKE(1, 2, 3));
+
+    eos_image_header_t header;
+    ASSERT(eos_slot_get_header(EOS_SLOT_A, &header) == EOS_OK);
+    ASSERT(header.image_version == EOS_VERSION_MAKE(1, 2, 3));
+}
+
+static void test_scan_two_valid_slots(void)
+{
+    make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 0, 0));
+    make_valid(EOS_SLOT_B, EOS_VERSION_MAKE(2, 0, 0));
+
+    ASSERT(eos_slot_scan_all() == 2);
+    ASSERT(eos_slot_is_valid(EOS_SLOT_A));
+    ASSERT(eos_slot_is_valid(EOS_SLOT_B));
+    ASSERT(eos_slot_get_version(EOS_SLOT_B) == EOS_VERSION_MAKE(2, 0, 0));
+}
+
+static void test_verification_failures_are_invalid(void)
+{
+    make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 0, 0));
+    make_valid(EOS_SLOT_B, EOS_VERSION_MAKE(2, 0, 0));
+    integrity_result[EOS_SLOT_A] = EOS_ERR_CRC;
+    signature_result[EOS_SLOT_B] = EOS_ERR_SIGNATURE;
+
+    ASSERT(eos_slot_scan_all() == 0);
+    ASSERT(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_INVALID);
+    ASSERT(eos_slot_get_state(EOS_SLOT_B) == EOS_SLOT_STATE_INVALID);
+    ASSERT(eos_slot_get_header(EOS_SLOT_A, NULL) == EOS_ERR_INVALID);
+}
+
+static void test_invalid_slot_is_rejected(void)
+{
+    ASSERT(!eos_slot_is_valid(EOS_SLOT_RECOVERY));
+    ASSERT(eos_slot_get_state(EOS_SLOT_RECOVERY) == EOS_SLOT_STATE_EMPTY);
+    ASSERT(eos_slot_get_version(EOS_SLOT_RECOVERY) == 0);
+    ASSERT(eos_slot_get_header(EOS_SLOT_RECOVERY, NULL) == EOS_ERR_INVALID);
+    ASSERT(eos_slot_erase(EOS_SLOT_RECOVERY) == EOS_ERR_INVALID);
+}
+
+static void test_erase_updates_state_only_on_success(void)
+{
+    make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 0, 0));
+    ASSERT(eos_slot_scan_all() == 1);
+
+    erase_result = EOS_ERR_FLASH;
+    ASSERT(eos_slot_erase(EOS_SLOT_A) == EOS_ERR_FLASH);
+    ASSERT(eos_slot_is_valid(EOS_SLOT_A));
+
+    erase_result = EOS_OK;
+    ASSERT(eos_slot_erase(EOS_SLOT_A) == EOS_OK);
+    ASSERT(erased_addr == SLOT_A_ADDR);
+    ASSERT(erased_size == SLOT_SIZE);
+    ASSERT(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_EMPTY);
+    ASSERT(eos_slot_get_version(EOS_SLOT_A) == 0);
+}
+
+static void test_boot_attempts_and_rollback(void) {
     reset_slots();
     slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    slot_versions[EOS_SLOT_A] = EOS_VERSION_MAKE(1, 0, 0);
-    int count = eos_slot_scan_all();
-    assert(count == 1);
-    PASS("scan_one_valid_slot");
-}
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 0);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
 
-static void test_scan_two_valid_slots(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    slot_states[EOS_SLOT_B] = EOS_SLOT_STATE_CONFIRMED;
-    slot_versions[EOS_SLOT_A] = EOS_VERSION_MAKE(1, 0, 0);
-    slot_versions[EOS_SLOT_B] = EOS_VERSION_MAKE(2, 0, 0);
-    int count = eos_slot_scan_all();
-    assert(count == 2);
-    PASS("scan_two_valid_slots");
-}
+    // Attempt 1
+    assert(eos_slot_mark_booting(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 1);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
 
-static void test_scan_all_slots_valid(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    slot_states[EOS_SLOT_B] = EOS_SLOT_STATE_VALID;
-    slot_states[EOS_SLOT_RECOVERY] = EOS_SLOT_STATE_CONFIRMED;
-    int count = eos_slot_scan_all();
-    assert(count == 3);
-    PASS("scan_all_slots_valid");
-}
+    // Attempt 2
+    assert(eos_slot_mark_booting(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 2);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
 
-static void test_slot_is_valid_empty(void) {
-    reset_slots();
-    assert(!eos_slot_is_valid(EOS_SLOT_A));
-    PASS("slot_is_valid_empty");
-}
+    // Attempt 3 (hits max allowed 3)
+    assert(eos_slot_mark_booting(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 3);
+    assert(eos_slot_needs_rollback(EOS_SLOT_A, 3));
 
-static void test_slot_is_valid_with_image(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    assert(eos_slot_is_valid(EOS_SLOT_A));
-    PASS("slot_is_valid_with_image");
-}
+    // Confirm slot (resets boot attempts and confirms)
+    assert(eos_slot_confirm(EOS_SLOT_A) == EOS_OK);
+    assert(eos_slot_get_boot_attempts(EOS_SLOT_A) == 0);
+    assert(!eos_slot_needs_rollback(EOS_SLOT_A, 3));
+    assert(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_CONFIRMED);
 
-static void test_slot_is_valid_confirmed(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_B] = EOS_SLOT_STATE_CONFIRMED;
-    assert(eos_slot_is_valid(EOS_SLOT_B));
-    PASS("slot_is_valid_confirmed");
-}
-
-static void test_slot_is_valid_invalid_state(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_INVALID;
-    assert(!eos_slot_is_valid(EOS_SLOT_A));
-    PASS("slot_is_valid_invalid_state");
-}
-
-static void test_slot_get_version_empty(void) {
-    reset_slots();
-    uint32_t ver = eos_slot_get_version(EOS_SLOT_A);
-    assert(ver == 0);
-    PASS("slot_get_version_empty");
-}
-
-static void test_slot_get_version_with_image(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    slot_versions[EOS_SLOT_A] = EOS_VERSION_MAKE(2, 3, 5);
-    uint32_t ver = eos_slot_get_version(EOS_SLOT_A);
-    assert(EOS_VERSION_MAJOR(ver) == 2);
-    assert(EOS_VERSION_MINOR(ver) == 3);
-    assert(EOS_VERSION_PATCH(ver) == 5);
-    PASS("slot_get_version_with_image");
-}
-
-static void test_slot_get_state_empty(void) {
-    reset_slots();
-    eos_slot_state_t state = eos_slot_get_state(EOS_SLOT_A);
-    assert(state == EOS_SLOT_STATE_EMPTY);
-    PASS("slot_get_state_empty");
-}
-
-static void test_slot_get_state_valid(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_B] = EOS_SLOT_STATE_VALID;
-    assert(eos_slot_get_state(EOS_SLOT_B) == EOS_SLOT_STATE_VALID);
-    PASS("slot_get_state_valid");
-}
-
-static void test_slot_get_state_testing(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_TESTING;
-    assert(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_TESTING);
-    PASS("slot_get_state_testing");
-}
-
-static void test_slot_erase(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    slot_versions[EOS_SLOT_A] = EOS_VERSION_MAKE(1, 0, 0);
-    int rc = eos_slot_erase(EOS_SLOT_A);
-    assert(rc == EOS_OK);
-    assert(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_EMPTY);
-    assert(eos_slot_get_version(EOS_SLOT_A) == 0);
-    PASS("slot_erase");
-}
-
-static void test_slot_erase_already_empty(void) {
-    reset_slots();
-    int rc = eos_slot_erase(EOS_SLOT_B);
-    assert(rc == EOS_OK);
-    PASS("slot_erase_already_empty");
-}
-
-static void test_slot_get_header_valid(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    slot_versions[EOS_SLOT_A] = EOS_VERSION_MAKE(3, 1, 0);
-    eos_image_header_t hdr;
-    int rc = eos_slot_get_header(EOS_SLOT_A, &hdr);
-    assert(rc == EOS_OK);
-    assert(hdr.magic == EOS_IMG_MAGIC);
-    assert(hdr.image_version == EOS_VERSION_MAKE(3, 1, 0));
-    PASS("slot_get_header_valid");
-}
-
-static void test_slot_get_header_empty(void) {
-    reset_slots();
-    eos_image_header_t hdr;
-    int rc = eos_slot_get_header(EOS_SLOT_A, &hdr);
-    assert(rc == EOS_ERR_NO_IMAGE);
-    PASS("slot_get_header_empty");
-}
-
-static void test_slot_get_header_null(void) {
-    reset_slots();
-    slot_states[EOS_SLOT_A] = EOS_SLOT_STATE_VALID;
-    int rc = eos_slot_get_header(EOS_SLOT_A, NULL);
-    assert(rc == EOS_ERR_INVALID);
-    PASS("slot_get_header_null");
-}
-
-static void test_version_macro_encoding(void) {
-    uint32_t v = EOS_VERSION_MAKE(1, 2, 3);
-    assert(EOS_VERSION_MAJOR(v) == 1);
-    assert(EOS_VERSION_MINOR(v) == 2);
-    assert(EOS_VERSION_PATCH(v) == 3);
-    PASS("version_macro_encoding");
-}
-
-static void test_version_macro_max_values(void) {
-    uint32_t v = EOS_VERSION_MAKE(255, 255, 65535);
-    assert(EOS_VERSION_MAJOR(v) == 255);
-    assert(EOS_VERSION_MINOR(v) == 255);
-    assert(EOS_VERSION_PATCH(v) == 65535);
-    PASS("version_macro_max_values");
-}
-
-static void test_slot_enum_values(void) {
-    assert(EOS_SLOT_A == 0);
-    assert(EOS_SLOT_B == 1);
-    assert(EOS_SLOT_RECOVERY == 2);
-    assert(EOS_SLOT_NONE == 0xFF);
-    PASS("slot_enum_values");
+    // Invalid slot handles
+    assert(eos_slot_mark_booting((eos_slot_t)0xFE) == EOS_ERR_INVALID);
+    assert(eos_slot_confirm((eos_slot_t)0xFE) == EOS_ERR_INVALID);
+    assert(eos_slot_get_boot_attempts((eos_slot_t)0xFE) == 0);
+    assert(!eos_slot_needs_rollback((eos_slot_t)0xFE, 3));
+    PASS("boot_attempts_and_rollback");
 }
 
 int main(void) {
@@ -276,6 +263,7 @@ int main(void) {
     test_version_macro_encoding();
     test_version_macro_max_values();
     test_slot_enum_values();
+    test_boot_attempts_and_rollback();
     printf("\n=== ALL %d TESTS PASSED ===\n", passed);
     return 0;
 }

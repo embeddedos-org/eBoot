@@ -9,6 +9,7 @@
 
 #include "eos_bootctl.h"
 #include "eos_image.h"
+#include "eos_slot_manager.h"
 #include "eos_hal.h"
 
 /* Per-slot cached state */
@@ -16,6 +17,8 @@ typedef struct {
     eos_slot_state_t state;
     eos_image_header_t header;
     bool header_valid;
+    uint8_t boot_attempts;
+    bool confirmed;
 } slot_info_t;
 
 static slot_info_t slots[2];
@@ -56,9 +59,10 @@ static int verify_slot(eos_slot_t slot)
 
 int eos_slot_scan_all(void)
 {
-    verify_slot(EOS_SLOT_A);
-    verify_slot(EOS_SLOT_B);
-    return EOS_OK;
+    int valid = 0;
+    if (verify_slot(EOS_SLOT_A) == EOS_OK) valid++;
+    if (verify_slot(EOS_SLOT_B) == EOS_OK) valid++;
+    return valid;
 }
 
 eos_slot_state_t eos_slot_get_state(eos_slot_t slot)
@@ -102,6 +106,8 @@ int eos_slot_erase(eos_slot_t slot)
     if (slot <= EOS_SLOT_B) {
         slots[slot].state = EOS_SLOT_STATE_EMPTY;
         slots[slot].header_valid = false;
+        slots[slot].boot_attempts = 0;
+        slots[slot].confirmed = false;
     }
 
     return EOS_OK;
@@ -116,4 +122,44 @@ uint32_t eos_slot_get_version(eos_slot_t slot)
         return 0;
 
     return slots[slot].header.image_version;
+}
+
+int eos_slot_mark_booting(eos_slot_t slot)
+{
+    if (slot > EOS_SLOT_B)
+        return EOS_ERR_INVALID;
+
+    if (slots[slot].boot_attempts < 255) {
+        slots[slot].boot_attempts++;
+    }
+    return EOS_OK;
+}
+
+int eos_slot_confirm(eos_slot_t slot)
+{
+    if (slot > EOS_SLOT_B)
+        return EOS_ERR_INVALID;
+
+    slots[slot].boot_attempts = 0;
+    slots[slot].confirmed = true;
+    if (slots[slot].state == EOS_SLOT_STATE_VALID) {
+        slots[slot].state = EOS_SLOT_STATE_CONFIRMED;
+    }
+    return EOS_OK;
+}
+
+bool eos_slot_needs_rollback(eos_slot_t slot, uint8_t max_attempts)
+{
+    if (slot > EOS_SLOT_B || max_attempts == 0)
+        return false;
+
+    return slots[slot].boot_attempts >= max_attempts;
+}
+
+uint8_t eos_slot_get_boot_attempts(eos_slot_t slot)
+{
+    if (slot > EOS_SLOT_B)
+        return 0;
+
+    return slots[slot].boot_attempts;
 }
