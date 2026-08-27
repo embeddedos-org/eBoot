@@ -30,8 +30,11 @@ static uint32_t crc32_byte(uint32_t crc, uint8_t byte)
     return crc;
 }
 
-uint32_t eos_crc32(uint32_t addr, size_t len)
+int eos_crc32(uint32_t addr, size_t len, uint32_t *out)
 {
+    if (!out)
+        return EOS_ERR_INVALID;
+
     uint32_t crc = 0xFFFFFFFF;
     uint8_t buf[256];
 
@@ -39,7 +42,7 @@ uint32_t eos_crc32(uint32_t addr, size_t len)
         size_t chunk = (len > sizeof(buf)) ? sizeof(buf) : len;
 
         if (eos_hal_flash_read(addr, buf, chunk) != EOS_OK)
-            return 0;
+            return EOS_ERR_FLASH;
 
         for (size_t i = 0; i < chunk; i++) {
             crc = crc32_byte(crc, buf[i]);
@@ -49,7 +52,8 @@ uint32_t eos_crc32(uint32_t addr, size_t len)
         len -= chunk;
     }
 
-    return ~crc;
+    *out = ~crc;
+    return EOS_OK;
 }
 
 int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
@@ -102,8 +106,13 @@ int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr)
         return EOS_OK;
     }
 
-    /* CRC32 fallback */
-    uint32_t computed_crc = eos_crc32(payload_addr, hdr->image_size);
+    /* CRC32 fallback. A failed read must not be mistaken for a CRC of zero:
+     * an image whose stored CRC is zero and whose payload runs past the end
+     * of the device would otherwise verify clean without a byte being read. */
+    uint32_t computed_crc;
+    int rc = eos_crc32(payload_addr, hdr->image_size, &computed_crc);
+    if (rc != EOS_OK)
+        return rc;
 
     uint32_t stored_crc;
     memcpy(&stored_crc, hdr->hash, sizeof(stored_crc));

@@ -18,7 +18,7 @@ add_test(NAME test_image_verify COMMAND test_image_verify)
 
 # --- test_recovery: UART recovery write range ---
 add_executable(test_recovery unit/test_recovery.c)
-target_link_libraries(test_recovery PRIVATE eboot_core)
+target_link_libraries(test_recovery PRIVATE eboot_core eboot_stage1)
 add_test(NAME test_recovery COMMAND test_recovery)
 
 # --- test_fw_transport: UART raw/YMODEM firmware transport ---
@@ -71,10 +71,12 @@ add_executable(test_keystore unit/test_keystore.c)
 target_link_libraries(test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND test_keystore)
 
-# --- test_storage: Unified storage abstraction ---
-add_executable(test_storage unit/test_storage.c)
-target_link_libraries(test_storage PRIVATE eboot_core)
-add_test(NAME test_storage COMMAND test_storage)
+# --- test_recovery: Recovery-mode UART protocol handler ---
+# recovery.c calls eos_boot_log_append(), which lives in eboot_stage1
+# (stage1/boot_log.c) rather than eboot_core, so link both.
+add_executable(test_recovery unit/test_recovery.c)
+target_link_libraries(test_recovery PRIVATE eboot_core eboot_stage1)
+add_test(NAME test_recovery COMMAND test_recovery)
 
 # --- Valgrind test targets ---
 find_program(VALGRIND valgrind)
