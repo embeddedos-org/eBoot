@@ -21,6 +21,11 @@ add_executable(test_recovery unit/test_recovery.c)
 target_link_libraries(test_recovery PRIVATE eboot_core eboot_stage1)
 add_test(NAME test_recovery COMMAND test_recovery)
 
+# --- test_fw_transport: UART raw/YMODEM firmware transport ---
+add_executable(test_fw_transport unit/test_fw_transport.c)
+target_link_libraries(test_fw_transport PRIVATE eboot_core)
+add_test(NAME test_fw_transport COMMAND test_fw_transport)
+
 # --- test_device_table: UEFI-style device table ---
 add_executable(test_device_table unit/test_device_table.c)
 target_link_libraries(test_device_table PRIVATE eboot_core)
@@ -83,7 +88,8 @@ if(VALGRIND)
     foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
-                      test_boot_log test_image_verify test_recovery)
+                      test_boot_log test_image_verify test_recovery
+                      test_fw_transport)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:${TEST_NAME}>
