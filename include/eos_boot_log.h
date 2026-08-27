@@ -54,15 +54,12 @@ int eos_boot_log_init(void);
 void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail);
 
 /**
- * @brief Read all boot log entries into a caller-provided buffer.
- *
- * Entries are returned in chronological order (oldest first).
- *
- * @param entries   Output buffer for log entries.
- * @param max_count Maximum number of entries the buffer can hold.
- * @return Number of entries read, or negative error code.
+ * @brief Read one boot log entry by index.
+ * @param index  Entry index (0 to EOS_BOOT_LOG_MAX - 1).
+ * @param out    Receives the entry at @p index.
+ * @return EOS_OK on success, EOS_ERR_INVALID on a bad index or null @p out.
  */
-int eos_boot_log_read(eos_boot_log_entry_t *entries, uint32_t max_count);
+int eos_boot_log_read(uint32_t index, eos_boot_log_entry_t *out);
 
 /**
  * @brief Get the number of log entries currently stored.

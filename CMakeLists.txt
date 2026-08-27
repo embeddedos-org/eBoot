@@ -80,7 +80,6 @@ target_include_directories(eboot_hal PUBLIC ${EBLDR_INCLUDE_DIR})
 # ---- Core boot logic ----
 add_library(eboot_core STATIC
     core/bootctl.c
-    core/boot_log.c
     core/image_verify.c
     core/slot_manager.c
     core/boot_policy.c
@@ -107,7 +106,9 @@ add_library(eboot_core STATIC
     core/bmc_handoff.c
     core/os_adapter.c
     core/ed25519_verify.c
+    core/sha512.c
     core/keystore.c
+    core/rollback.c
     core/debug_lock.c
     core/fw_decrypt.c
     core/image_tlv.c
