@@ -42,6 +42,20 @@ elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra)
 endif()
 
+# Mixing up the reset enums is a security-relevant error rather than a style
+# nit: eos_reset_reason_t (why a reset happened) and eos_reset_type_t (which
+# reset to perform) overlap numerically, so passing one where the other is
+# expected silently selects the wrong action. Promote that specific diagnostic
+# to an error so it cannot be reintroduced.
+#
+# Scoped to native GCC/Clang builds. That covers core/ and hal/, the
+# platform-agnostic code where this class of mistake actually occurs, without
+# promoting warnings to errors in per-board cross builds whose sources are not
+# compiled here. MSVC has no equivalent flag.
+if(NOT CMAKE_CROSSCOMPILING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Werror=enum-conversion)
+endif()
+
 # Security hardening flags
 if(EBLDR_HARDENING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-fstack-protector-strong -D_FORTIFY_SOURCE=2)
@@ -104,7 +118,10 @@ add_library(eboot_core STATIC
     core/ecc_scrub.c
     core/bmc_handoff.c
     core/os_adapter.c
+    core/sha512.c
     core/ed25519_verify.c
+    core/secure_boot.c
+    core/fdt_loader.c
     core/keystore.c
     core/debug_lock.c
     core/fw_decrypt.c
