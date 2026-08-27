@@ -83,7 +83,8 @@ if(VALGRIND)
     foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
-                      test_boot_log test_image_verify test_recovery)
+                      test_boot_log test_image_verify test_recovery
+                      test_fw_transport)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:${TEST_NAME}>

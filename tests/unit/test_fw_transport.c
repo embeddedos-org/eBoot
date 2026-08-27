@@ -29,23 +29,31 @@ static uint8_t sim_flash[SIM_FLASH_SIZE];
 #define SIM_SLOT_B_ADDR  0x10000
 #define SIM_SLOT_B_SIZE  0x08000
 
+/* Written so the sum cannot wrap: a simulator that fails open would turn a
+ * bounds bug in the code under test into a corrupted heap instead of a
+ * legible test failure. */
+static int sim_range_ok(uint32_t addr, size_t len)
+{
+    return len <= SIM_FLASH_SIZE && (size_t)addr <= SIM_FLASH_SIZE - len;
+}
+
 static int sim_flash_read(uint32_t addr, void *buf, size_t len)
 {
-    if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
+    if (!sim_range_ok(addr, len)) return EOS_ERR_FLASH;
     memcpy(buf, &sim_flash[addr], len);
     return EOS_OK;
 }
 
 static int sim_flash_write(uint32_t addr, const void *buf, size_t len)
 {
-    if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
+    if (!sim_range_ok(addr, len)) return EOS_ERR_FLASH;
     memcpy(&sim_flash[addr], buf, len);
     return EOS_OK;
 }
 
 static int sim_flash_erase(uint32_t addr, size_t len)
 {
-    if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
+    if (!sim_range_ok(addr, len)) return EOS_ERR_FLASH;
     memset(&sim_flash[addr], 0xFF, len);
     return EOS_OK;
 }
@@ -163,11 +171,13 @@ static int tests_passed = 0;
 
 /* ---- Stream-building helpers ---- */
 
-#define XM_SOH 0x01
-#define XM_EOT 0x04
-#define XM_ACK 0x06
-#define XM_NAK 0x15
-#define BLOCK  128
+#define XM_SOH  0x01
+#define XM_STX  0x02
+#define XM_EOT  0x04
+#define XM_ACK  0x06
+#define XM_NAK  0x15
+#define BLOCK   128
+#define BLOCK_L 1024
 
 static void rx_push(const uint8_t *data, size_t n)
 {
@@ -191,22 +201,30 @@ static uint16_t crc16_xmodem(const uint8_t *data, size_t len)
     return crc;
 }
 
-/* Append one 128-byte YMODEM/XMODEM block with a correct CRC. */
-static void push_block(uint8_t blk, const uint8_t *payload, size_t n)
+/* Append one YMODEM/XMODEM block with a correct CRC. `marker` selects the
+ * framing: SOH for 128-byte blocks, STX for 1024-byte blocks. */
+static void push_block_sized(uint8_t marker, uint8_t blk,
+                             const uint8_t *payload, size_t n, size_t block_size)
 {
-    uint8_t body[BLOCK];
-    memset(body, 0, sizeof(body));
-    if (n > BLOCK) n = BLOCK;
+    uint8_t body[BLOCK_L];
+    memset(body, 0, block_size);
+    if (n > block_size) n = block_size;
     if (payload) memcpy(body, payload, n);
 
-    rx_push_byte(XM_SOH);
+    rx_push_byte(marker);
     rx_push_byte(blk);
     rx_push_byte((uint8_t)~blk);
-    rx_push(body, BLOCK);
+    rx_push(body, block_size);
 
-    uint16_t crc = crc16_xmodem(body, BLOCK);
+    uint16_t crc = crc16_xmodem(body, block_size);
     rx_push_byte((uint8_t)(crc >> 8));
     rx_push_byte((uint8_t)(crc & 0xFF));
+}
+
+/* Append one 128-byte SOH-framed block. */
+static void push_block(uint8_t blk, const uint8_t *payload, size_t n)
+{
+    push_block_sized(XM_SOH, blk, payload, n, BLOCK);
 }
 
 /* Append a block whose complement byte is deliberately wrong. */
@@ -391,6 +409,45 @@ TEST(test_ymodem_header_without_nul_is_bounded)
     ASSERT(flash_matches_image());
 }
 
+/*
+ * The 1024-byte STX framing is where the original strlen() over-read actually
+ * left the buffer: ymodem_receive()'s block[] is YMODEM_BLOCK_SIZE + 2 = 1026
+ * bytes and a full STX block fills every one of them. Fill byte 0x21 is chosen
+ * deliberately - its CRC over 1024 bytes is 0xE940, so neither CRC byte is NUL
+ * either and the old unbounded scan had nothing to stop it before running off
+ * the end. Under Valgrind this case reports an invalid read on unfixed code.
+ */
+TEST(test_ymodem_stx_header_without_nul_is_bounded)
+{
+    uint8_t body[BLOCK_L];
+    memset(body, 0x21, sizeof(body));
+
+    build_image();
+    push_block_sized(XM_STX, 0, body, sizeof(body), BLOCK_L);
+    push_image_block(0);
+    push_image_block(1);
+    push_image_block(2);
+    rx_push_byte(XM_EOT);
+    rx_push_byte(XM_EOT);
+
+    ASSERT(run_ymodem() == EOS_OK);
+    ASSERT(flash_matches_image());
+}
+
+/* Sequencing and duplicate suppression must apply on the STX path too. */
+TEST(test_ymodem_stx_duplicate_block_is_not_written_twice)
+{
+    build_image();
+    push_header_block("fw.bin", "384");
+    push_block_sized(XM_STX, 1, image_buf, image_len, BLOCK_L);
+    push_block_sized(XM_STX, 1, image_buf, image_len, BLOCK_L);  /* retransmit */
+    rx_push_byte(XM_EOT);
+    rx_push_byte(XM_EOT);
+
+    ASSERT(run_ymodem() == EOS_OK);
+    ASSERT(flash_matches_image());
+}
+
 /* A run of digits longer than 32 bits must not wrap into a bogus size. */
 TEST(test_ymodem_header_size_overflow_is_rejected)
 {
@@ -490,13 +547,15 @@ int main(void)
     run_test_ymodem_out_of_sequence_block_is_nakd();
     run_test_ymodem_bad_block_complement_is_nakd();
     run_test_ymodem_header_without_nul_is_bounded();
+    run_test_ymodem_stx_header_without_nul_is_bounded();
+    run_test_ymodem_stx_duplicate_block_is_not_written_twice();
     run_test_ymodem_header_size_overflow_is_rejected();
     run_test_ymodem_first_block_must_be_zero();
     run_test_raw_valid_transfer_is_written();
     run_test_raw_oversized_length_is_rejected();
     run_test_raw_zero_length_is_rejected();
 
-    tests_run = 10;
+    tests_run = 12;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
