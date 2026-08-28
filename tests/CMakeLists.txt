@@ -21,6 +21,11 @@ add_executable(test_recovery unit/test_recovery.c)
 target_link_libraries(test_recovery PRIVATE eboot_core eboot_stage1)
 add_test(NAME test_recovery COMMAND test_recovery)
 
+# --- test_fw_transport: UART raw/XMODEM/YMODEM firmware transport ---
+add_executable(test_fw_transport unit/test_fw_transport.c)
+target_link_libraries(test_fw_transport PRIVATE eboot_core)
+add_test(NAME test_fw_transport COMMAND test_fw_transport)
+
 # --- test_slot_size_bounds: verify_slot() must reject image_size > slot capacity ---
 add_executable(test_slot_size_bounds unit/test_slot_size_bounds.c)
 target_link_libraries(test_slot_size_bounds PRIVATE eboot_core)
@@ -89,7 +94,7 @@ if(VALGRIND)
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_recovery
-                      test_slot_size_bounds)
+                      test_slot_size_bounds test_fw_transport)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:${TEST_NAME}>
