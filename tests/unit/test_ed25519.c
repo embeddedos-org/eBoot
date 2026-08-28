@@ -219,6 +219,19 @@ TEST(test_ed25519_zero_signature_rejected)
     ASSERT(eos_ed25519_verify(sig, pk, msg, 1) != EOS_OK);
 }
 
+TEST(test_ed25519_identity_key_forgery_rejected)
+{
+    /* The identity point has compressed encoding 01 00...00. With both the
+     * public key and R set to the identity and S set to zero, the verification
+     * equation is true for every message unless low-order keys are rejected. */
+    uint8_t identity_pub[32] = {1};
+    uint8_t identity_sig[64] = {1};
+    const uint8_t msg[] = "untrusted firmware";
+
+    ASSERT(eos_ed25519_verify(identity_sig, identity_pub,
+                              msg, sizeof(msg) - 1) != EOS_OK);
+}
+
 /* ---- SHA-512, the hash Ed25519 is defined over (FIPS 180-4) ---- */
 
 TEST(test_sha512_known_answers)
@@ -281,10 +294,11 @@ int main(void)
     run_test_ed25519_null_args();
     run_test_ed25519_zero_pubkey_rejected();
     run_test_ed25519_zero_signature_rejected();
+    run_test_ed25519_identity_key_forgery_rejected();
     run_test_sha512_known_answers();
     run_test_sha512_streaming_matches_one_shot();
 
-    tests_run = 10;
+    tests_run = 11;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

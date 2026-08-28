@@ -286,6 +286,34 @@ static void scalarbase(gf r[4], const uint8_t *s)
     scalarmult(r, q, s);
 }
 
+static int point_is_identity(gf p[4])
+{
+    uint8_t encoded[32];
+    point_pack(encoded, p);
+
+    uint8_t diff = (uint8_t)(encoded[0] ^ 1U);
+    for (int i = 1; i < 32; i++)
+        diff |= encoded[i];
+    return diff == 0;
+}
+
+/* Public keys must be non-identity points in Ed25519's prime-order subgroup.
+ * Merely decoding a point is insufficient: an identity or torsion key can
+ * make the verification equation true without knowledge of a private key. */
+static int public_key_is_valid_subgroup(gf public_key[4])
+{
+    uint8_t order_l[32];
+    gf q[4], multiple[4];
+
+    for (int i = 0; i < 32; i++)
+        order_l[i] = (uint8_t)ORDER_L[i];
+    for (int i = 0; i < 4; i++)
+        fe_copy16(q[i], public_key[i]);
+
+    scalarmult(multiple, q, order_l);
+    return point_is_identity(multiple) && !point_is_identity(public_key);
+}
+
 /* Decode a compressed point into -P (the negation is what verification wants). */
 static int unpackneg(gf r[4], const uint8_t p[32])
 {
@@ -415,6 +443,8 @@ int eos_ed25519_verify(const uint8_t signature[64],
     /* Decode -A from the public key; a key off the curve is rejected here. */
     gf A[4];
     if (unpackneg(A, public_key) != EOS_OK)
+        return EOS_ERR_SIGNATURE;
+    if (!public_key_is_valid_subgroup(A))
         return EOS_ERR_SIGNATURE;
 
     /* k = SHA-512(R || A || M) mod L */
