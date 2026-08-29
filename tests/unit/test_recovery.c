@@ -14,6 +14,7 @@
  */
 
 #include "eos_bootctl.h"
+#include "eos_recovery.h"
 #include "eos_hal.h"
 #include "eos_crypto_boot.h"
 #include <setjmp.h>
@@ -197,8 +198,6 @@ static void script_append(const uint8_t *bytes, size_t len)
     script_len += len;
 }
 
-extern int eos_recovery_enter(eos_bootctl_t *bctl);
-
 /* ---- Test harness ---- */
 
 static int tests_run = 0;
@@ -231,6 +230,32 @@ static void setup(void)
     script_pos = 0;
     out_len = 0;
     eos_hal_init(&sim_ops);
+}
+
+TEST(test_write_in_range_rejects_zero_base)
+{
+    ASSERT(eos_recovery_write_in_range(0, 0x1000, 0, 16) == EOS_ERR_INVALID);
+}
+
+TEST(test_write_in_range_rejects_zero_len)
+{
+    ASSERT(eos_recovery_write_in_range(0x4000, 0x1000, 0, 0) == EOS_ERR_INVALID);
+}
+
+TEST(test_write_in_range_rejects_past_slot)
+{
+    ASSERT(eos_recovery_write_in_range(0x4000, 0x1000, 0x1000, 16) == EOS_ERR_INVALID);
+}
+
+TEST(test_write_in_range_rejects_base_offset_wrap)
+{
+    ASSERT(eos_recovery_write_in_range(0xFFFFFFF0u, 0x1000, 0x20, 16) == EOS_ERR_INVALID);
+}
+
+TEST(test_write_in_range_accepts_in_slot)
+{
+    ASSERT(eos_recovery_write_in_range(0x4000, 0x1000, 0, 16) == EOS_OK);
+    ASSERT(eos_recovery_write_in_range(0x4000, 0x1000, 0x1000 - 16, 16) == EOS_OK);
 }
 
 /* Authenticate, then drive an out-of-bounds WRITE (offset+len past the end
@@ -295,6 +320,11 @@ TEST(test_write_rejects_offset_past_slot_end)
 int main(void)
 {
     printf("=== test_recovery ===\n");
+    run_test_write_in_range_rejects_zero_base();
+    run_test_write_in_range_rejects_zero_len();
+    run_test_write_in_range_rejects_past_slot();
+    run_test_write_in_range_rejects_base_offset_wrap();
+    run_test_write_in_range_accepts_in_slot();
     run_test_write_rejects_offset_past_slot_end();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
