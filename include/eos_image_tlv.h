@@ -82,7 +82,8 @@ typedef struct {
  * @brief Parse TLV area from flash at given address.
  * @param ctx       TLV context (caller-allocated).
  * @param tlv_addr  Flash address of the TLV info header.
- * @return EOS_OK on success, EOS_ERR_INVALID if magic mismatch.
+ * @return EOS_OK on success, EOS_ERR_NOT_FOUND if there is no TLV area
+ *         (magic mismatch), EOS_ERR_INVALID if the TLV size is out of range.
  */
 int eos_tlv_parse(eos_tlv_ctx_t *ctx, uint32_t tlv_addr);
 
