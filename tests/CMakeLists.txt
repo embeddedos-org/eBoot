@@ -11,6 +11,11 @@ add_executable(eboot_test_crypto unit/test_crypto.c)
 target_link_libraries(eboot_test_crypto PRIVATE eboot_core)
 add_test(NAME test_crypto COMMAND eboot_test_crypto)
 
+# --- test_image_abi: .efw wire format, shared with eFirmware ---
+add_executable(eboot_test_image_abi unit/test_image_abi.c)
+target_link_libraries(eboot_test_image_abi PRIVATE eboot_core)
+add_test(NAME test_image_abi COMMAND eboot_test_image_abi)
+
 # --- test_image_verify: Image header parse bounds ---
 add_executable(eboot_test_image_verify unit/test_image_verify.c)
 target_link_libraries(eboot_test_image_verify PRIVATE eboot_core)
