@@ -81,6 +81,11 @@ add_executable(test_storage unit/test_storage.c)
 target_link_libraries(test_storage PRIVATE eboot_core)
 add_test(NAME test_storage COMMAND test_storage)
 
+# --- test_fw_transport: XMODEM/YMODEM firmware transport ---
+add_executable(test_fw_transport unit/test_fw_transport.c)
+target_link_libraries(test_fw_transport PRIVATE eboot_core)
+add_test(NAME test_fw_transport COMMAND test_fw_transport)
+
 # --- Valgrind test targets ---
 find_program(VALGRIND valgrind)
 if(VALGRIND)

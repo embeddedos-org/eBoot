@@ -29,7 +29,6 @@
 #include "eos_crypto_boot.h"
 #include "eos_types.h"
 #include <string.h>
-#include "eos_sha512.h"
 
 /* ================================================================
  * Field arithmetic mod p = 2^255 - 19
@@ -428,19 +427,23 @@ int eos_ed25519_verify(const uint8_t signature[64],
     eos_sha512_final(&ctx, k);
     reduce_hash(k);
 
-    /* Step 3: Compute k = SHA-256(R || A || M) reduced mod L */
-    /* Step 3: Compute k = SHA-512(R || A || M) reduced mod L */
-uint8_t k_hash[64];
-sha512_ctx_t ctx;
+    /* Accept iff [S]B == R + [k]A, checked as [S]B - [k]A == R.
+     *
+     * A already holds -A (unpackneg() negates on decode), so [k]A' is the
+     * subtraction. scalarmult() consumes its point argument in place, which is
+     * why q is reloaded with the base point only after [k]A' has been formed. */
+    gf p[4], q[4];
+    scalarmult(p, A, k);                 /* p = [k](-A)      */
+    scalarbase(q, &signature[32]);       /* q = [S]B         */
+    point_add(p, (const gf *)q);         /* p = [S]B - [k]A  */
 
-sha512_init(&ctx);
-sha512_update(&ctx, signature, 32);       /* R */
-sha512_update(&ctx, public_key, 32);      /* A */
-sha512_update(&ctx, message, msg_len);    /* M */
-sha512_final(&ctx, k_hash);
+    uint8_t check[32];
+    point_pack(check, p);
 
-uint8_t k[32];
-sc_reduce(k, k_hash);
+    /* Compare against R without an early exit, so a rejected signature costs
+     * the same time whatever byte it first differs at. */
+    uint8_t diff = 0;
+    for (int i = 0; i < 32; i++) diff |= (uint8_t)(check[i] ^ signature[i]);
 
     return diff == 0 ? EOS_OK : EOS_ERR_SIGNATURE;
 }
