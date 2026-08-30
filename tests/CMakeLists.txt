@@ -17,9 +17,9 @@ target_link_libraries(test_image_verify PRIVATE eboot_core)
 add_test(NAME test_image_verify COMMAND test_image_verify)
 
 # --- test_secure_boot: Secure boot policy gates ---
-add_executable(test_secure_boot unit/test_secure_boot.c)
-target_link_libraries(test_secure_boot PRIVATE eboot_core)
-add_test(NAME test_secure_boot COMMAND test_secure_boot)
+add_executable(eboot_test_secure_boot unit/test_secure_boot.c)
+target_link_libraries(eboot_test_secure_boot PRIVATE eboot_core)
+add_test(NAME test_secure_boot COMMAND eboot_test_secure_boot)
 
 # --- test_recovery: UART recovery write range ---
 add_executable(test_recovery unit/test_recovery.c)
