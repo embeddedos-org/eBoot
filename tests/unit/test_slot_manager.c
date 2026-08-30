@@ -5,10 +5,19 @@
 /**
  * @file test_slot_manager.c
  * @brief Unit tests for the production firmware slot manager
+ *
+ * These tests exercise the real core/slot_manager.c. The three image
+ * verification steps it calls -- eos_image_parse_header(),
+ * eos_image_verify_integrity() and eos_image_verify_signature() -- are
+ * replaced with per-slot scriptable mocks so each stage can be failed
+ * independently without having to build and sign real images. Flash and
+ * slot geometry come from the standard simulated eos_board_ops_t, so
+ * eos_hal_slot_addr()/eos_hal_slot_size() behave as they do on a board.
  */
 
-#include "eos_hal.h"
 #include "eos_slot_manager.h"
+#include "eos_image.h"
+#include "eos_hal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,24 +72,30 @@ static void reset_fixture(void)
     erased_size = 0;
 }
 
-uint32_t eos_hal_slot_addr(eos_slot_t slot)
+static int      parse_result[2];
+static int      integrity_result[2];
+static int      signature_result[2];
+static uint32_t slot_version[2];
+
+/* ---- Observed flash erase behaviour ---- */
+
+static int      erase_result;
+static uint32_t erased_addr;
+static size_t   erased_size;
+
+/** Map a flash address back to the slot that starts there, or -1. */
+static int slot_index(uint32_t addr)
 {
-    if (slot == EOS_SLOT_A) return SLOT_A_ADDR;
-    if (slot == EOS_SLOT_B) return SLOT_B_ADDR;
-    return 0;
+    if (addr == SLOT_A_ADDR) return EOS_SLOT_A;
+    if (addr == SLOT_B_ADDR) return EOS_SLOT_B;
+    return -1;
 }
 
-uint32_t eos_hal_slot_size(eos_slot_t slot)
-{
-    return slot <= EOS_SLOT_B ? SLOT_SIZE : 0;
-}
-
-int eos_hal_flash_erase(uint32_t addr, size_t len)
-{
-    erased_addr = addr;
-    erased_size = len;
-    return erase_result;
-}
+/* ---- Image verification mocks (override eboot_core's real ones) ----
+ *
+ * verify_slot() passes the parsed header straight to the integrity and
+ * signature checks, so the mocks stash the slot index in reserved[0] on
+ * parse and read it back to decide which scripted result to return. */
 
 int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
 {
@@ -102,26 +117,107 @@ int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr)
     return integrity_result[slot];
 }
 
-int eos_image_verify_signature(const eos_image_header_t *hdr)
+static int sim_flash_erase(uint32_t addr, size_t len)
 {
-    if (!hdr || hdr->reserved[0] > EOS_SLOT_B) return EOS_ERR_INVALID;
-    return signature_result[hdr->reserved[0]];
+    erased_addr = addr;
+    erased_size = len;
+    if (erase_result != EOS_OK) return erase_result;
+    if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
+    memset(&sim_flash[addr], 0xFF, len);
+    return EOS_OK;
 }
 
+static uint32_t sim_tick = 0;
+static uint32_t sim_get_tick(void) { return sim_tick++; }
+static void sim_noop(void) {}
+static void sim_noop_u32(uint32_t x) { (void)x; }
+static void sim_jump(uint32_t addr) { (void)addr; }
+static eos_reset_reason_t sim_reset_reason(void) { return EOS_RESET_POWER_ON; }
+static bool sim_recovery_pin(void) { return false; }
+static void sim_system_reset(void) {}
+
+static const eos_board_ops_t sim_ops = {
+    .flash_base          = 0,
+    .flash_size          = SIM_FLASH_SIZE,
+    .slot_a_addr         = SLOT_A_ADDR,
+    .slot_a_size         = SLOT_SIZE,
+    .slot_b_addr         = SLOT_B_ADDR,
+    .slot_b_size         = SLOT_SIZE,
+    .recovery_addr       = 0,
+    .recovery_size       = 0,
+    .bootctl_addr        = 0,
+    .bootctl_backup_addr = 0x1000,
+    .log_addr            = 0x2000,
+    .app_vector_offset   = 0,
+    .flash_read          = sim_flash_read,
+    .flash_write         = sim_flash_write,
+    .flash_erase         = sim_flash_erase,
+    .watchdog_init       = sim_noop_u32,
+    .watchdog_feed       = sim_noop,
+    .get_reset_reason    = sim_reset_reason,
+    .system_reset        = sim_system_reset,
+    .recovery_pin_asserted = sim_recovery_pin,
+    .jump                = sim_jump,
+    .uart_init           = NULL,
+    .uart_send           = NULL,
+    .uart_recv           = NULL,
+    .get_tick_ms         = sim_get_tick,
+    .disable_interrupts  = sim_noop,
+    .enable_interrupts   = sim_noop,
+    .deinit_peripherals  = sim_noop,
+};
+
+/* ---- Test harness ---- */
+
+static int tests_run = 0;
+static int tests_passed = 0;
+
+#define TEST(name) \
+    static void name(void); \
+    static void run_##name(void) { \
+        memset(sim_flash, 0xFF, sizeof(sim_flash)); \
+        sim_tick = 0; \
+        for (int i = 0; i < 2; i++) { \
+            parse_result[i] = EOS_ERR_NO_IMAGE; \
+            integrity_result[i] = EOS_OK; \
+            signature_result[i] = EOS_OK; \
+            slot_version[i] = 0; \
+        } \
+        erase_result = EOS_OK; \
+        erased_addr = 0; \
+        erased_size = 0; \
+        eos_hal_init(&sim_ops); \
+        printf("  %-55s ", #name); \
+        name(); \
+        tests_passed++; \
+        printf("[PASS]\n"); \
+    } \
+    static void name(void)
+
+#define ASSERT(cond) do { \
+    if (!(cond)) { \
+        printf("[FAIL] %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+        exit(1); \
+    } \
+} while(0)
+
+/** Script a slot so that all three verification stages succeed. */
 static void make_valid(eos_slot_t slot, uint32_t version)
 {
     parse_result[slot] = EOS_OK;
     slot_version[slot] = version;
 }
 
-static void test_scan_no_valid_slots(void)
+/* ---- Tests ---- */
+
+TEST(test_scan_no_valid_slots)
 {
     ASSERT(eos_slot_scan_all() == 0);
     ASSERT(eos_slot_get_state(EOS_SLOT_A) == EOS_SLOT_STATE_EMPTY);
     ASSERT(eos_slot_get_state(EOS_SLOT_B) == EOS_SLOT_STATE_EMPTY);
 }
 
-static void test_scan_one_valid_slot(void)
+TEST(test_scan_one_valid_slot)
 {
     make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 2, 3));
 
@@ -135,7 +231,7 @@ static void test_scan_one_valid_slot(void)
     ASSERT(header.image_version == EOS_VERSION_MAKE(1, 2, 3));
 }
 
-static void test_scan_two_valid_slots(void)
+TEST(test_scan_two_valid_slots)
 {
     make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 0, 0));
     make_valid(EOS_SLOT_B, EOS_VERSION_MAKE(2, 0, 0));
@@ -146,7 +242,7 @@ static void test_scan_two_valid_slots(void)
     ASSERT(eos_slot_get_version(EOS_SLOT_B) == EOS_VERSION_MAKE(2, 0, 0));
 }
 
-static void test_verification_failures_are_invalid(void)
+TEST(test_verification_failures_are_invalid)
 {
     make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 0, 0));
     make_valid(EOS_SLOT_B, EOS_VERSION_MAKE(2, 0, 0));
@@ -159,7 +255,7 @@ static void test_verification_failures_are_invalid(void)
     ASSERT(eos_slot_get_header(EOS_SLOT_A, NULL) == EOS_ERR_INVALID);
 }
 
-static void test_invalid_slot_is_rejected(void)
+TEST(test_invalid_slot_is_rejected)
 {
     ASSERT(!eos_slot_is_valid(EOS_SLOT_RECOVERY));
     ASSERT(eos_slot_get_state(EOS_SLOT_RECOVERY) == EOS_SLOT_STATE_EMPTY);
@@ -168,7 +264,7 @@ static void test_invalid_slot_is_rejected(void)
     ASSERT(eos_slot_erase(EOS_SLOT_RECOVERY) == EOS_ERR_INVALID);
 }
 
-static void test_erase_updates_state_only_on_success(void)
+TEST(test_erase_updates_state_only_on_success)
 {
     make_valid(EOS_SLOT_A, EOS_VERSION_MAKE(1, 0, 0));
     ASSERT(eos_slot_scan_all() == 1);
