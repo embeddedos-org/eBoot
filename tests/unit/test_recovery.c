@@ -198,6 +198,8 @@ static void script_append(const uint8_t *bytes, size_t len)
 }
 
 extern int eos_recovery_enter(eos_bootctl_t *bctl);
+extern int eos_recovery_write_in_range(uint32_t base, uint32_t slot_size,
+                                       uint32_t offset, uint16_t len);
 
 /* ---- Test harness ---- */
 
@@ -231,6 +233,30 @@ static void setup(void)
     script_pos = 0;
     out_len = 0;
     eos_hal_init(&sim_ops);
+}
+
+TEST(test_write_range_helper_rejects_invalid_bounds)
+{
+    ASSERT(eos_recovery_write_in_range(SIM_SLOT_A_ADDR, SIM_SLOT_A_SIZE,
+                                       0, 1) == EOS_OK);
+    ASSERT(eos_recovery_write_in_range(SIM_SLOT_A_ADDR, SIM_SLOT_A_SIZE,
+                                       SIM_SLOT_A_SIZE - 16, 16) == EOS_OK);
+
+    ASSERT(eos_recovery_write_in_range(SIM_SLOT_A_ADDR, SIM_SLOT_A_SIZE,
+                                       SIM_SLOT_A_SIZE, 1) == EOS_ERR_INVALID);
+    ASSERT(eos_recovery_write_in_range(SIM_SLOT_A_ADDR, SIM_SLOT_A_SIZE,
+                                       SIM_SLOT_A_SIZE - 15, 16) == EOS_ERR_INVALID);
+    ASSERT(eos_recovery_write_in_range(0, SIM_SLOT_A_SIZE,
+                                       0, 1) == EOS_ERR_INVALID);
+    ASSERT(eos_recovery_write_in_range(SIM_SLOT_A_ADDR, 0,
+                                       0, 1) == EOS_ERR_INVALID);
+    ASSERT(eos_recovery_write_in_range(SIM_SLOT_A_ADDR, SIM_SLOT_A_SIZE,
+                                       0, 0) == EOS_ERR_INVALID);
+
+    ASSERT(eos_recovery_write_in_range(0xFFFFFFF0u, 0x100u,
+                                       0x20u, 1) == EOS_ERR_INVALID);
+    ASSERT(eos_recovery_write_in_range(0xFFFFFFF0u, 0x100u,
+                                       0, 17) == EOS_ERR_INVALID);
 }
 
 /* Authenticate, then drive an out-of-bounds WRITE (offset+len past the end
@@ -295,6 +321,7 @@ TEST(test_write_rejects_offset_past_slot_end)
 int main(void)
 {
     printf("=== test_recovery ===\n");
+    run_test_write_range_helper_rejects_invalid_bounds();
     run_test_write_rejects_offset_past_slot_end();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
