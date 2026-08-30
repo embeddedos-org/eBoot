@@ -84,7 +84,6 @@ add_library(eboot_core STATIC
     core/image_verify.c
     core/slot_manager.c
     core/boot_policy.c
-    core/boot_log.c
     core/recovery.c
     core/fw_services.c
     core/fw_update.c
@@ -113,6 +112,8 @@ add_library(eboot_core STATIC
     core/debug_lock.c
     core/fw_decrypt.c
     core/image_tlv.c
+    core/sha512.c
+    core/rollback.c
 )
 target_include_directories(eboot_core PUBLIC ${EBLDR_INCLUDE_DIR})
 target_link_libraries(eboot_core PUBLIC eboot_hal)
