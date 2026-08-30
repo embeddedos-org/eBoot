@@ -112,6 +112,7 @@ add_library(eboot_core STATIC
     core/image_tlv.c
     core/sha512.c
     core/rollback.c
+    core/secure_boot.c
 )
 target_include_directories(eboot_core PUBLIC ${EBLDR_INCLUDE_DIR})
 target_link_libraries(eboot_core PUBLIC eboot_hal)
