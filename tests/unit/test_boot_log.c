@@ -1,235 +1,267 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 EoS Project
 // ISO/IEC 25000 | ISO/IEC/IEEE 15288:2023
+
 /**
  * @file test_boot_log.c
- * @brief Unit tests for boot log subsystem
+ * @brief Unit tests for the boot log subsystem
+ *
+ * These exercise core/boot_log.c itself. The previous version of this file
+ * defined its own eos_boot_log_* functions, so the linker never pulled
+ * boot_log.c out of libeboot_core.a and the suite tested only its own stubs.
+ * Only the platform below is stubbed: flash and the tick counter.
  */
+
+#include "eos_boot_log.h"
+#include "eos_hal.h"
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
-#include "eos_boot_log.h"
+#include <stdlib.h>
 
-static int passed = 0;
-#define PASS(name) do { printf("[PASS] %s\n", name); passed++; } while(0)
+static int tests_passed = 0;
 
-/* ---- Simulated Boot Log Storage ---- */
-static eos_boot_log_entry_t log_buffer[EOS_BOOT_LOG_MAX];
-static int log_count = 0;
-static uint32_t log_tick = 1000;
+#define ASSERT(condition)                                                     \
+    do {                                                                      \
+        if (!(condition)) {                                                   \
+            fprintf(stderr, "[FAIL] %s:%d: %s\n",                             \
+                    __FILE__, __LINE__, #condition);                          \
+            exit(1);                                                          \
+        }                                                                     \
+    } while (0)
 
-/* ---- Stub implementations ---- */
-int eos_boot_log_init(void) {
-    memset(log_buffer, 0, sizeof(log_buffer));
-    log_count = 0;
+#define RUN(test)                                                             \
+    do {                                                                      \
+        reset_fixture();                                                      \
+        test();                                                               \
+        tests_passed++;                                                       \
+        printf("[PASS] %s\n", #test);                                         \
+    } while (0)
+
+/* ---- Simulated flash sector holding the log ---- */
+
+#define LOG_BASE 0x8000u
+#define LOG_BYTES (EOS_BOOT_LOG_MAX * sizeof(eos_boot_log_entry_t))
+
+static uint8_t sim_flash[LOG_BYTES];
+static int write_result;
+static int erase_result;
+static uint32_t erased_addr;
+static size_t erased_size;
+static uint32_t sim_tick;
+
+static eos_board_ops_t sim_ops;
+
+const eos_board_ops_t *eos_hal_get_ops(void)
+{
+    return &sim_ops;
+}
+
+uint32_t eos_hal_get_tick_ms(void)
+{
+    return ++sim_tick;
+}
+
+static int in_log(uint32_t addr, size_t len)
+{
+    return addr >= LOG_BASE && (uint64_t)addr + len <= (uint64_t)LOG_BASE + LOG_BYTES;
+}
+
+int eos_hal_flash_read(uint32_t addr, void *buf, size_t len)
+{
+    if (!buf || !in_log(addr, len))
+        return EOS_ERR_INVALID;
+    memcpy(buf, sim_flash + (addr - LOG_BASE), len);
     return EOS_OK;
 }
 
-void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail) {
-    if (log_count < EOS_BOOT_LOG_MAX) {
-        log_buffer[log_count].timestamp = log_tick++;
-        log_buffer[log_count].event = event;
-        log_buffer[log_count].slot = slot;
-        log_buffer[log_count].detail = detail;
-        log_count++;
-    } else {
-        /* Ring buffer: overwrite oldest */
-        memmove(&log_buffer[0], &log_buffer[1],
-                (EOS_BOOT_LOG_MAX - 1) * sizeof(eos_boot_log_entry_t));
-        log_buffer[EOS_BOOT_LOG_MAX - 1].timestamp = log_tick++;
-        log_buffer[EOS_BOOT_LOG_MAX - 1].event = event;
-        log_buffer[EOS_BOOT_LOG_MAX - 1].slot = slot;
-        log_buffer[EOS_BOOT_LOG_MAX - 1].detail = detail;
-    }
-}
-
-int eos_boot_log_read(eos_boot_log_entry_t *entries, uint32_t max_count) {
-    if (!entries) return EOS_ERR_INVALID;
-    uint32_t n = (uint32_t)log_count;
-    if (n > max_count) n = max_count;
-    memcpy(entries, log_buffer, n * sizeof(eos_boot_log_entry_t));
-    return (int)n;
-}
-
-uint32_t eos_boot_log_count(void) {
-    return (uint32_t)log_count;
-}
-
-int eos_boot_log_clear(void) {
-    memset(log_buffer, 0, sizeof(log_buffer));
-    log_count = 0;
+int eos_hal_flash_write(uint32_t addr, const void *buf, size_t len)
+{
+    if (!buf || !in_log(addr, len))
+        return EOS_ERR_INVALID;
+    if (write_result != EOS_OK)
+        return write_result;
+    memcpy(sim_flash + (addr - LOG_BASE), buf, len);
     return EOS_OK;
 }
 
-int eos_boot_log_flush(void) {
+int eos_hal_flash_erase(uint32_t addr, size_t len)
+{
+    erased_addr = addr;
+    erased_size = len;
+    if (erase_result != EOS_OK)
+        return erase_result;
+    if (!in_log(addr, len))
+        return EOS_ERR_INVALID;
+    memset(sim_flash + (addr - LOG_BASE), 0xFF, len);
     return EOS_OK;
 }
 
-int eos_boot_log_get_latest(eos_boot_log_entry_t *entry) {
-    if (!entry) return EOS_ERR_INVALID;
-    if (log_count == 0) return EOS_ERR_NO_IMAGE;
-    *entry = log_buffer[log_count - 1];
-    return EOS_OK;
-}
-
-const char *eos_boot_log_event_name(uint32_t event) {
-    switch (event) {
-        case EOS_LOG_BOOT_START:     return "BOOT_START";
-        case EOS_LOG_IMAGE_VALID:    return "IMAGE_VALID";
-        case EOS_LOG_IMAGE_INVALID:  return "IMAGE_INVALID";
-        case EOS_LOG_SLOT_SELECTED:  return "SLOT_SELECTED";
-        case EOS_LOG_ROLLBACK:       return "ROLLBACK";
-        case EOS_LOG_RECOVERY_ENTER: return "RECOVERY_ENTER";
-        case EOS_LOG_UPGRADE_START:  return "UPGRADE_START";
-        case EOS_LOG_UPGRADE_DONE:   return "UPGRADE_DONE";
-        case EOS_LOG_CONFIRM:        return "CONFIRM";
-        case EOS_LOG_FACTORY_RESET:  return "FACTORY_RESET";
-        case EOS_LOG_WATCHDOG_RESET: return "WATCHDOG_RESET";
-        case EOS_LOG_BOOT_FAIL:      return "BOOT_FAIL";
-        default:                     return "UNKNOWN";
-    }
+static void reset_fixture(void)
+{
+    memset(&sim_ops, 0, sizeof(sim_ops));
+    sim_ops.log_addr = LOG_BASE;
+    memset(sim_flash, 0xFF, sizeof(sim_flash));
+    write_result = EOS_OK;
+    erase_result = EOS_OK;
+    erased_addr = 0;
+    erased_size = 0;
+    sim_tick = 0;
 }
 
 /* ---- Tests ---- */
-static void test_log_init(void) {
-    int rc = eos_boot_log_init();
-    assert(rc == EOS_OK);
-    assert(eos_boot_log_count() == 0);
-    PASS("log_init");
-}
 
-static void test_log_append_single(void) {
-    eos_boot_log_init();
+/* stage0 reads the head out of the boot control block and hands it to
+ * eos_boot_log_init(). Appending before that would scribble over entry 0 of
+ * whatever the previous boot wrote, so it has to be a no-op. */
+static void test_append_before_init_is_ignored(void)
+{
     eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
-    assert(eos_boot_log_count() == 1);
-    PASS("log_append_single");
+
+    for (size_t i = 0; i < LOG_BYTES; i++)
+        ASSERT(sim_flash[i] == 0xFF);
 }
 
-static void test_log_append_multiple(void) {
-    eos_boot_log_init();
-    eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
-    eos_boot_log_append(EOS_LOG_IMAGE_VALID, EOS_SLOT_A, 0x01020003);
-    eos_boot_log_append(EOS_LOG_SLOT_SELECTED, EOS_SLOT_A, 0);
-    assert(eos_boot_log_count() == 3);
-    PASS("log_append_multiple");
-}
+static void test_append_writes_at_head_and_advances(void)
+{
+    eos_boot_log_init(0);
+    ASSERT(eos_boot_log_get_head() == 0);
 
-static void test_log_read_entries(void) {
-    eos_boot_log_init();
     eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 100);
-    eos_boot_log_append(EOS_LOG_ROLLBACK, EOS_SLOT_B, 200);
+    ASSERT(eos_boot_log_get_head() == 1);
 
-    eos_boot_log_entry_t entries[8];
-    int n = eos_boot_log_read(entries, 8);
-    assert(n == 2);
-    assert(entries[0].event == EOS_LOG_BOOT_START);
-    assert(entries[0].detail == 100);
-    assert(entries[1].event == EOS_LOG_ROLLBACK);
-    assert(entries[1].detail == 200);
-    PASS("log_read_entries");
+    eos_boot_log_append(EOS_LOG_ROLLBACK, EOS_SLOT_B, 200);
+    ASSERT(eos_boot_log_get_head() == 2);
+
+    eos_boot_log_entry_t entry;
+    ASSERT(eos_boot_log_read(0, &entry) == EOS_OK);
+    ASSERT(entry.event == EOS_LOG_BOOT_START);
+    ASSERT(entry.slot == EOS_SLOT_A);
+    ASSERT(entry.detail == 100);
+
+    ASSERT(eos_boot_log_read(1, &entry) == EOS_OK);
+    ASSERT(entry.event == EOS_LOG_ROLLBACK);
+    ASSERT(entry.slot == EOS_SLOT_B);
+    ASSERT(entry.detail == 200);
 }
 
-static void test_log_read_limited_buffer(void) {
-    eos_boot_log_init();
+/* The head is persisted across resets, so init() must resume where the last
+ * boot stopped rather than overwriting from zero. */
+static void test_init_resumes_from_persisted_head(void)
+{
+    eos_boot_log_init(5);
+    ASSERT(eos_boot_log_get_head() == 5);
+
+    eos_boot_log_append(EOS_LOG_CONFIRM, EOS_SLOT_A, 42);
+
+    eos_boot_log_entry_t entry;
+    ASSERT(eos_boot_log_read(5, &entry) == EOS_OK);
+    ASSERT(entry.event == EOS_LOG_CONFIRM);
+    ASSERT(eos_boot_log_read(0, &entry) == EOS_OK);
+    ASSERT(entry.event == 0xFFFFFFFFu); /* untouched erased flash */
+}
+
+/* A corrupt boot control block can hand back any 32-bit value; it must wrap
+ * into the ring instead of indexing past the log sector. */
+static void test_init_wraps_out_of_range_head(void)
+{
+    eos_boot_log_init(EOS_BOOT_LOG_MAX + 3);
+    ASSERT(eos_boot_log_get_head() == 3);
+
+    eos_boot_log_init(0xFFFFFFFFu);
+    ASSERT(eos_boot_log_get_head() < EOS_BOOT_LOG_MAX);
+}
+
+static void test_head_wraps_at_end_of_ring(void)
+{
+    eos_boot_log_init(EOS_BOOT_LOG_MAX - 1);
+
+    eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 1);
+    ASSERT(eos_boot_log_get_head() == 0);
+
+    eos_boot_log_append(EOS_LOG_BOOT_FAIL, EOS_SLOT_A, 2);
+    ASSERT(eos_boot_log_get_head() == 1);
+
+    eos_boot_log_entry_t entry;
+    ASSERT(eos_boot_log_read(EOS_BOOT_LOG_MAX - 1, &entry) == EOS_OK);
+    ASSERT(entry.detail == 1);
+    ASSERT(eos_boot_log_read(0, &entry) == EOS_OK);
+    ASSERT(entry.detail == 2);
+}
+
+static void test_entries_are_timestamped_in_order(void)
+{
+    eos_boot_log_init(0);
     eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
     eos_boot_log_append(EOS_LOG_IMAGE_VALID, EOS_SLOT_A, 0);
-    eos_boot_log_append(EOS_LOG_SLOT_SELECTED, EOS_SLOT_A, 0);
 
-    eos_boot_log_entry_t entries[2];
-    int n = eos_boot_log_read(entries, 2);
-    assert(n == 2);
-    PASS("log_read_limited_buffer");
+    eos_boot_log_entry_t first, second;
+    ASSERT(eos_boot_log_read(0, &first) == EOS_OK);
+    ASSERT(eos_boot_log_read(1, &second) == EOS_OK);
+    ASSERT(second.timestamp > first.timestamp);
 }
 
-static void test_log_get_latest(void) {
-    eos_boot_log_init();
-    eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 10);
-    eos_boot_log_append(EOS_LOG_UPGRADE_DONE, EOS_SLOT_B, 20);
+static void test_read_rejects_bad_arguments(void)
+{
+    eos_boot_log_init(0);
+    eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
 
     eos_boot_log_entry_t entry;
-    int rc = eos_boot_log_get_latest(&entry);
-    assert(rc == EOS_OK);
-    assert(entry.event == EOS_LOG_UPGRADE_DONE);
-    assert(entry.slot == EOS_SLOT_B);
-    assert(entry.detail == 20);
-    PASS("log_get_latest");
+    ASSERT(eos_boot_log_read(0, NULL) == EOS_ERR_INVALID);
+    ASSERT(eos_boot_log_read(EOS_BOOT_LOG_MAX, &entry) == EOS_ERR_INVALID);
+    ASSERT(eos_boot_log_read(0xFFFFFFFFu, &entry) == EOS_ERR_INVALID);
 }
 
-static void test_log_get_latest_empty(void) {
-    eos_boot_log_init();
-    eos_boot_log_entry_t entry;
-    int rc = eos_boot_log_get_latest(&entry);
-    assert(rc == EOS_ERR_NO_IMAGE);
-    PASS("log_get_latest_empty");
-}
-
-static void test_log_clear(void) {
-    eos_boot_log_init();
+static void test_clear_erases_the_sector_and_resets_head(void)
+{
+    eos_boot_log_init(0);
     eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
     eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_B, 0);
-    assert(eos_boot_log_count() == 2);
+    ASSERT(eos_boot_log_get_head() == 2);
 
-    int rc = eos_boot_log_clear();
-    assert(rc == EOS_OK);
-    assert(eos_boot_log_count() == 0);
-    PASS("log_clear");
+    ASSERT(eos_boot_log_clear() == EOS_OK);
+    ASSERT(eos_boot_log_get_head() == 0);
+    ASSERT(erased_addr == LOG_BASE);
+    ASSERT(erased_size == LOG_BYTES);
+
+    for (size_t i = 0; i < LOG_BYTES; i++)
+        ASSERT(sim_flash[i] == 0xFF);
 }
 
-static void test_log_flush(void) {
-    eos_boot_log_init();
+/* A failed erase must not reset the head: reporting success would let the next
+ * boot append over entries that are still there. */
+static void test_clear_reports_erase_failure(void)
+{
+    eos_boot_log_init(0);
     eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
-    int rc = eos_boot_log_flush();
-    assert(rc == EOS_OK);
-    PASS("log_flush");
+
+    erase_result = EOS_ERR_FLASH;
+    ASSERT(eos_boot_log_clear() == EOS_ERR_FLASH);
+    ASSERT(eos_boot_log_get_head() == 1);
 }
 
-static void test_log_event_names(void) {
-    assert(strcmp(eos_boot_log_event_name(EOS_LOG_BOOT_START), "BOOT_START") == 0);
-    assert(strcmp(eos_boot_log_event_name(EOS_LOG_ROLLBACK), "ROLLBACK") == 0);
-    assert(strcmp(eos_boot_log_event_name(EOS_LOG_RECOVERY_ENTER), "RECOVERY_ENTER") == 0);
-    assert(strcmp(eos_boot_log_event_name(EOS_LOG_FACTORY_RESET), "FACTORY_RESET") == 0);
-    assert(strcmp(eos_boot_log_event_name(0xFF), "UNKNOWN") == 0);
-    PASS("log_event_names");
+static void test_entry_layout_is_stable(void)
+{
+    /* The log is parsed by host tooling and by application firmware through
+     * eos_fw_read_boot_log(), so the on-flash layout is ABI. */
+    ASSERT(sizeof(eos_boot_log_entry_t) == 16);
+    ASSERT(EOS_BOOT_LOG_MAX == 32);
+    ASSERT(EOS_BOOT_LOG_SECTOR_SIZE == 4096);
+    ASSERT(LOG_BYTES <= EOS_BOOT_LOG_SECTOR_SIZE);
 }
 
-static void test_log_entry_timestamps_increment(void) {
-    eos_boot_log_init();
-    eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 0);
-    eos_boot_log_append(EOS_LOG_IMAGE_VALID, EOS_SLOT_A, 0);
-    eos_boot_log_entry_t entries[2];
-    eos_boot_log_read(entries, 2);
-    assert(entries[1].timestamp > entries[0].timestamp);
-    PASS("log_entry_timestamps_increment");
-}
-
-static void test_log_constants(void) {
-    assert(EOS_BOOT_LOG_MAX == 32);
-    assert(EOS_LOG_BOOT_START == 0x01);
-    assert(EOS_LOG_BOOT_FAIL == 0x0C);
-    assert(EOS_BOOT_LOG_SECTOR_SIZE == 4096);
-    PASS("log_constants");
-}
-
-static void test_log_entry_struct_size(void) {
-    assert(sizeof(eos_boot_log_entry_t) == 16);
-    PASS("log_entry_struct_size");
-}
-
-int main(void) {
-    printf("=== eboot Boot Log Tests ===\n");
-    test_log_init();
-    test_log_append_single();
-    test_log_append_multiple();
-    test_log_read_entries();
-    test_log_read_limited_buffer();
-    test_log_get_latest();
-    test_log_get_latest_empty();
-    test_log_clear();
-    test_log_flush();
-    test_log_event_names();
-    test_log_entry_timestamps_increment();
-    test_log_constants();
-    test_log_entry_struct_size();
-    printf("\n=== ALL %d TESTS PASSED ===\n", passed);
+int main(void)
+{
+    printf("=== eBootloader Boot Log Tests ===\n");
+    RUN(test_append_before_init_is_ignored);
+    RUN(test_append_writes_at_head_and_advances);
+    RUN(test_init_resumes_from_persisted_head);
+    RUN(test_init_wraps_out_of_range_head);
+    RUN(test_head_wraps_at_end_of_ring);
+    RUN(test_entries_are_timestamped_in_order);
+    RUN(test_read_rejects_bad_arguments);
+    RUN(test_clear_erases_the_sector_and_resets_head);
+    RUN(test_clear_reports_erase_failure);
+    RUN(test_entry_layout_is_stable);
+    printf("\n%d/10 tests passed\n", tests_passed);
     return 0;
 }

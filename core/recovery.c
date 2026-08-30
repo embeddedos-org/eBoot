@@ -276,7 +276,6 @@ static int recovery_handle_write(eos_slot_t slot, uint32_t offset, uint16_t len)
         return recovery_send_nack();
 
     uint32_t base = eos_hal_slot_addr(slot);
-    uint32_t slot_size = eos_hal_slot_size(slot);
 
     uint8_t buf[RCVR_WRITE_CHUNK];
     if (len > sizeof(buf))

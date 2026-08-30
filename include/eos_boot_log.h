@@ -32,78 +32,50 @@ extern "C" {
 /**
  * @brief Initialize the boot log subsystem.
  *
- * Reads the log region from flash, validates the header, and
- * locates the current write position. If the log region is corrupt
- * or uninitialized, it is formatted with a fresh header.
+ * @param head  Ring-buffer write position recovered from the boot control
+ *              block. Values >= EOS_BOOT_LOG_MAX wrap.
  *
- * @return EOS_OK on success, EOS_ERR_FLASH on read failure.
+ * Until this is called, eos_boot_log_append() is a no-op — stage0 must not
+ * write log entries before the boot control block has been read.
  */
-int eos_boot_log_init(void);
+void eos_boot_log_init(uint32_t head);
 
 /**
- * @brief Append a log entry to the boot log.
+ * @brief Append a log entry at the current head and advance it.
  *
- * Writes a timestamped entry to the next available position in
- * the ring buffer. When the buffer is full, the oldest entry is
- * overwritten. The entry is flushed to flash immediately.
+ * The entry is timestamped with eos_hal_get_tick_ms() and written straight to
+ * the log sector. When the ring wraps, the oldest entry is overwritten.
  *
- * @param event   Event code (EOS_LOG_BOOT_START, EOS_LOG_ROLLBACK, etc.)
+ * @param event   Event code (EOS_LOG_BOOT_START, EOS_LOG_ROLLBACK, ...).
  * @param slot    Associated slot (EOS_SLOT_A, EOS_SLOT_B, or EOS_SLOT_NONE).
- * @param detail  Event-specific detail value (version, error code, etc.)
+ * @param detail  Event-specific detail (version, error code, ...).
  */
 void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail);
 
 /**
- * @brief Read all boot log entries into a caller-provided buffer.
+ * @brief Current ring-buffer write position.
  *
- * Entries are returned in chronological order (oldest first).
- *
- * @param entries   Output buffer for log entries.
- * @param max_count Maximum number of entries the buffer can hold.
- * @return Number of entries read, or negative error code.
+ * Persisted into the boot control block on handoff so the log survives a
+ * reset. @return Head index in [0, EOS_BOOT_LOG_MAX).
  */
-int eos_boot_log_read(eos_boot_log_entry_t *entries, uint32_t max_count);
+uint32_t eos_boot_log_get_head(void);
 
 /**
- * @brief Get the number of log entries currently stored.
- * @return Entry count (0 to EOS_BOOT_LOG_MAX).
+ * @brief Read one log entry by ring index.
+ *
+ * @param index  Entry index in [0, EOS_BOOT_LOG_MAX).
+ * @param out    Receives the entry. Untouched unless EOS_OK is returned.
+ * @return EOS_OK on success, EOS_ERR_INVALID for a null @p out or an index
+ *         past the end of the ring, EOS_ERR_GENERIC if the board has no ops,
+ *         or the flash driver's error.
  */
-uint32_t eos_boot_log_count(void);
+int eos_boot_log_read(uint32_t index, eos_boot_log_entry_t *out);
 
 /**
- * @brief Clear all boot log entries and reset the write pointer.
- *
- * Erases the log flash sector and writes a fresh header.
- *
- * @return EOS_OK on success, EOS_ERR_FLASH on erase failure.
+ * @brief Erase the log sector and reset the write position.
+ * @return EOS_OK on success, otherwise the flash driver's error.
  */
 int eos_boot_log_clear(void);
-
-/**
- * @brief Flush any buffered log entries to flash.
- *
- * Normally entries are written immediately, but this can be
- * called before a jump to ensure all entries are persisted.
- *
- * @return EOS_OK on success, EOS_ERR_FLASH on write failure.
- */
-int eos_boot_log_flush(void);
-
-/**
- * @brief Get the most recent log entry.
- *
- * @param entry  Pointer to structure to populate.
- * @return EOS_OK on success, EOS_ERR_NO_IMAGE if log is empty.
- */
-int eos_boot_log_get_latest(eos_boot_log_entry_t *entry);
-
-/**
- * @brief Convert a log event code to a human-readable string.
- *
- * @param event  Event code (EOS_LOG_*).
- * @return Static string describing the event, or "UNKNOWN".
- */
-const char *eos_boot_log_event_name(uint32_t event);
 
 #ifdef __cplusplus
 }

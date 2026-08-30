@@ -1,4 +1,4 @@
-#include "eos_sha512.h"
+#include "eos_crypto_boot.h"
 #include <string.h>
 
 #define ROTR64(x, n) (((x) >> (n)) | ((x) << (64 - (n))))
@@ -119,7 +119,7 @@ static void store_be64(uint8_t *p, uint64_t x)
     p[7] = (uint8_t)x;
 }
 
-static void sha512_transform(sha512_ctx_t *ctx,
+static void sha512_transform(eos_sha512_ctx_t *ctx,
                              const uint8_t block[128])
 {
     uint64_t w[80];
@@ -164,7 +164,7 @@ static void sha512_transform(sha512_ctx_t *ctx,
     ctx->state[7] += h;
 }
 
-void sha512_init(sha512_ctx_t *ctx)
+void eos_sha512_init(eos_sha512_ctx_t *ctx)
 {
     ctx->state[0] = 0x6a09e667f3bcc908ULL;
     ctx->state[1] = 0xbb67ae8584caa73bULL;
@@ -180,7 +180,7 @@ void sha512_init(sha512_ctx_t *ctx)
     ctx->buffer_len = 0;
 }
 
-void sha512_update(sha512_ctx_t *ctx,
+void eos_sha512_update(eos_sha512_ctx_t *ctx,
                    const uint8_t *data,
                    size_t len)
 {
@@ -213,8 +213,8 @@ void sha512_update(sha512_ctx_t *ctx,
     }
 }
 
-void sha512_final(sha512_ctx_t *ctx,
-                  uint8_t digest[64])
+void eos_sha512_final(eos_sha512_ctx_t *ctx,
+                      uint8_t digest[EOS_SHA512_DIGEST_SIZE])
 {
     size_t i = ctx->buffer_len;
 
@@ -240,4 +240,13 @@ void sha512_final(sha512_ctx_t *ctx,
         store_be64(digest + i2 * 8, ctx->state[i2]);
 
     memset(ctx, 0, sizeof(*ctx));
+}
+
+void eos_sha512(const uint8_t *data, size_t len,
+                uint8_t digest[EOS_SHA512_DIGEST_SIZE])
+{
+    eos_sha512_ctx_t ctx;
+    eos_sha512_init(&ctx);
+    eos_sha512_update(&ctx, data, len);
+    eos_sha512_final(&ctx, digest);
 }
