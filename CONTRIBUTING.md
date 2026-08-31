@@ -62,7 +62,7 @@ python scripts/generate_config.py configs/example_boot.yaml /tmp/generated/
 
 ## Test Suites
 
-eboot includes 17 C unit test suites that run natively on the host, plus a
+eboot includes 19 C unit test suites that run natively on the host, plus a
 set of Python tests that check the build files and tooling statically:
 
 | Test | Covers |
@@ -70,6 +70,7 @@ set of Python tests that check the build files and tooling statically:
 | `test_bootctl` | Boot control block save/load, CRC, rollback |
 | `test_crypto` | SHA-256 against known vectors |
 | `test_image_verify` | Image header parse bounds |
+| `test_image_abi` | Firmware image header ABI compatibility |
 | `test_recovery` | Recovery-mode UART protocol handler |
 | `test_slot_size_bounds` | `verify_slot()` rejects `image_size` larger than the slot |
 | `test_fw_transport` | UART raw / XMODEM / YMODEM firmware transport framing |
@@ -84,6 +85,7 @@ set of Python tests that check the build files and tooling statically:
 | `test_keystore` | Boot keystore management |
 | `test_rollback` | Anti-rollback security counter |
 | `test_storage` | Unified storage bounds checking |
+| `test_ecc` | ECC scrub-region and request range validation |
 
 Every `tests/unit/test_*.c` suite must be registered in `tests/CMakeLists.txt`
 with both an `add_executable()` and an `add_test()`. A suite that is not

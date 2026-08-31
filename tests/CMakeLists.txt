@@ -91,6 +91,11 @@ add_executable(eboot_test_storage unit/test_storage.c)
 target_link_libraries(eboot_test_storage PRIVATE eboot_core)
 add_test(NAME test_storage COMMAND eboot_test_storage)
 
+# --- test_ecc: ECC memory range validation ---
+add_executable(eboot_test_ecc unit/test_ecc.c)
+target_link_libraries(eboot_test_ecc PRIVATE eboot_core)
+add_test(NAME test_ecc COMMAND eboot_test_ecc)
+
 # --- Valgrind test targets ---
 find_program(VALGRIND valgrind)
 if(VALGRIND)

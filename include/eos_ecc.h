@@ -28,8 +28,11 @@ typedef struct {
     int scrub_complete;
 } eos_ecc_ctx_t;
 
+/* Initialize a non-wrapping 32-bit ECC memory range. */
 int  eos_ecc_init(eos_ecc_ctx_t *ctx, uint32_t base, uint32_t size);
 int  eos_ecc_scrub(eos_ecc_ctx_t *ctx);
+/* Check that [addr, addr + len) is contained in the configured range, then
+ * read each complete word to trigger the platform's ECC machinery. */
 int  eos_ecc_check_region(eos_ecc_ctx_t *ctx, uint32_t addr, uint32_t len);
 void eos_ecc_dump(const eos_ecc_ctx_t *ctx);
 
