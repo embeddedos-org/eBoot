@@ -17,8 +17,14 @@
 #define SIM_FLASH_SIZE  (64 * 1024)
 static uint8_t sim_flash[SIM_FLASH_SIZE];
 
+/* Reads at or beyond this address fail. UINT32_MAX disables the hook. */
+static uint32_t sim_unreadable_from = UINT32_MAX;
+
 static int sim_flash_read(uint32_t addr, void *buf, size_t len)
 {
+    if (addr >= sim_unreadable_from)
+        return EOS_ERR_FLASH;
+
     if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
     memcpy(buf, &sim_flash[addr], len);
     return EOS_OK;
@@ -85,6 +91,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         memset(sim_flash, 0xFF, sizeof(sim_flash)); \
+        sim_unreadable_from = UINT32_MAX;
         sim_tick = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-50s ", #name); \
@@ -401,6 +408,56 @@ TEST(test_header_version_is_validated)
     write_header(0x1000, &hdr);
     ASSERT(eos_image_parse_header(0x1000, &out) == EOS_OK);
     ASSERT(out.hdr_version == EOS_IMAGE_HDR_VERSION);
+    
+}
+
+static void write_min_sec_ver_tlv(uint32_t addr, uint32_t version)
+{
+    eos_tlv_info_t info;
+    eos_tlv_entry_hdr_t entry;
+
+    info.magic = EOS_TLV_INFO_MAGIC;
+    info.tlv_total_len = (uint16_t)(sizeof(info) + sizeof(entry) + sizeof(version));
+    memcpy(&sim_flash[addr], &info, sizeof(info));
+
+    entry.type = EOS_TLV_MIN_SEC_VER;
+    entry.len = (uint16_t)sizeof(version);
+    memcpy(&sim_flash[addr + sizeof(info)], &entry, sizeof(entry));
+    memcpy(&sim_flash[addr + sizeof(info) + sizeof(entry)], &version, sizeof(version));
+}
+
+/*
+ * Regression: eos_tlv_parse used to fail OPEN.
+ *
+ * A flash read that failed while walking entries did `break` and then
+ * returned EOS_OK with a partial or empty list. Callers such as
+ * eos_rollback_read_image_counter treat EOS_OK + missing MIN_SEC_VER as
+ * "this image has no security-version TLV", which is indistinguishable
+ * from a successful parse of an image that truly omitted it.
+ *
+ * The SHA-256 / CRC32 image paths already propagate a flash error; this
+ * asserts the TLV walker does the same. Truncated entries (readable but
+ * past tlv_total_len) are unchanged and are not this test.
+ */
+TEST(test_tlv_unreadable_entry_fails_closed)
+{
+    const uint32_t addr = 0x1000;
+    write_min_sec_ver_tlv(addr, 7u);
+
+    eos_tlv_ctx_t ctx;
+    ASSERT(eos_tlv_parse(&ctx, addr) == EOS_OK);
+
+    eos_tlv_parsed_entry_t found;
+    ASSERT(eos_tlv_find(&ctx, EOS_TLV_MIN_SEC_VER, &found) == EOS_OK);
+    ASSERT(found.len == sizeof(uint32_t));
+
+    /* Entry header sits immediately after the info header. */
+    sim_unreadable_from = addr + (uint32_t)sizeof(eos_tlv_info_t);
+
+    uint8_t probe = 0;
+    ASSERT(eos_hal_flash_read(sim_unreadable_from, &probe, 1) != EOS_OK);
+
+    ASSERT(eos_tlv_parse(&ctx, addr) == EOS_ERR_FLASH);
 }
 
 int main(void)
@@ -422,7 +479,8 @@ int main(void)
     run_test_flags_are_inside_the_signed_region();
     run_test_unsigned_signature_types_are_rejected();
     run_test_header_version_is_validated();
-    tests_run = 16;
+    run_test_tlv_unreadable_entry_fails_closed();
+    tests_run = 17;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

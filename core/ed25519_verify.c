@@ -29,7 +29,6 @@
 #include "eos_crypto_boot.h"
 #include "eos_types.h"
 #include <string.h>
-#include "eos_sha512.h"
 
 /* ================================================================
  * Field arithmetic mod p = 2^255 - 19
@@ -428,19 +427,21 @@ int eos_ed25519_verify(const uint8_t signature[64],
     eos_sha512_final(&ctx, k);
     reduce_hash(k);
 
-    /* Step 3: Compute k = SHA-256(R || A || M) reduced mod L */
-    /* Step 3: Compute k = SHA-512(R || A || M) reduced mod L */
-uint8_t k_hash[64];
-sha512_ctx_t ctx;
+    /* Recompute R' = [S]B + [k](-A). A is already negated by unpackneg(), so
+     * the sum is R' rather than a difference. RFC 8032 permits the cheaper
+     * "compare encodings" check in place of a group-element comparison. */
+    gf lhs[4], rhs[4];
+    scalarmult(lhs, A, k);
+    scalarbase(rhs, &signature[32]);
+    point_add(lhs, (const gf *)rhs);
 
-sha512_init(&ctx);
-sha512_update(&ctx, signature, 32);       /* R */
-sha512_update(&ctx, public_key, 32);      /* A */
-sha512_update(&ctx, message, msg_len);    /* M */
-sha512_final(&ctx, k_hash);
+    uint8_t rcheck[32];
+    point_pack(rcheck, lhs);
 
-uint8_t k[32];
-sc_reduce(k, k_hash);
+    /* Constant-time comparison against R. */
+    uint8_t diff = 0;
+    for (int i = 0; i < 32; i++)
+        diff |= (uint8_t)(rcheck[i] ^ signature[i]);
 
     return diff == 0 ? EOS_OK : EOS_ERR_SIGNATURE;
 }

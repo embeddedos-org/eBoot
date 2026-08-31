@@ -15,3 +15,5 @@ __pycache__/
 target/
 .pytest_cache/
 .DS_Store
+.coverage
+.coverage.*

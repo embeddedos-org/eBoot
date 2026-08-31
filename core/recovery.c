@@ -15,6 +15,7 @@
  */
 
 #include "eos_bootctl.h"
+#include "eos_recovery.h"
 #include "eos_image.h"
 #include "eos_hal.h"
 #include "eos_crypto_boot.h"

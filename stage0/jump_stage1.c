@@ -13,6 +13,7 @@
 
 #include "eos_hal.h"
 #include "eos_bootctl.h"
+#include "eos_crypto_boot.h"
 
 /* Forward declarations */
 extern void ebldr_watchdog_init(void);
