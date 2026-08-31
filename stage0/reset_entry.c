@@ -56,10 +56,16 @@ void Reset_Handler(void)
     while (dst < &_ebss)
         *dst++ = 0;
 
-    /* Stack poisoning: fill remaining stack with canary pattern
-     * for post-mortem stack depth analysis and overflow detection */
+    /* Stack poisoning: fill the free RAM between the end of .bss and the
+     * current frame with a canary pattern, for post-mortem stack depth
+     * analysis and overflow detection.
+     *
+     * This starts at _ebss, not _sbss: both stage-0 linker scripts place
+     * .bss at the bottom of RAM and _estack at the top, so starting at
+     * _sbss would refill the .bss just zeroed above with 0xDEADBEEF
+     * before the first line of stage-0 runs. */
     {
-        volatile uint32_t *stack_ptr = &_sbss;
+        volatile uint32_t *stack_ptr = &_ebss;
         volatile uint32_t *stack_end = (volatile uint32_t *)(__builtin_frame_address(0));
         while (stack_ptr < stack_end - 16) {
             *stack_ptr++ = 0xDEADBEEF;
