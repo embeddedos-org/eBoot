@@ -27,8 +27,12 @@ target_link_libraries(eboot_test_secure_boot PRIVATE eboot_core)
 add_test(NAME test_secure_boot COMMAND eboot_test_secure_boot)
 
 # --- test_recovery: UART recovery write range ---
+# eboot_stage1 links eboot_core PUBLIC, so naming eboot_core here too put it on
+# the link line twice -- ahead of the target that needs it, which is the wrong
+# order for a left-to-right archive scan, so CMake appended it again anyway and
+# the linker reported the duplicate. The transitive dependency covers it.
 add_executable(eboot_test_recovery unit/test_recovery.c)
-target_link_libraries(eboot_test_recovery PRIVATE eboot_core eboot_stage1)
+target_link_libraries(eboot_test_recovery PRIVATE eboot_stage1)
 add_test(NAME test_recovery COMMAND eboot_test_recovery)
 
 # --- test_fw_transport: UART raw/XMODEM/YMODEM firmware transport ---
