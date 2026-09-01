@@ -239,6 +239,43 @@ static void test_clear_reports_erase_failure(void)
     ASSERT(eos_boot_log_get_head() == 1);
 }
 
+/* The same reasoning on the write path. append() cannot report a failure --
+ * it returns void -- but it can decline to advance past a slot it never wrote.
+ * The head is persisted in the boot control block, so advancing anyway leaves
+ * a permanent hole: the slot is skipped for good and reads back as erased
+ * flash that a reader cannot tell apart from a real entry. */
+static void test_append_does_not_advance_head_when_write_fails(void)
+{
+    eos_boot_log_init(0);
+    eos_boot_log_append(EOS_LOG_BOOT_START, EOS_SLOT_A, 111);
+    ASSERT(eos_boot_log_get_head() == 1);
+
+    write_result = EOS_ERR_FLASH;
+    eos_boot_log_append(EOS_LOG_BOOT_FAIL, EOS_SLOT_A, 222);
+
+    /* Head stays put and slot 1 is still erased flash. */
+    ASSERT(eos_boot_log_get_head() == 1);
+
+    eos_boot_log_entry_t entry;
+    ASSERT(eos_boot_log_read(1, &entry) == EOS_OK);
+    ASSERT(entry.event == 0xFFFFFFFFu);
+
+    /* The next successful append reuses that slot instead of skipping it. */
+    write_result = EOS_OK;
+    eos_boot_log_append(EOS_LOG_CONFIRM, EOS_SLOT_B, 333);
+    ASSERT(eos_boot_log_get_head() == 2);
+
+    ASSERT(eos_boot_log_read(1, &entry) == EOS_OK);
+    ASSERT(entry.event == EOS_LOG_CONFIRM);
+    ASSERT(entry.slot == EOS_SLOT_B);
+    ASSERT(entry.detail == 333);
+
+    /* The entry written before the failure is untouched. */
+    ASSERT(eos_boot_log_read(0, &entry) == EOS_OK);
+    ASSERT(entry.event == EOS_LOG_BOOT_START);
+    ASSERT(entry.detail == 111);
+}
+
 static void test_entry_layout_is_stable(void)
 {
     /* The log is parsed by host tooling and by application firmware through
@@ -261,7 +298,8 @@ int main(void)
     RUN(test_read_rejects_bad_arguments);
     RUN(test_clear_erases_the_sector_and_resets_head);
     RUN(test_clear_reports_erase_failure);
+    RUN(test_append_does_not_advance_head_when_write_fails);
     RUN(test_entry_layout_is_stable);
-    printf("\n%d/10 tests passed\n", tests_passed);
+    printf("\n%d/11 tests passed\n", tests_passed);
     return 0;
 }

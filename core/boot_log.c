@@ -41,7 +41,15 @@ void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail)
     uint32_t offset = log_head * sizeof(eos_boot_log_entry_t);
     uint32_t addr   = ops->log_addr + offset;
 
-    eos_hal_flash_write(addr, &entry, sizeof(entry));
+    /* Advance the head only once the entry is actually on flash. Advancing
+     * unconditionally skips a slot that was never written, and the head is
+     * persisted in the boot control block, so the gap survives the reset:
+     * eos_boot_log_read() then hands the reader erased flash as if it were an
+     * entry, and the slot is never reused. eos_boot_log_clear() guards its own
+     * state change against a failed erase for the same reason. */
+    int rc = eos_hal_flash_write(addr, &entry, sizeof(entry));
+    if (rc != EOS_OK)
+        return;
 
     log_head = (log_head + 1) % EOS_BOOT_LOG_MAX;
 }
