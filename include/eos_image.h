@@ -22,6 +22,22 @@ extern "C" {
 
 /* ---------------- Image Header ---------------- */
 
+/**
+ * @brief Bytes of the TLV area's SHA-256 digest carried in the header.
+ *
+ * The TLV area sits after the payload, so neither the signature (which covers
+ * the header prefix) nor hash[] (which covers exactly image_size payload bytes)
+ * reaches it. tlv_len and tlv_hash do, and they are inside the signed prefix —
+ * that is what makes a TLV-declared value such as EOS_TLV_MIN_SEC_VER
+ * trustworthy enough to gate anti-rollback on.
+ *
+ * The digest is truncated to 224 bits so the pair fits the 30 bytes previously
+ * reserved between sig_len and signature[], leaving every other field at the
+ * offset the signing tools already address. Second-preimage resistance at 224
+ * bits is far beyond what an attacker rewriting a ~64-byte TLV blob can reach.
+ */
+#define EOS_IMG_TLV_HASH_LEN  28
+
 typedef struct {
     uint32_t magic;           /* EOS_IMG_MAGIC */
     uint16_t hdr_version;     /* Header format version */
@@ -34,7 +50,8 @@ typedef struct {
     uint8_t  hash[EOS_HASH_SIZE];   /* SHA-256 hash of payload */
     uint8_t  sig_type;        /* eos_sig_type_t */
     uint8_t  sig_len;         /* Actual signature length */
-    uint8_t  reserved[30];    /* Reserved for future use */
+    uint16_t tlv_len;         /* Bytes of TLV area following the payload; 0 = none */
+    uint8_t  tlv_hash[EOS_IMG_TLV_HASH_LEN]; /* Truncated SHA-256 of that area */
     uint8_t  signature[EOS_SIG_MAX_SIZE]; /* Digital signature */
 } eos_image_header_t;
 
@@ -51,7 +68,7 @@ typedef struct {
  *
  * Everything except the signature field itself: magic, hdr_version, hdr_size,
  * image_size, load_addr, entry_addr, image_version, flags, hash, sig_type,
- * sig_len and reserved.
+ * sig_len, tlv_len and tlv_hash.
  *
  * Signing hash[] alone leaves every other field unauthenticated. An attacker
  * could keep a legitimately signed image's signature and still change the load
@@ -77,8 +94,17 @@ EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, hash) == 28,
                       "hash[] must stay at offset 28");
 EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, sig_type) == 60,
                       "sig_type must stay at offset 60");
+EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, tlv_len) == 62,
+                      "tlv_len must occupy the first 2 of the 30 formerly "
+                      "reserved bytes");
+EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, tlv_hash) == 64,
+                      "tlv_hash must occupy the remaining 28 reserved bytes");
 EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, signature) == 92,
                       "signature[] must stay at offset 92");
+EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, tlv_hash) +
+                      EOS_IMG_TLV_HASH_LEN ==
+                      offsetof(eos_image_header_t, signature),
+                      "the TLV binding must be inside the signed prefix");
 
 /* ---------------- Image Validation API ---------------- */
 
@@ -93,8 +119,8 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out);
 /**
  * @brief Verify image integrity using CRC32 or hash.
  * @param hdr   Parsed image header.
- * @param addr  Flash address of the image (header base). Payload starts after
- *              hdr_size and an optional TLV area, matching eos_sign.py.
+ * @param addr  Flash address of the image (header base). The payload starts at
+ *              addr + hdr_size; any TLV area follows it, not precedes it.
  * @return EOS_OK if integrity check passes, EOS_ERR_CRC on failure.
  */
 int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr);

@@ -328,7 +328,8 @@ TEST(test_signed_region_covers_all_metadata)
     COVERED(hash);
     COVERED(sig_type);
     COVERED(sig_len);
-    COVERED(reserved);
+    COVERED(tlv_len);
+    COVERED(tlv_hash);
     #undef COVERED
 
     /* The signature itself is the only thing outside it. */

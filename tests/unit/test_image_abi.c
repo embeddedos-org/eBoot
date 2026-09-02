@@ -71,7 +71,8 @@ int main(void)
     CHECK_FIELD(hash,           28,  32);
     CHECK_FIELD(sig_type,       60,  1);
     CHECK_FIELD(sig_len,        61,  1);
-    CHECK_FIELD(reserved,       62,  30);
+    CHECK_FIELD(tlv_len,        62,  2);
+    CHECK_FIELD(tlv_hash,       64,  28);
     CHECK_FIELD(signature,      92,  64);
 
     /* No padding anywhere, and none on the end. The struct is written to flash

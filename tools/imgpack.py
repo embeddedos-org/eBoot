@@ -71,7 +71,7 @@ def build_header(
     header += hash_field
     header += struct.pack('<B', SIG_CRC32)   # sig_type
     header += struct.pack('<B', 0)            # sig_len (no signature yet)
-    header += b'\x00' * 30                    # reserved
+    header += b'\x00' * 30                    # tlv_len(2) + tlv_hash(28); 0 = no authenticated TLV area
     header += b'\x00' * EOS_SIG_MAX_SIZE      # signature placeholder
 
     assert len(header) == hdr_size, f"Header size mismatch: {len(header)} != {hdr_size}"

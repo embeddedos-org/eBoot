@@ -147,7 +147,7 @@ def make_image_header(
     hdr += hash_bytes[:EOS_HASH_SIZE]        # 32
     hdr += struct.pack('<B', sig_type)       # 1
     hdr += struct.pack('<B', sig_len)        # 1
-    hdr += b'\x00' * 30                     # reserved
+    hdr += b'\x00' * 30                     # tlv_len(2) + tlv_hash(28); 0 = no authenticated TLV area
     hdr += signature[:EOS_SIG_MAX_SIZE]      # 64
     # Total so far: 4+2+2+4+4+4+4+4+32+1+1+30+64 = 156 bytes
     # Pad to hdr_size
@@ -899,7 +899,7 @@ def run_integration_tests():
 def run_static_analysis_tests():
     section("CATEGORY 6: Static Analysis Simulation")
 
-    repo = Path("/home/ubuntu/eBoot")
+    repo = Path(__file__).resolve().parent.parent
 
     # 6.1 Magic constant consistency across all Python tools
     magic_values = {}
@@ -1202,7 +1202,7 @@ def run_cross_platform_tests():
               h.hex() == expected_hex)
 
     # 8.8 Board count in repository
-    boards_dir = Path("/home/ubuntu/eBoot/boards")
+    boards_dir = Path(__file__).resolve().parent.parent / "boards"
     board_count = len([d for d in boards_dir.iterdir() if d.is_dir()])
     check(f"Cross-8.10: Board count >= 83 (actual: {board_count})",
           board_count >= 83, f"got {board_count}")

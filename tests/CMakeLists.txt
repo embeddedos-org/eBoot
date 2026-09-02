@@ -91,6 +91,11 @@ add_executable(eboot_test_rollback unit/test_rollback.c)
 target_link_libraries(eboot_test_rollback PRIVATE eboot_core)
 add_test(NAME test_rollback COMMAND eboot_test_rollback)
 
+# --- test_tlv_auth: TLV area must be bound to the signed header ---
+add_executable(eboot_test_tlv_auth unit/test_tlv_auth.c)
+target_link_libraries(eboot_test_tlv_auth PRIVATE eboot_core)
+add_test(NAME test_tlv_auth COMMAND eboot_test_tlv_auth)
+
 # --- test_storage: Unified storage abstraction ---
 add_executable(eboot_test_storage unit/test_storage.c)
 target_link_libraries(eboot_test_storage PRIVATE eboot_core)
@@ -109,7 +114,8 @@ if(VALGRIND)
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_image_abi
-                      test_recovery test_slot_size_bounds test_fw_transport)
+                      test_recovery test_slot_size_bounds test_fw_transport
+                      test_tlv_auth)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:eboot_${TEST_NAME}>

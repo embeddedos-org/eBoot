@@ -102,7 +102,7 @@ def build_header(payload: bytes, entry_addr: int, load_addr: int,
     # wait for the signature to exist.
     hdr += struct.pack('B', EOS_SIG_MAX_SIZE if sig_type == SIG_TYPE_ED25519
                        else (len(sig) if sig else 0))
-    hdr += b'\x00' * 30  # reserved
+    hdr += b'\x00' * 30  # tlv_len(2) + tlv_hash(28); 0 = no authenticated TLV area
 
     # Signature field (padded to 64 bytes)
     sig_padded = (sig or b'').ljust(EOS_SIG_MAX_SIZE, b'\x00')
