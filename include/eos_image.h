@@ -132,15 +132,21 @@ EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, flags) == 24,
                       "flags must stay at offset 24");
 EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, sig_len) == 61,
                       "sig_len must stay at offset 61");
-EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, reserved) == 62,
-                      "reserved[] must stay at offset 62");
+/* tlv_len (offset 62) and tlv_hash (offset 64) occupy the 30 bytes that sat
+ * between sig_len and signature[] before the TLV area was authenticated; both
+ * offsets are pinned with the rest of the TLV binding in the first block above,
+ * so they are not repeated here. */
 
 /* Field widths. An offset assert cannot see a field growing into padding that
- * happens to keep every later offset -- reserved[] absorbs exactly that. */
+ * happens to keep every later offset -- the tlv_len/tlv_hash pair absorbs
+ * exactly that gap, so pin each field's width as well. */
 EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->hash) == 32,
                       "hash[] is 32 bytes on the wire");
-EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->reserved) == 30,
-                      "reserved[] is 30 bytes on the wire");
+EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->tlv_len) == 2,
+                      "tlv_len is 2 bytes on the wire");
+EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->tlv_hash) ==
+                      EOS_IMG_TLV_HASH_LEN,
+                      "tlv_hash[] is 28 bytes on the wire");
 EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->signature) == 64,
                       "signature[] is 64 bytes on the wire");
 
