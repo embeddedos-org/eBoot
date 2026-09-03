@@ -65,6 +65,13 @@ add_executable(eboot_test_multicore unit/test_multicore.c)
 target_link_libraries(eboot_test_multicore PRIVATE eboot_core)
 add_test(NAME test_multicore COMMAND eboot_test_multicore)
 
+# --- test_qemu_arm64_timer: Generic timer conversion ---
+add_executable(eboot_test_qemu_arm64_timer unit/test_qemu_arm64_timer.c)
+target_include_directories(eboot_test_qemu_arm64_timer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/qemu_arm64
+)
+add_test(NAME test_qemu_arm64_timer COMMAND eboot_test_qemu_arm64_timer)
+
 # --- test_board_registry: Runtime board selection ---
 add_executable(eboot_test_board_registry unit/test_board_registry.c)
 target_link_libraries(eboot_test_board_registry PRIVATE eboot_core)
@@ -116,8 +123,8 @@ if(VALGRIND)
     set(VALGRIND_OPTS --leak-check=full --error-exitcode=1 --quiet)
     foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
                       test_device_table test_runtime_svc test_board_config
-                      test_multicore test_board_registry test_slot_manager
-                      test_boot_log test_image_verify test_image_abi
+                      test_multicore test_qemu_arm64_timer test_board_registry
+                      test_slot_manager test_boot_log test_image_verify test_image_abi
                       test_recovery test_slot_size_bounds test_fw_transport
                       test_tlv_auth)
         add_test(

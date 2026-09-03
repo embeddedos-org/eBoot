@@ -9,6 +9,7 @@
 
 #include "board_qemu_arm64.h"
 #include "eos_board_registry.h"
+#include "qemu_arm64_timer.h"
 #include <string.h>
 
 static int qemu_flash_read(uint32_t addr, void *buf, size_t len)
@@ -50,7 +51,17 @@ static void qemu_jump(uint32_t vector_addr)
     entry();
 }
 
-static uint32_t qemu_get_tick_ms(void) { return 0; }
+static uint32_t qemu_get_tick_ms(void)
+{
+    uint64_t counter;
+    uint64_t frequency;
+
+    /* QEMU virt exposes the AArch64 Generic Timer at EL1. */
+    __asm volatile ("mrs %0, cntfrq_el0" : "=r" (frequency));
+    __asm volatile ("isb\n\tmrs %0, cntvct_el0" : "=r" (counter) :: "memory");
+
+    return qemu_arm64_counter_to_ms(counter, (uint32_t)frequency);
+}
 
 static const eos_board_ops_t qemu_arm64_ops = {
     .flash_base          = QEMU_ARM64_FLASH_BASE,
