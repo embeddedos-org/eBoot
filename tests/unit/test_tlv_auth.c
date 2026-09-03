@@ -99,6 +99,7 @@ static int tests_passed = 0;
         sim_counter = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-58s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -294,7 +295,6 @@ int main(void)
 {
     printf("TLV authentication (anti-rollback counter)\n\n");
 
-    tests_run = 8;
     run_test_authenticated_tlv_counter_is_read();
     run_test_tampered_tlv_counter_is_rejected();
     run_test_tamper_is_invisible_to_signature_and_integrity();
@@ -303,7 +303,6 @@ int main(void)
     run_test_tlv_binding_fields_are_inside_the_signed_prefix();
     run_test_oversized_tlv_len_is_rejected();
 
-    tests_run = 7;
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

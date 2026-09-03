@@ -82,6 +82,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -276,7 +277,6 @@ int main(void)
     run_test_revocation_is_persisted_without_clobbering_other_slots();
     run_test_revoke_reports_a_failed_persist();
 
-    tests_run = 9;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

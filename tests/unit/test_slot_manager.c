@@ -171,6 +171,7 @@ static int tests_passed = 0;
         erased_size = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-55s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -338,7 +339,6 @@ int main(void)
     run_test_boot_attempts_drive_rollback();
     run_test_boot_attempts_reject_invalid_slot();
     run_test_erase_resets_boot_attempts();
-    tests_run = 9;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

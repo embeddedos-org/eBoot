@@ -163,6 +163,7 @@ static int tests_passed = 0;
     static void run_##name(void) { \
         setup(); \
         printf("  %-56s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[OK]\n"); \
@@ -555,7 +556,6 @@ int main(void)
     run_test_raw_oversized_length_is_rejected();
     run_test_raw_zero_length_is_rejected();
 
-    tests_run = 12;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

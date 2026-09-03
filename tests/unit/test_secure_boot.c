@@ -84,6 +84,7 @@ static const eos_board_ops_t sim_ops = {
     .deinit_peripherals  = sim_noop,
 };
 
+static int tests_run = 0;
 static int tests_passed = 0;
 
 #define TEST(name) \
@@ -93,6 +94,7 @@ static int tests_passed = 0;
         sim_tick = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -203,6 +205,10 @@ int main(void)
     run_test_encrypted_image_rejected_while_decrypt_unimplemented();
     run_test_plaintext_image_boots_when_encryption_not_required();
     run_test_decrypt_failure_is_attested();
-    printf("%d passed\n", tests_passed);
-    return 0;
+    /* Compare, and let the exit code carry it. `return 0` meant a suite that
+     * ran nothing at all still reported success -- the ASSERT macro exits on
+     * failure, so the only thing this return could ever have signalled is
+     * exactly the case it ignored. */
+    printf("\n%d/%d passed\n", tests_passed, tests_run);
+    return tests_passed == tests_run ? 0 : 1;
 }

@@ -119,6 +119,7 @@ static int tests_passed = 0;
         payload_bytes_read = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-55s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -190,7 +191,6 @@ int main(void)
     printf("=== eBootloader: Slot-Size Bounds Regression Tests ===\n\n");
     run_test_oversized_image_rejected_before_reading_payload();
     run_test_in_bounds_image_is_not_over_rejected();
-    tests_run = 2;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

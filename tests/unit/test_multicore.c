@@ -21,6 +21,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -211,7 +212,6 @@ int main(void)
     run_test_invalid_core_id();
     run_test_ipi_mailbox_fallback();
 
-    tests_run = 10;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
