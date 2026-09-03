@@ -90,6 +90,11 @@ add_executable(eboot_test_keystore unit/test_keystore.c)
 target_link_libraries(eboot_test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND eboot_test_keystore)
 
+# --- test_secure_boot_policy: debug-lock policy enforcement ---
+add_executable(eboot_test_secure_boot_policy unit/test_secure_boot_policy.c)
+target_link_libraries(eboot_test_secure_boot_policy PRIVATE eboot_core)
+add_test(NAME test_secure_boot_policy COMMAND eboot_test_secure_boot_policy)
+
 # --- test_rollback: Anti-rollback security counter ---
 add_executable(eboot_test_rollback unit/test_rollback.c)
 target_link_libraries(eboot_test_rollback PRIVATE eboot_core)
@@ -119,7 +124,8 @@ if(VALGRIND)
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_image_abi
                       test_recovery test_slot_size_bounds test_fw_transport
-                      test_tlv_auth)
+                      test_tlv_auth test_secure_boot_policy test_fdt_loader
+                      test_fw_decrypt)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:eboot_${TEST_NAME}>

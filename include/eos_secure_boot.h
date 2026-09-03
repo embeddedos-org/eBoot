@@ -106,8 +106,13 @@ int eos_secure_boot_verify_key(const uint8_t key_hash[32]);
 /**
  * @brief Lock debug interfaces (SWD/JTAG) permanently.
  * Only effective on real hardware with eFuse support.
+ *
+ * @return EOS_OK if the lock was written, otherwise the HAL error --
+ *         EOS_ERR_NOT_SUPPORTED on a board with no otp_write. Callers that
+ *         asked for the debug port to be closed must treat a non-OK result
+ *         as a failure to boot: the port is still open.
  */
-void eos_secure_boot_lock_debug(void);
+int eos_secure_boot_lock_debug(void);
 
 /**
  * @brief Update the anti-rollback counter in OTP.
