@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  EOSIM_VERSION: "0.1.0"
+  # v0.1.0 has never existed. embeddedos-org/EoSim tags v1.0.0 through
+  # v3.0.1, and no release publishes a wheel -- so the pip install below
+  # 404s and this workflow has never had a green run. v1.5.0 is the
+  # release marked Latest.
+  EOSIM_VERSION: "1.5.0"
 
 permissions:
   contents: read
@@ -30,13 +34,47 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install EoSim
-        run: pip install "eosim @ https://github.com/embeddedos-org/EoSim/releases/download/v${{ env.EOSIM_VERSION }}/eosim-${{ env.EOSIM_VERSION }}-py3-none-any.whl"
+        run: git clone --depth 1 --branch v${{ env.EOSIM_VERSION }} https://github.com/embeddedos-org/EoSim.git /tmp/EoSim && pip install /tmp/EoSim
       - name: Verify installation
         run: |
+          # Assert, do not print. The tag and the package's declared version
+          # disagree upstream -- v1.5.0 ships "eosim, version 2.0.0" -- so
+          # pinning to a tag does not pin what the name suggests, and nothing
+          # here would notice if the tag moved. Raised against EoSim
+          # separately; asserted here so this workflow stops being the place
+          # it goes unnoticed.
           eosim --version
-          eosim list
+          eosim --version | grep -qE "2\.0\.0" || {
+            echo "::error::eosim --version is not the expected 2.0.0 for tag v${{ env.EOSIM_VERSION }}"
+            eosim --version
+            exit 1
+          }
+      # platforms/ is data, not package data: PLATFORMS_DIR resolves to
+      # <site-packages>/platforms while the wheel ships only
+      # eosim/platforms/__init__.py. Without this copy `eosim list` prints
+      # "Available platforms (0)" and exits 0 -- so the step named
+      # "Validate all platform configs" validated nothing and passed.
+      - name: Install platform data
+        run: |
+          SITE_PACKAGES=$(python -c "import eosim, os; print(os.path.dirname(os.path.dirname(eosim.__file__)))")
+          cp -r /tmp/EoSim/platforms "$SITE_PACKAGES/"
       - name: Validate all platform configs
-        run: eosim list && eosim doctor
+        run: |
+          eosim doctor
+          # Assert a non-zero count rather than trusting the exit code:
+          # `eosim list` exits 0 with zero platforms, which is how this step
+          # passed while checking nothing.
+          python - <<'PY'
+          import os, sys
+          from eosim.platforms import discover_platforms
+          import eosim, pathlib
+          root = pathlib.Path(eosim.__file__).parent.parent / "platforms"
+          found = discover_platforms(str(root))
+          print(f"discovered {len(found)} platforms under {root}")
+          if not found:
+              sys.exit("::error::no platform configs discovered; "
+                       "this step would otherwise pass having validated nothing")
+          PY
 
   nested-simulation:
     name: Nested Simulation (${{ matrix.platform }})
@@ -60,10 +98,14 @@ jobs:
           python-version: "3.12"
       - name: Install EoSim
         run: |
-          pip install "eosim @ https://github.com/embeddedos-org/EoSim/releases/download/v${{ env.EOSIM_VERSION }}/eosim-${{ env.EOSIM_VERSION }}-py3-none-any.whl"
-          SITE_PACKAGES=$(python -c "import eosim; import os; print(os.path.dirname(os.path.dirname(eosim.__file__)))")
-          git clone --depth 1 https://github.com/embeddedos-org/EoSim.git /tmp/eosim-data
-          cp -r /tmp/eosim-data/platforms "$SITE_PACKAGES/"
+          # Install from a git checkout: no release ships a wheel.
+          git clone --depth 1 --branch v${{ env.EOSIM_VERSION }} \
+            https://github.com/embeddedos-org/EoSim.git /tmp/EoSim
+          pip install /tmp/EoSim
+          # platforms/ is data, not package data, so `eosim list` reports
+          # zero platforms without it. Copy it from the same checkout.
+          SITE_PACKAGES=$(python -c "import eosim, os; print(os.path.dirname(os.path.dirname(eosim.__file__)))")
+          cp -r /tmp/EoSim/platforms "$SITE_PACKAGES/"
       - name: Simulate ${{ matrix.platform }}
         run: |
           eosim run ${{ matrix.platform }} --headless --timeout 10
@@ -90,10 +132,12 @@ jobs:
           python-version: "3.12"
       - name: Install EoSim
         run: |
-          pip install "eosim @ https://github.com/embeddedos-org/EoSim/releases/download/v${{ env.EOSIM_VERSION }}/eosim-${{ env.EOSIM_VERSION }}-py3-none-any.whl"
+          git clone --depth 1 --branch v${{ env.EOSIM_VERSION }} https://github.com/embeddedos-org/EoSim.git /tmp/EoSim && pip install /tmp/EoSim
           SITE_PACKAGES=$(python -c "import eosim; import os; print(os.path.dirname(os.path.dirname(eosim.__file__)))")
-          git clone --depth 1 https://github.com/embeddedos-org/EoSim.git /tmp/eosim-data
-          cp -r /tmp/eosim-data/platforms "$SITE_PACKAGES/"
+          # From the same pinned checkout. A second, unpinned clone here meant
+          # the package came from v${{ env.EOSIM_VERSION }} while platforms/
+          # came from whatever the default branch pointed at that morning.
+          cp -r /tmp/EoSim/platforms "$SITE_PACKAGES/"
       - name: Boot guest and test EoSim inside
         run: |
           echo "=== Nested Guest: ${{ matrix.guest }} ==="
@@ -109,12 +153,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # `eosim list` exits 0 with zero platforms, so "list && doctor" passed
+      # on both these runners while validating nothing. Copy platforms/ from
+      # the same pinned checkout and assert a non-zero count, as
+      # install-validate now does.
       - name: Test EoSim on Windows
+        shell: bash
         run: |
-          pip install "eosim @ https://github.com/embeddedos-org/EoSim/releases/download/v${{ env.EOSIM_VERSION }}/eosim-${{ env.EOSIM_VERSION }}-py3-none-any.whl"
+          git clone --depth 1 --branch v${{ env.EOSIM_VERSION }} https://github.com/embeddedos-org/EoSim.git /tmp/EoSim && pip install /tmp/EoSim
+          SITE_PACKAGES=$(python -c "import eosim, os; print(os.path.dirname(os.path.dirname(eosim.__file__)))")
+          cp -r /tmp/EoSim/platforms "$SITE_PACKAGES/"
           eosim --version
-          eosim list && eosim doctor
-          eosim list
+          eosim doctor
+          python -c "
+          import pathlib, sys, eosim
+          from eosim.platforms import discover_platforms
+          root = pathlib.Path(eosim.__file__).parent.parent / 'platforms'
+          found = discover_platforms(str(root))
+          print(f'discovered {len(found)} platforms')
+          sys.exit(0 if found else 'no platform configs discovered')
+          "
 
   macos-sanity:
     name: macOS Sanity
@@ -126,11 +184,21 @@ jobs:
         with:
           python-version: "3.12"
       - name: Test EoSim on macOS
+        shell: bash
         run: |
-          pip install "eosim @ https://github.com/embeddedos-org/EoSim/releases/download/v${{ env.EOSIM_VERSION }}/eosim-${{ env.EOSIM_VERSION }}-py3-none-any.whl"
+          git clone --depth 1 --branch v${{ env.EOSIM_VERSION }} https://github.com/embeddedos-org/EoSim.git /tmp/EoSim && pip install /tmp/EoSim
+          SITE_PACKAGES=$(python -c "import eosim, os; print(os.path.dirname(os.path.dirname(eosim.__file__)))")
+          cp -r /tmp/EoSim/platforms "$SITE_PACKAGES/"
           eosim --version
-          eosim list && eosim doctor
-          eosim list
+          eosim doctor
+          python -c "
+          import pathlib, sys, eosim
+          from eosim.platforms import discover_platforms
+          root = pathlib.Path(eosim.__file__).parent.parent / 'platforms'
+          found = discover_platforms(str(root))
+          print(f'discovered {len(found)} platforms')
+          sys.exit(0 if found else 'no platform configs discovered')
+          "
 
   sanity-gate:
     name: EoSim Sanity Gate
@@ -138,18 +206,24 @@ jobs:
     needs: [install-validate, nested-simulation, nested-guest-install, windows-sanity, macos-sanity]
     runs-on: ubuntu-latest
     steps:
-      - name: Results
+      # Iterates toJSON(needs) rather than naming one dependency. The
+      # previous body tested install-validate alone and then printed "All
+      # EoSim sanity checks passed" -- which it would do with the other four
+      # jobs red. This workflow has never had a green run, so this gate is
+      # about to start mattering for the first time; a summary that asserts
+      # more than it checked is the wrong thing to start with.
+      - name: Every job in this workflow must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "════════════════════════════════════════════════"
-          echo "  EoSim Sanity Results"
-          echo "════════════════════════════════════════════════"
-          echo "Install & Validate (3 OS × 3 Py):  ${{ needs.install-validate.result }}"
-          echo "Nested Simulation (7 platforms):    ${{ needs.nested-simulation.result }}"
-          echo "Nested Guest Install (3 guests):    ${{ needs.nested-guest-install.result }}"
-          echo "Windows Sanity:                     ${{ needs.windows-sanity.result }}"
-          echo "macOS Sanity:                       ${{ needs.macos-sanity.result }}"
-          echo "════════════════════════════════════════════════"
-          if [ "${{ needs.install-validate.result }}" != "success" ]; then
-            echo "❌ Install/validate failed"; exit 1
+          printf '%s\n' "$RESULTS"
+          bad=$(printf '%s' "$RESULTS" | jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "  \(.key): \(.value.result)"')
+          if [ -n "$bad" ]; then
+            echo "::error::EoSim Sanity Gate failed. These jobs did not succeed:"
+            printf '%s\n' "$bad"
+            exit 1
           fi
-          echo "✅ All EoSim sanity checks passed"
+          echo "All EoSim sanity jobs succeeded."

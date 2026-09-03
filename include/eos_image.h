@@ -108,7 +108,8 @@ EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, tlv_hash) +
 
 /* Every remaining field, pinned.
  *
- * Four of the fourteen fields were asserted. Transposing two adjacent
+ * Three of the thirteen field offsets were asserted (the fourth pre-existing
+ * assert is sizeof, which is not a field). Transposing two adjacent
  * same-width fields moves neither sizeof nor any of those four offsets, so it
  * compiled clean: with load_addr and entry_addr swapped, all four existing
  * asserts still passed and the bootloader would load an image at its entry
@@ -132,15 +133,18 @@ EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, flags) == 24,
                       "flags must stay at offset 24");
 EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, sig_len) == 61,
                       "sig_len must stay at offset 61");
-EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, reserved) == 62,
-                      "reserved[] must stay at offset 62");
+/* tlv_len and tlv_hash are asserted above, where #93 introduced them; the
+ * 30 bytes they occupy are the ones this block used to pin as reserved[]. */
 
 /* Field widths. An offset assert cannot see a field growing into padding that
- * happens to keep every later offset -- reserved[] absorbs exactly that. */
+ * happens to keep every later offset -- the 30 bytes at 62 absorb exactly
+ * that, which is why both halves of that span carry a width assert. */
 EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->hash) == 32,
                       "hash[] is 32 bytes on the wire");
-EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->reserved) == 30,
-                      "reserved[] is 30 bytes on the wire");
+EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->tlv_len) == 2,
+                      "tlv_len is 2 bytes on the wire");
+EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->tlv_hash) == 28,
+                      "tlv_hash is 28 bytes on the wire");
 EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->signature) == 64,
                       "signature[] is 64 bytes on the wire");
 
