@@ -85,6 +85,25 @@ add_executable(eboot_test_ed25519 unit/test_ed25519.c)
 target_link_libraries(eboot_test_ed25519 PRIVATE eboot_core)
 add_test(NAME test_ed25519 COMMAND eboot_test_ed25519)
 
+# --- test_ed25519_contract: the corpus shared byte-for-byte with eos ---
+# tests/vectors/ed25519_contract_vectors.h is committed, not generated at
+# build time. What the TCB's signature verifier was tested against belongs in
+# the repository and in the release artifact: from a tag you should be able to
+# see which 76 vectors ran. Generating it also made Python 3 a hard
+# configure-time dependency of an otherwise pure-C test suite, which cost
+# minimal cross-build images the ability to configure at all.
+#
+# The reason it was generated -- that two repos would hold the same file and
+# have to keep it in step by hand -- is answered by the digest pinned in
+# test_ed25519_contract.c instead: neither copy can change without failing.
+# tools/gen_ed25519_contract_vectors.py stays as the way the file is
+# reproduced and reviewed.
+add_executable(eboot_test_ed25519_contract unit/test_ed25519_contract.c)
+target_link_libraries(eboot_test_ed25519_contract PRIVATE eboot_core)
+target_include_directories(eboot_test_ed25519_contract PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME test_ed25519_contract COMMAND eboot_test_ed25519_contract)
+
 # --- test_keystore: Key management ---
 add_executable(eboot_test_keystore unit/test_keystore.c)
 target_link_libraries(eboot_test_keystore PRIVATE eboot_core)
@@ -114,7 +133,7 @@ add_test(NAME test_ecc COMMAND eboot_test_ecc)
 find_program(VALGRIND valgrind)
 if(VALGRIND)
     set(VALGRIND_OPTS --leak-check=full --error-exitcode=1 --quiet)
-    foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
+    foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_ed25519_contract test_keystore
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_image_abi
