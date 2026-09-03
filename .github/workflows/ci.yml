@@ -36,13 +36,7 @@ jobs:
             cmake ninja-build gcc-12 g++-12 \
             gcc-arm-none-eabi binutils-arm-none-eabi \
             lcov gcovr python3-pip
-          # Install from requirements.txt rather than a hand-maintained list.
-          # tests/unit/test_sign_image.py guards itself with
-          # pytest.importorskip("cryptography"), so a dependency that is
-          # declared nowhere does not fail the job -- it skips the 14 cases
-          # that pin the signed header format and the run still goes green.
-          # pytest-cov stays separate: it is a CI-only coverage plugin, not a
-          # dependency of anything in the repository.
+          # pyyaml: tests/unit/test_ci_gate.py parses .github/workflows/ci.yml
           pip3 install -r requirements.txt pytest-cov
 
       - name: Configure (host)
@@ -182,3 +176,32 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
+  # ── Required check ────────────────────────────────────────────────────────
+  # One job that succeeds only if every other job in this workflow did, so
+  # branch protection has a single stable name to require. `required_status_
+  # checks` is null on master here, the same gap eos#92 and ebuild#87 track:
+  # nothing builds the merge result before it becomes master.
+  #
+  # `release` is deliberately outside the gate: it only runs on tags, so on a
+  # pull request it is skipped, and a required check that is skipped never
+  # reports -- the pull request would wait for a status that never arrives.
+  #
+  # `if: always()` for the same reason in reverse: without it the gate is
+  # skipped whenever an earlier job fails, so a real failure would present as a
+  # pull request that hangs rather than one that goes red.
+  #
+  # A non-success result of any kind fails the gate, `skipped` included. A job
+  # that did not run did not verify anything, and treating that as a pass is
+  # the fail-open shape #38, #59 and #82 removed from the boot path.
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-22.04
+    needs: [test, build-arm, static-analysis]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every job in this workflow must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: printf '%s' "$RESULTS" | .github/scripts/ci-gate-check.sh

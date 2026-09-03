@@ -30,6 +30,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -211,29 +212,105 @@ TEST(test_ed25519_identity_key_forgery_rejected)
                               msg, sizeof(msg) - 1) != EOS_OK);
 }
 
+/* The eight canonical low-order point encodings.
+ *
+ * Every order was computed rather than copied: decoding each y, recovering x,
+ * and repeatedly adding the point until it reached the identity gives
+ * 1, 2, 4, 4, 8, 8, 8, 8 for the entries below in order. An earlier revision
+ * of this array held only five of them -- it omitted y=0 with the sign bit
+ * set and both sign-flipped order-8 encodings -- while its comment claimed to
+ * hold "the eight". [L](-A) = -[L]A, so the guard rejects a sign variant
+ * whether or not it is listed; the reason to list them is that this is the
+ * regression record for a secure-boot bypass, and a claimed class has to be
+ * the class it claims. */
+static const uint8_t k_low_order[8][32] = {
+    /* order 1: the identity, y = 1 */
+    {0x01},
+    /* order 2: y = -1 */
+    {0xEC,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+     0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x7F},
+    /* order 4: y = 0, sign bit clear */
+    {0x00},
+    /* order 4: y = 0, sign bit set -- the encoding the earlier array missed */
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+     0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80},
+    /* order 8 */
+    {0x26,0xE8,0x95,0x8F,0xC2,0xB2,0x27,0xB0,0x45,0xC3,0xF4,0x89,0xF2,0xEF,0x98,0xF0,
+     0xD5,0xDF,0xAC,0x05,0xD3,0xC6,0x33,0x39,0xB1,0x38,0x02,0x88,0x6D,0x53,0xFC,0x05},
+    /* order 8 */
+    {0xC7,0x17,0x6A,0x70,0x3D,0x4D,0xD8,0x4F,0xBA,0x3C,0x0B,0x76,0x0D,0x10,0x67,0x0F,
+     0x2A,0x20,0x53,0xFA,0x2C,0x39,0xCC,0xC6,0x4E,0xC7,0xFD,0x77,0x92,0xAC,0x03,0x7A},
+    /* order 8: sign flip of the first order-8 entry -- also missing before */
+    {0x26,0xE8,0x95,0x8F,0xC2,0xB2,0x27,0xB0,0x45,0xC3,0xF4,0x89,0xF2,0xEF,0x98,0xF0,
+     0xD5,0xDF,0xAC,0x05,0xD3,0xC6,0x33,0x39,0xB1,0x38,0x02,0x88,0x6D,0x53,0xFC,0x85},
+    /* order 8: sign flip of the second -- also missing before */
+    {0xC7,0x17,0x6A,0x70,0x3D,0x4D,0xD8,0x4F,0xBA,0x3C,0x0B,0x76,0x0D,0x10,0x67,0x0F,
+     0x2A,0x20,0x53,0xFA,0x2C,0x39,0xCC,0xC6,0x4E,0xC7,0xFD,0x77,0x92,0xAC,0x03,0xFA},
+};
+
+/* Not low-order points, and refused earlier and by a different mechanism:
+ * unpackneg() rejects them on canonicality or because no x exists. Kept
+ * separate so the array above means what its name says -- an earlier revision
+ * spent one of its eight slots on D9FF..FF, which does not decode at all. */
+static const uint8_t k_non_canonical[3][32] = {
+    /* y = p: reduces to 0, decodes as an order-4 point but is not canonical */
+    {0xED,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+     0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x7F},
+    /* y = p + 1: reduces to the identity, likewise not canonical */
+    {0xEE,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+     0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x7F},
+    /* no x satisfies the curve equation for this y: unpackneg() fails */
+    {0xD9,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+     0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF},
+};
+
+/* A low-order key forges for roughly one message in n, where n is its order,
+ * so a single fixed message would let a real bypass pass this suite. */
+static const char *const messages[] = {
+    "untrusted firmware", "v1.0.0", "", "a", "boot", "eos", "1234", "payload",
+};
+
 TEST(test_ed25519_low_order_keys_rejected)
 {
     /* zero_pubkey covers one encoding; Ed25519 has eight low-order points and
      * the family is what matters. A subgroup test alone is not enough either:
      * the identity has order 1, which divides L, so [L]identity = identity and
-     * it passes. Both checks are required. */
-    static const uint8_t low_order[4][32] = {
-        {0},
-        {1},
-        {0x26,0xe8,0x95,0x8f,0xc2,0xb2,0x27,0xb0,0x45,0xc3,0xf4,0x89,0xf2,0xef,0x98,0xf0,
-         0xd5,0xdf,0xac,0x05,0xd3,0xc6,0x33,0x39,0xb1,0x38,0x02,0x88,0x6d,0x53,0xfc,0x05},
-        {0xc7,0x17,0x6a,0x70,0x3d,0x4d,0xd8,0x4f,0xba,0x3c,0x0b,0x76,0x0d,0x10,0x67,0x0f,
-         0x2a,0x20,0x53,0xfa,0x2c,0x39,0xcc,0xc6,0x4e,0xc7,0xfd,0x77,0x92,0xac,0x03,0x7a},
-    };
-    const uint8_t msg[] = "untrusted firmware";
+     * it passes. Both checks are required.
+     *
+     * The sweep is every low-order encoding as the key against every one as R,
+     * over eight messages, because a low-order key of order n forges for
+     * roughly one message in n -- a single fixed message would let a genuine
+     * bypass through this test. Measured against 13a7a02, the last commit
+     * before the subgroup check: 16 of the 64 (key, R) pairs were accepted by
+     * at least one message. Here: none. */
+    for (size_t k = 0; k < sizeof(k_low_order) / sizeof(k_low_order[0]); k++) {
+        for (size_t r = 0; r < sizeof(k_low_order) / sizeof(k_low_order[0]); r++) {
+            for (size_t m = 0; m < sizeof(messages) / sizeof(messages[0]); m++) {
+                uint8_t sig[64];
+                memset(sig, 0, sizeof(sig));
+                memcpy(sig, k_low_order[r], 32);
+                ASSERT(eos_ed25519_verify(sig, k_low_order[k],
+                                          (const uint8_t *)messages[m],
+                                          strlen(messages[m])) != EOS_OK);
+            }
+        }
+    }
+}
 
-    for (int k = 0; k < 4; k++) {
-        for (int r = 0; r < 4; r++) {
+TEST(test_ed25519_non_canonical_encodings_rejected)
+{
+    /* These are refused before the subgroup check ever runs -- unpackneg()
+     * rejects them on canonicality, or because no x satisfies the curve
+     * equation. Pinned separately so that nobody deletes that path on the
+     * grounds that the subgroup test now covers it. It does not. */
+    for (size_t k = 0; k < sizeof(k_non_canonical) / sizeof(k_non_canonical[0]); k++) {
+        for (size_t m = 0; m < sizeof(messages) / sizeof(messages[0]); m++) {
             uint8_t sig[64];
             memset(sig, 0, sizeof(sig));
-            memcpy(sig, low_order[r], 32);
-            ASSERT(eos_ed25519_verify(sig, low_order[k],
-                                      msg, sizeof(msg) - 1) != EOS_OK);
+            memcpy(sig, k_non_canonical[k], 32);
+            ASSERT(eos_ed25519_verify(sig, k_non_canonical[k],
+                                      (const uint8_t *)messages[m],
+                                      strlen(messages[m])) != EOS_OK);
         }
     }
 }
@@ -259,21 +336,6 @@ TEST(test_ed25519_zero_signature_rejected)
 
     ASSERT(eos_ed25519_verify(sig, pk, msg, 1) != EOS_OK);
 }
-
-TEST(test_ed25519_identity_key_forgery_rejected)
-{
-    /* The identity point has compressed encoding 01 00...00. With both the
-     * public key and R set to the identity and S set to zero, the verification
-     * equation is true for every message unless low-order keys are rejected. */
-    uint8_t identity_pub[32] = {1};
-    uint8_t identity_sig[64] = {1};
-    const uint8_t msg[] = "untrusted firmware";
-
-    ASSERT(eos_ed25519_verify(identity_sig, identity_pub,
-                              msg, sizeof(msg) - 1) != EOS_OK);
-}
-
-/* ---- SHA-512, the hash Ed25519 is defined over (FIPS 180-4) ---- */
 
 TEST(test_ed25519_low_order_R_with_a_valid_key_is_not_a_forgery)
 {
@@ -367,13 +429,13 @@ int main(void)
     run_test_ed25519_null_args();
     run_test_ed25519_identity_key_forgery_rejected();
     run_test_ed25519_low_order_keys_rejected();
+    run_test_ed25519_non_canonical_encodings_rejected();
+    run_test_ed25519_low_order_R_with_a_valid_key_is_not_a_forgery();
     run_test_ed25519_zero_pubkey_rejected();
     run_test_ed25519_zero_signature_rejected();
-    run_test_ed25519_identity_key_forgery_rejected();
     run_test_sha512_known_answers();
     run_test_sha512_streaming_matches_one_shot();
 
-    tests_run = 11;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

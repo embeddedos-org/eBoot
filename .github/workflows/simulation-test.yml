@@ -95,15 +95,15 @@ jobs:
     needs: [simulate, cross-platform]
     runs-on: ubuntu-latest
     steps:
-      - name: Results
-        run: |
-          echo "════════════════════════════════════════════"
-          echo "  EoSim Simulation Sanity Results"
-          echo "════════════════════════════════════════════"
-          echo "Simulation (11 platforms):     ${{ needs.simulate.result }}"
-          echo "Cross-Platform (Win/Lin/Mac):  ${{ needs.cross-platform.result }}"
-          echo "════════════════════════════════════════════"
-          if [ "${{ needs.simulate.result }}" != "success" ]; then
-            echo "❌ Simulation failed"; exit 1
-          fi
-          echo "✅ All simulation checks passed (EoSim steps skipped — no published release)"
+      # Iterates toJSON(needs) rather than naming each dependency. The
+      # previous body printed both results and branched on `simulate` alone,
+      # so a red or skipped `cross-platform` -- three OS legs -- passed the
+      # gate and it still printed "All simulation checks passed". That is the
+      # fail-open shape ci.yml's gate was written to remove, in a job whose
+      # name a maintainer would plausibly require. This form cannot fall out
+      # of step with `needs:`.
+      - uses: actions/checkout@v4
+      - name: Every job in this workflow must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: printf '%s' "$RESULTS" | .github/scripts/ci-gate-check.sh
