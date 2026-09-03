@@ -45,6 +45,14 @@ jobs:
           # dependency of anything in the repository.
           pip3 install -r requirements.txt pytest-cov
 
+      # Installing the dependency fixes today's silent skip; this makes the
+      # skip impossible here rather than merely unlikely. Without it, a
+      # dropped requirement or a changed runner image puts the signing suite
+      # back to collecting 19 tests and running none, with the job still
+      # green. See tests/unit/test_eos_sign_payload_offset.py.
+      - name: Signing tests must not silently skip
+        run: echo "EOS_REQUIRE_SIGNING_TESTS=1" >> "$GITHUB_ENV"
+
       - name: Configure (host)
         run: |
           cmake -B build/host -G Ninja \
