@@ -91,7 +91,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         memset(sim_flash, 0xFF, sizeof(sim_flash)); \
-        sim_unreadable_from = UINT32_MAX;
+        sim_unreadable_from = UINT32_MAX; \
         sim_tick = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-50s ", #name); \
@@ -328,7 +328,8 @@ TEST(test_signed_region_covers_all_metadata)
     COVERED(hash);
     COVERED(sig_type);
     COVERED(sig_len);
-    COVERED(reserved);
+    COVERED(tlv_len);
+    COVERED(tlv_hash);
     #undef COVERED
 
     /* The signature itself is the only thing outside it. */

@@ -17,6 +17,7 @@
 #include "eos_recovery.h"
 #include "eos_hal.h"
 #include "eos_crypto_boot.h"
+#include "eos_image.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,10 +38,15 @@ static uint8_t sim_flash[SIM_FLASH_SIZE];
 #define SIM_SLOT_B_ADDR         0x6000
 #define SIM_SLOT_B_SIZE         0x1000
 
+static size_t verify_payload_bytes_read = 0;
+
 static int sim_flash_read(uint32_t addr, void *buf, size_t len)
 {
     if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
     memcpy(buf, &sim_flash[addr], len);
+    if (addr >= SIM_SLOT_A_ADDR + sizeof(eos_image_header_t) &&
+        addr < SIM_SLOT_B_ADDR)
+        verify_payload_bytes_read += len;
     return EOS_OK;
 }
 
@@ -171,6 +177,7 @@ static const eos_board_ops_t sim_ops = {
 /* ---- Recovery protocol packet (mirrors the private struct in recovery.c) ---- */
 
 #define RCVR_CMD_WRITE 0x04
+#define RCVR_CMD_VERIFY 0x05
 #define RCVR_CMD_AUTH  0x10
 #define RCVR_ACK       0xAA
 #define RCVR_NACK      0x55
@@ -228,6 +235,7 @@ static void setup(void)
     script_len = 0;
     script_pos = 0;
     out_len = 0;
+    verify_payload_bytes_read = 0;
     eos_hal_init(&sim_ops);
 }
 
@@ -314,11 +322,62 @@ TEST(test_write_rejects_offset_past_slot_end)
     ASSERT(memcmp(&sim_flash[SIM_SLOT_A_ADDR], payload, sizeof(payload)) == 0);
 }
 
+static void fill_header(eos_image_header_t *hdr, uint32_t image_size)
+{
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->magic = EOS_IMG_MAGIC;
+    hdr->hdr_version = EOS_IMAGE_HDR_VERSION;
+    hdr->hdr_size = (uint16_t)sizeof(eos_image_header_t);
+    hdr->image_size = image_size;
+    hdr->load_addr = 0x20000000;
+    hdr->entry_addr = 0x20000100;
+}
+
+/* VERIFY must reject an image whose payload exceeds the slot, instead of
+ * streaming reads past the slot boundary during eos_image_verify_integrity(). */
+TEST(test_verify_rejects_oversized_image_before_reading_payload)
+{
+    eos_image_header_t hdr;
+    fill_header(&hdr, SIM_SLOT_A_SIZE + 0x400u);
+    memcpy(&sim_flash[SIM_SLOT_A_ADDR], &hdr, sizeof(hdr));
+
+    eos_sha256_ctx_t ctx;
+    uint8_t auth_response[32];
+    eos_sha256_init(&ctx);
+    eos_sha256_update(&ctx, SIM_CHALLENGE, sizeof(SIM_CHALLENGE));
+    eos_sha256_update(&ctx, SIM_SHARED_SECRET, sizeof(SIM_SHARED_SECRET));
+    eos_sha256_final(&ctx, auth_response);
+
+    uint8_t pkt[8];
+    put_pkt(pkt, RCVR_CMD_AUTH, 0, 0, 0);
+    script_append(pkt, sizeof(pkt));
+    put_pkt(pkt, RCVR_CMD_AUTH, 0, 0, 0);
+    script_append(pkt, sizeof(pkt));
+    script_append(auth_response, sizeof(auth_response));
+
+    put_pkt(pkt, RCVR_CMD_VERIFY, EOS_SLOT_A, 0, 0);
+    script_append(pkt, sizeof(pkt));
+
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+
+    /* auth ACK then VERIFY NACK */
+    ASSERT(out_len >= 35);
+    ASSERT(out_buf[33] == RCVR_ACK);
+    ASSERT(out_buf[34] == RCVR_NACK);
+    ASSERT(verify_payload_bytes_read == 0);
+}
+
 int main(void)
 {
     printf("=== test_recovery ===\n");
     run_test_write_range_helper_rejects_invalid_bounds();
     run_test_write_rejects_offset_past_slot_end();
+    run_test_verify_rejects_oversized_image_before_reading_payload();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

@@ -21,9 +21,18 @@ add_executable(eboot_test_image_abi unit/test_image_abi.c)
 target_link_libraries(eboot_test_image_abi PRIVATE eboot_core)
 add_test(NAME test_image_abi COMMAND eboot_test_image_abi)
 
+# --- test_secure_boot: Secure boot policy gates ---
+add_executable(eboot_test_secure_boot unit/test_secure_boot.c)
+target_link_libraries(eboot_test_secure_boot PRIVATE eboot_core)
+add_test(NAME test_secure_boot COMMAND eboot_test_secure_boot)
+
 # --- test_recovery: UART recovery write range ---
+# eboot_stage1 links eboot_core PUBLIC, so naming eboot_core here too put it on
+# the link line twice -- ahead of the target that needs it, which is the wrong
+# order for a left-to-right archive scan, so CMake appended it again anyway and
+# the linker reported the duplicate. The transitive dependency covers it.
 add_executable(eboot_test_recovery unit/test_recovery.c)
-target_link_libraries(eboot_test_recovery PRIVATE eboot_core eboot_stage1)
+target_link_libraries(eboot_test_recovery PRIVATE eboot_stage1)
 add_test(NAME test_recovery COMMAND eboot_test_recovery)
 
 # --- test_fw_transport: UART raw/XMODEM/YMODEM firmware transport ---
@@ -86,6 +95,11 @@ add_executable(eboot_test_rollback unit/test_rollback.c)
 target_link_libraries(eboot_test_rollback PRIVATE eboot_core)
 add_test(NAME test_rollback COMMAND eboot_test_rollback)
 
+# --- test_tlv_auth: TLV area must be bound to the signed header ---
+add_executable(eboot_test_tlv_auth unit/test_tlv_auth.c)
+target_link_libraries(eboot_test_tlv_auth PRIVATE eboot_core)
+add_test(NAME test_tlv_auth COMMAND eboot_test_tlv_auth)
+
 # --- test_storage: Unified storage abstraction ---
 add_executable(eboot_test_storage unit/test_storage.c)
 target_link_libraries(eboot_test_storage PRIVATE eboot_core)
@@ -104,7 +118,8 @@ if(VALGRIND)
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_image_abi
-                      test_recovery test_slot_size_bounds test_fw_transport)
+                      test_recovery test_slot_size_bounds test_fw_transport
+                      test_tlv_auth)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:eboot_${TEST_NAME}>

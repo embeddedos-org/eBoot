@@ -197,6 +197,47 @@ TEST(test_ed25519_null_args)
     ASSERT(eos_ed25519_verify(sig, pk, NULL, sizeof(msg)) != EOS_OK);
 }
 
+TEST(test_ed25519_identity_key_forgery_rejected)
+{
+    /* The identity point encodes as 01 00..00. With the public key and R both
+     * set to it and S zero, every term of the verification equation collapses
+     * to the identity, so the equation holds for any message at all. That is
+     * not a weakened signature; it is no signature. */
+    uint8_t identity_pub[32] = {1};
+    uint8_t identity_sig[64] = {1};
+    const uint8_t msg[] = "untrusted firmware";
+
+    ASSERT(eos_ed25519_verify(identity_sig, identity_pub,
+                              msg, sizeof(msg) - 1) != EOS_OK);
+}
+
+TEST(test_ed25519_low_order_keys_rejected)
+{
+    /* zero_pubkey covers one encoding; Ed25519 has eight low-order points and
+     * the family is what matters. A subgroup test alone is not enough either:
+     * the identity has order 1, which divides L, so [L]identity = identity and
+     * it passes. Both checks are required. */
+    static const uint8_t low_order[4][32] = {
+        {0},
+        {1},
+        {0x26,0xe8,0x95,0x8f,0xc2,0xb2,0x27,0xb0,0x45,0xc3,0xf4,0x89,0xf2,0xef,0x98,0xf0,
+         0xd5,0xdf,0xac,0x05,0xd3,0xc6,0x33,0x39,0xb1,0x38,0x02,0x88,0x6d,0x53,0xfc,0x05},
+        {0xc7,0x17,0x6a,0x70,0x3d,0x4d,0xd8,0x4f,0xba,0x3c,0x0b,0x76,0x0d,0x10,0x67,0x0f,
+         0x2a,0x20,0x53,0xfa,0x2c,0x39,0xcc,0xc6,0x4e,0xc7,0xfd,0x77,0x92,0xac,0x03,0x7a},
+    };
+    const uint8_t msg[] = "untrusted firmware";
+
+    for (int k = 0; k < 4; k++) {
+        for (int r = 0; r < 4; r++) {
+            uint8_t sig[64];
+            memset(sig, 0, sizeof(sig));
+            memcpy(sig, low_order[r], 32);
+            ASSERT(eos_ed25519_verify(sig, low_order[k],
+                                      msg, sizeof(msg) - 1) != EOS_OK);
+        }
+    }
+}
+
 TEST(test_ed25519_zero_pubkey_rejected)
 {
     uint8_t zero_pub[32], sig[64], msg[1];
@@ -233,6 +274,38 @@ TEST(test_ed25519_identity_key_forgery_rejected)
 }
 
 /* ---- SHA-512, the hash Ed25519 is defined over (FIPS 180-4) ---- */
+
+TEST(test_ed25519_low_order_R_with_a_valid_key_is_not_a_forgery)
+{
+    /* The subgroup check guards the public key, not R, and that is
+     * deliberate rather than an omission. Verification computes
+     * [S]B = R + [k]A: a low-order A collapses the equation for any message,
+     * which is the bypass. A low-order R with a genuine A does not, because
+     * k = SHA-512(R || A || M) depends on R, so an attacker choosing R would
+     * have to solve for it.
+     *
+     * Measured rather than argued: all eight low-order encodings as R with
+     * S = 0, against RFC 8032 test 2's real public key, are rejected on the
+     * unfixed verifier too -- 0 of 8, before and after. Pinned here so that
+     * a later "R should be checked as well" change is recognised as scope
+     * creep, and so that removing the key check because "R is the untrusted
+     * half" fails loudly.
+     */
+    uint8_t pk[32], sig[64];
+    size_t r, m;
+
+    hex2bin(k_vectors[1].pubkey_hex, pk, 32);
+
+    for (r = 0; r < sizeof(k_low_order) / sizeof(k_low_order[0]); r++) {
+        for (m = 0; m < sizeof(messages) / sizeof(messages[0]); m++) {
+            memset(sig, 0, sizeof(sig));
+            memcpy(sig, k_low_order[r], 32);
+            ASSERT(eos_ed25519_verify(sig, pk,
+                                      (const uint8_t *)messages[m],
+                                      strlen(messages[m])) != EOS_OK);
+        }
+    }
+}
 
 TEST(test_sha512_known_answers)
 {
@@ -292,6 +365,8 @@ int main(void)
     run_test_ed25519_wrong_public_key_rejected();
     run_test_ed25519_malleated_signature_rejected();
     run_test_ed25519_null_args();
+    run_test_ed25519_identity_key_forgery_rejected();
+    run_test_ed25519_low_order_keys_rejected();
     run_test_ed25519_zero_pubkey_rejected();
     run_test_ed25519_zero_signature_rejected();
     run_test_ed25519_identity_key_forgery_rejected();

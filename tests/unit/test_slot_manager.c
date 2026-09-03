@@ -121,7 +121,7 @@ static int slot_index(uint32_t addr)
 /* ---- Image verification mocks (override eboot_core's real ones) ----
  *
  * verify_slot() passes the parsed header straight to the integrity and
- * signature checks, so the mocks stash the slot index in reserved[0] on
+ * signature checks, so the mocks stash the slot index in tlv_hash[0] on
  * parse and read it back to decide which scripted result to return. */
 
 int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
@@ -133,7 +133,7 @@ int eos_image_parse_header(uint32_t addr, eos_image_header_t *out)
     memset(out, 0, sizeof(*out));
     out->magic = EOS_IMG_MAGIC;
     out->image_version = slot_version[slot];
-    out->reserved[0] = (uint8_t)slot;
+    out->tlv_hash[0] = (uint8_t)slot;
     return EOS_OK;
 }
 
@@ -146,8 +146,8 @@ int eos_image_verify_integrity(const eos_image_header_t *hdr, uint32_t addr)
 
 int eos_image_verify_signature(const eos_image_header_t *hdr)
 {
-    if (!hdr || hdr->reserved[0] > EOS_SLOT_B) return EOS_ERR_INVALID;
-    return signature_result[hdr->reserved[0]];
+    if (!hdr || hdr->tlv_hash[0] > EOS_SLOT_B) return EOS_ERR_INVALID;
+    return signature_result[hdr->tlv_hash[0]];
 }
 
 /* ---- Test harness ---- */

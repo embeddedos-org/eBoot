@@ -314,6 +314,12 @@ static int recovery_handle_verify(eos_slot_t slot)
     if (rc != EOS_OK)
         return recovery_send_nack();
 
+    uint32_t slot_size = eos_hal_slot_size(slot);
+    if (slot_size == 0 ||
+        hdr.hdr_size > slot_size ||
+        hdr.image_size > slot_size - hdr.hdr_size)
+        return recovery_send_nack();
+
     /* eos_image_verify_integrity() adds hdr_size internally — pass base addr only */
     rc = eos_image_verify_integrity(&hdr, addr);
     if (rc != EOS_OK)

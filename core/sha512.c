@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 EoS Project
+
 #include "eos_crypto_boot.h"
 #include <string.h>
 

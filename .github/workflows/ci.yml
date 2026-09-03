@@ -36,7 +36,14 @@ jobs:
             cmake ninja-build gcc-12 g++-12 \
             gcc-arm-none-eabi binutils-arm-none-eabi \
             lcov gcovr python3-pip
-          pip3 install pytest pytest-cov
+          # Install from requirements.txt rather than a hand-maintained list.
+          # tests/unit/test_sign_image.py guards itself with
+          # pytest.importorskip("cryptography"), so a dependency that is
+          # declared nowhere does not fail the job -- it skips the 14 cases
+          # that pin the signed header format and the run still goes green.
+          # pytest-cov stays separate: it is a CI-only coverage plugin, not a
+          # dependency of anything in the repository.
+          pip3 install -r requirements.txt pytest-cov
 
       - name: Configure (host)
         run: |

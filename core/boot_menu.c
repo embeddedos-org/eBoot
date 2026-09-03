@@ -12,13 +12,21 @@
 #include "eos_bootctl.h"
 #include <string.h>
 
+/* eos_hal_uart_write()/eos_hal_uart_read() are compatibility macros over the
+ * HAL's single-UART API (eos_hal_uart_send()/eos_hal_uart_recv()), so they
+ * expand without their port argument and it reads as unused under -Wextra.
+ * The parameter is kept because eos_boot_menu_config_t carries a uart_port and
+ * the board ports address one; it starts being honoured the moment the HAL
+ * grows a per-port call. */
 static void uart_puts(uint8_t port, const char *str)
 {
+    (void)port;
     eos_hal_uart_write(port, (const uint8_t *)str, strlen(str));
 }
 
 static int uart_getc(uint8_t port, uint32_t timeout_ms)
 {
+    (void)port;
     uint8_t ch;
     int rc = eos_hal_uart_read(port, &ch, 1, timeout_ms);
     return (rc == EOS_OK) ? (int)ch : -1;
