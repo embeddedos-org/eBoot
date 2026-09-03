@@ -112,6 +112,10 @@ def sign_sha256(image_path: Path):
     data[SIG_TYPE_OFFSET] = SIG_SHA256
     data[SIG_LEN_OFFSET] = 0
 
+    flags = struct.unpack_from('<I', data, FLAGS_OFFSET)[0]
+    flags |= IMG_FLAG_HASH_SHA256
+    struct.pack_into('<I', data, FLAGS_OFFSET, flags)
+
     image_path.write_bytes(bytes(data))
     print(f"SHA-256 hash applied: {sha.hex()}")
 
