@@ -45,6 +45,10 @@ add_executable(eboot_test_slot_size_bounds unit/test_slot_size_bounds.c)
 target_link_libraries(eboot_test_slot_size_bounds PRIVATE eboot_core)
 add_test(NAME test_slot_size_bounds COMMAND eboot_test_slot_size_bounds)
 
+add_executable(eboot_test_jump_app_bounds unit/test_jump_app_bounds.c)
+target_link_libraries(eboot_test_jump_app_bounds PRIVATE eboot_core eboot_stage1)
+add_test(NAME test_jump_app_bounds COMMAND eboot_test_jump_app_bounds)
+
 # --- test_device_table: UEFI-style device table ---
 add_executable(eboot_test_device_table unit/test_device_table.c)
 target_link_libraries(eboot_test_device_table PRIVATE eboot_core)
