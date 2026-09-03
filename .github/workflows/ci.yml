@@ -123,6 +123,51 @@ jobs:
             build/arm/**/*.hex
           retention-days: 90
 
+  # ── Fuzz Harness Build ────────────────────────────────────────────────────
+  # tests/fuzz/ is behind EBLDR_BUILD_FUZZ, which defaults OFF, and no job set
+  # it -- so the harnesses were never compiled anywhere. A harness that is not
+  # built cannot fail to build, and #99 is what that hid: three of the five
+  # named functions that exist nowhere in the repository, and a fourth declared
+  # eos_image_parse_header with the wrong signature, so it linked, ran, and
+  # fuzzed nothing.
+  #
+  # #99 repairs the harnesses and tests/unit/test_fuzz_harnesses.py refuses the
+  # hand-written `extern` that made the mismatch invisible, but neither
+  # compiles anything: a signature that drifts after this lands still needs a
+  # compiler to notice. This is that compiler.
+  #
+  # It does not fuzz. It builds the targets with clang and runs each for a few
+  # seconds over its own generated inputs, which is enough to catch a harness
+  # that no longer compiles or crashes immediately. A real campaign belongs in
+  # a scheduled workflow, not on every pull request.
+  fuzz-build:
+    name: Fuzz Harness Build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fuzz targets
+        run: |
+          set -euo pipefail
+          # EBLDR_BUILD_TESTS too: tests/fuzz/ is added from
+          # tests/CMakeLists.txt, so EBLDR_BUILD_FUZZ alone builds nothing and
+          # the job would pass having compiled no harness at all.
+          cmake -B build/fuzz -DEBLDR_BUILD_TESTS=ON -DEBLDR_BUILD_FUZZ=ON \
+                -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/fuzz -j"$(nproc)"
+      - name: Smoke-run each harness
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          harnesses=(build/fuzz/tests/fuzz/fuzz_*)
+          if [ ${#harnesses[@]} -eq 0 ]; then
+            echo "::error::EBLDR_BUILD_FUZZ=ON produced no harnesses"
+            exit 1
+          fi
+          for f in "${harnesses[@]}"; do
+            echo "=== $(basename "$f") ==="
+            "$f" -max_total_time=5 -print_final_stats=1
+          done
+
   # ── Static Analysis ───────────────────────────────────────────────────────
   static-analysis:
     name: Static Analysis (cppcheck + clang-tidy)

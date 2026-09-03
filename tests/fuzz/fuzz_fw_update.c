@@ -3,41 +3,57 @@
 
 /**
  * @file fuzz_fw_update.c
- * @brief libFuzzer harness for firmware update stream processing
+ * @brief libFuzzer harness for the firmware update ingest path.
  *
- * Simulates a chunked firmware-update data stream, feeding arbitrary data
- * into the update parser to exercise header validation, chunk sequencing,
- * checksum verification, and boundary conditions.
+ * This harness used to declare three functions of its own:
+ *
+ *     eos_fw_update_init(), eos_fw_update_process_chunk(), eos_fw_update_finalize(void)
+ *
+ * The first two have never existed. The third does exist but takes
+ * (ctx, mode), not (void) -- so had the other two ever resolved, this would
+ * have called it through a wrong prototype. The real ingest path is
+ * begin -> write -> finalize/abort over a context the caller owns.
+ *
+ * Chunk widths come from the input rather than being fixed, so the fuzzer can
+ * split the same payload across write() calls differently -- which is where
+ * state carried between chunks goes wrong.
  */
 
-#include <stdint.h>
+#include "eos_fw_update.h"
+#include "fuzz_sim_flash.h"
+
 #include <stddef.h>
-#include <string.h>
+#include <stdint.h>
 
-/* Forward-declare firmware update APIs */
-extern int eos_fw_update_init(void);
-extern int eos_fw_update_process_chunk(const uint8_t *chunk, size_t chunk_len);
-extern int eos_fw_update_finalize(void);
-
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    if (size < 4) {
-        return 0;
-    }
-
-    eos_fw_update_init();
-
-    /* Feed data in variable-sized chunks derived from the fuzzer input */
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+{
+    eos_fw_update_ctx_t ctx;
     size_t offset = 0;
+    uint8_t selector;
+
+    if (size < 2) return 0;
+
+    selector = data[0];
+    data += 1; size -= 1;
+
+    fuzz_flash_load(0x4000, NULL, 0);
+
+    memset(&ctx, 0, sizeof ctx);
+    if (eos_fw_update_begin(&ctx, (selector & 1) ? EOS_SLOT_B : EOS_SLOT_A) != EOS_OK)
+        return 0;
+
     while (offset < size) {
-        size_t chunk_sz = (data[offset] % 64) + 1;
-        if (offset + chunk_sz > size) {
-            chunk_sz = size - offset;
-        }
-        eos_fw_update_process_chunk(data + offset, chunk_sz);
-        offset += chunk_sz;
+        /* 1..64 bytes, chosen by the data itself. */
+        size_t chunk = (size_t)(data[offset] & 0x3F) + 1;
+        if (chunk > size - offset) chunk = size - offset;
+        if (eos_fw_update_write(&ctx, data + offset, chunk) != EOS_OK) break;
+        offset += chunk;
     }
 
-    eos_fw_update_finalize();
+    if (selector & 2)
+        (void)eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST);
+    else
+        eos_fw_update_abort(&ctx);
 
     return 0;
 }
