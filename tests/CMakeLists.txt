@@ -110,6 +110,12 @@ add_executable(eboot_test_ecc unit/test_ecc.c)
 target_link_libraries(eboot_test_ecc PRIVATE eboot_core)
 add_test(NAME test_ecc COMMAND eboot_test_ecc)
 
+# --- test_fdt_loader: device tree parsing against malformed blobs ---
+# core/fdt_loader.c was in no source list, so it had never been compiled.
+add_executable(eboot_test_fdt_loader unit/test_fdt_loader.c)
+target_link_libraries(eboot_test_fdt_loader PRIVATE eboot_core)
+add_test(NAME test_fdt_loader COMMAND eboot_test_fdt_loader)
+
 # --- Valgrind test targets ---
 find_program(VALGRIND valgrind)
 if(VALGRIND)
