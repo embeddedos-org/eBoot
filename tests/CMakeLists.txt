@@ -40,6 +40,11 @@ add_executable(eboot_test_fw_transport unit/test_fw_transport.c)
 target_link_libraries(eboot_test_fw_transport PRIVATE eboot_core)
 add_test(NAME test_fw_transport COMMAND eboot_test_fw_transport)
 
+# --- test_fw_update_sig: install path must authenticate, not just hash ---
+add_executable(eboot_test_fw_update_sig unit/test_fw_update_sig.c)
+target_link_libraries(eboot_test_fw_update_sig PRIVATE eboot_core)
+add_test(NAME test_fw_update_sig COMMAND eboot_test_fw_update_sig)
+
 # --- test_slot_size_bounds: verify_slot() must reject image_size > slot capacity ---
 add_executable(eboot_test_slot_size_bounds unit/test_slot_size_bounds.c)
 target_link_libraries(eboot_test_slot_size_bounds PRIVATE eboot_core)
