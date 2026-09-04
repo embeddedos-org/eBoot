@@ -132,15 +132,21 @@ EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, flags) == 24,
                       "flags must stay at offset 24");
 EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, sig_len) == 61,
                       "sig_len must stay at offset 61");
-EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, reserved) == 62,
-                      "reserved[] must stay at offset 62");
+/* offsetof(tlv_len) == 62 and offsetof(tlv_hash) == 64 are already asserted
+ * above, next to EOS_IMG_TLV_HASH_LEN -- this used to be a single reserved[30]
+ * field before #93 split it into tlv_len + tlv_hash for anti-rollback, and
+ * this block was never updated to match, leaving `reserved` referring to a
+ * struct member that no longer exists (a hard compile error, not just a stale
+ * comment: eos_image_header_t has never had every field pinned since #93).
+ */
 
 /* Field widths. An offset assert cannot see a field growing into padding that
- * happens to keep every later offset -- reserved[] absorbs exactly that. */
+ * happens to keep every later offset -- tlv_hash[] absorbs exactly that. */
 EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->hash) == 32,
                       "hash[] is 32 bytes on the wire");
-EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->reserved) == 30,
-                      "reserved[] is 30 bytes on the wire");
+EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->tlv_hash) ==
+                      EOS_IMG_TLV_HASH_LEN,
+                      "tlv_hash[] is EOS_IMG_TLV_HASH_LEN bytes on the wire");
 EOS_IMG_STATIC_ASSERT(sizeof(((eos_image_header_t *)0)->signature) == 64,
                       "signature[] is 64 bytes on the wire");
 

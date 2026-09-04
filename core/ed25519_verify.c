@@ -276,6 +276,16 @@ static void scalarmult(gf r[4], gf q[4], const uint8_t *s)
     }
 }
 
+static void scalarbase(gf r[4], const uint8_t *s)
+{
+    gf q[4];
+    fe_copy16(q[0], BX);
+    fe_copy16(q[1], BY);
+    fe_copy16(q[2], gf1);
+    fe_mul(q[3], BX, BY);
+    scalarmult(r, q, s);
+}
+
 /* The identity encodes as y = 1 with the sign bit clear. Takes a point rather
  * than an encoding so both callers below can pass one directly. */
 static int point_is_identity(gf p[4])
@@ -300,53 +310,7 @@ static int point_is_identity(gf p[4])
  * for every point whose order divides L -- including the identity itself,
  * whose order is 1 -- so the identity must also be excluded explicitly.
  *
- * The scalar is derived from ORDER_L rather than written out a second time,
- * so there is no separate constant to transcribe wrongly: a mistyped L would
- * reject valid keys, and only in the field.
- *
- * A arrives negated from unpackneg(). [L](-A) = -[L]A and the identity is its
- * own negation, so neither condition is affected by the sign.
- *
- * Formulation taken from eBoot#57 by @muhammadburhandevv-hub, which reached
- * this before I did and states both conditions in one expression.
- */
-static int key_has_prime_order(gf A[4])
-{
-    uint8_t order_l[32];
-    gf q[4], multiple[4];
-    int i;
-
-    for (i = 0; i < 32; i++)
-        order_l[i] = (uint8_t)ORDER_L[i];
-    for (i = 0; i < 4; i++)
-        fe_copy16(q[i], A[i]);
-
-    scalarmult(multiple, q, order_l);
-    return point_is_identity(multiple) && !point_is_identity(A);
-}
-
-static void scalarbase(gf r[4], const uint8_t *s)
-{
-    gf q[4];
-    fe_copy16(q[0], BX);
-    fe_copy16(q[1], BY);
-    fe_copy16(q[2], gf1);
-    fe_mul(q[3], BX, BY);
-    scalarmult(r, q, s);
-}
-
-static int point_is_identity(gf p[4])
-{
-    uint8_t encoded[32];
-    point_pack(encoded, p);
-
-    uint8_t diff = (uint8_t)(encoded[0] ^ 1U);
-    for (int i = 1; i < 32; i++)
-        diff |= encoded[i];
-    return diff == 0;
-}
-
-/* Public keys must be non-identity points in Ed25519's prime-order subgroup.
+ * Public keys must be non-identity points in Ed25519's prime-order subgroup.
  * Merely decoding a point is insufficient: an identity or torsion key can
  * make the verification equation true without knowledge of a private key. */
 static int public_key_is_valid_subgroup(gf public_key[4])
