@@ -1321,6 +1321,8 @@ typedef struct {
 } eos_fw_update_ctx_t;
 ```
 
+The update container is `[header][payload][TLV area]`, and `eos_fw_update_write()` must receive all three parts. Bytes beyond the complete container are rejected rather than discarded.
+
 ### 16.2 Flash Sector Alignment
 
 Most flash memories require sector-aligned writes. The update pipeline handles alignment automatically by accumulating data in a sector buffer before writing complete sectors to flash.

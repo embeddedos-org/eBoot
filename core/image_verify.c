@@ -226,23 +226,3 @@ int eos_image_check_version(uint32_t candidate_version, uint32_t min_version)
 
     return EOS_OK;
 }
-
-int eos_image_check_rollback(uint32_t candidate_version)
-{
-    /* Read monotonic counter from hardware */
-    uint32_t hw_min_version = 0;
-    int rc = eos_hal_monotonic_read(&hw_min_version);
-    if (rc == EOS_ERR_NOT_SUPPORTED) {
-        /* No HW counter — version check only */
-        return EOS_OK;
-    }
-    if (rc != EOS_OK) {
-        return rc;
-    }
-
-    if (candidate_version < hw_min_version) {
-        return EOS_ERR_ANTI_ROLLBACK;
-    }
-
-    return EOS_OK;
-}

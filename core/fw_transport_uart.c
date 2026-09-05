@@ -236,12 +236,27 @@ static int xmodem_receive(eos_fw_transport_t *tp, eos_fw_update_ctx_t *ctx)
             continue;
         }
 
-        /* Write to update context */
-        rc = eos_fw_update_write(ctx, block, XMODEM_BLOCK_SIZE);
-        if (rc != EOS_OK) {
-            c = XMODEM_CAN;
-            eos_hal_uart_send(&c, 1);
-            return rc;
+        /* XMODEM carries no container length and always sends whole
+         * 128-byte blocks, so the tail of the final block is padding the
+         * sender invented. Forward only what the container still wants:
+         * the rest is not image data, and eos_fw_update_write() rejects
+         * bytes past the container rather than discarding them. */
+        size_t written = 0;
+        while (written < XMODEM_BLOCK_SIZE) {
+            uint32_t wanted = eos_fw_update_bytes_wanted(ctx);
+            if (wanted == 0) break;
+
+            size_t chunk = XMODEM_BLOCK_SIZE - written;
+            if (chunk > wanted) chunk = (size_t)wanted;
+
+            rc = eos_fw_update_write(ctx, block + written, chunk);
+            if (rc != EOS_OK) {
+                c = XMODEM_CAN;
+                eos_hal_uart_send(&c, 1);
+                return rc;
+            }
+
+            written += chunk;
         }
 
         c = XMODEM_ACK;
@@ -382,6 +397,17 @@ static int ymodem_receive(eos_fw_transport_t *tp, eos_fw_update_ctx_t *ctx)
                     }
                     file_size = file_size * 10u + (uint32_t)(digit - '0');
                 }
+            }
+
+            /* Without a usable size the receiver cannot tell image bytes
+             * from block padding, and the padding would reach
+             * eos_fw_update_write() as trailing garbage. A missing or
+             * unparseable size is a protocol error, not an invitation to
+             * treat the transfer as unbounded. */
+            if (file_size == 0) {
+                c = XMODEM_CAN;
+                eos_hal_uart_send(&c, 1);
+                return EOS_ERR_INVALID;
             }
 
             first_block = false;

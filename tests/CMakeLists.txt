@@ -40,6 +40,16 @@ add_executable(eboot_test_fw_transport unit/test_fw_transport.c)
 target_link_libraries(eboot_test_fw_transport PRIVATE eboot_core)
 add_test(NAME test_fw_transport COMMAND eboot_test_fw_transport)
 
+# --- test_fw_update: firmware update finalize / anti-rollback wiring ---
+add_executable(eboot_test_fw_update unit/test_fw_update.c)
+target_link_libraries(eboot_test_fw_update PRIVATE eboot_core)
+add_test(NAME test_fw_update COMMAND eboot_test_fw_update)
+
+# --- test_jump_app: stage-1 jump uses the authenticated TLV counter ---
+add_executable(eboot_test_jump_app unit/test_jump_app.c)
+target_link_libraries(eboot_test_jump_app PRIVATE eboot_stage1)
+add_test(NAME test_jump_app COMMAND eboot_test_jump_app)
+
 # --- test_slot_size_bounds: verify_slot() must reject image_size > slot capacity ---
 add_executable(eboot_test_slot_size_bounds unit/test_slot_size_bounds.c)
 target_link_libraries(eboot_test_slot_size_bounds PRIVATE eboot_core)
@@ -119,7 +129,7 @@ if(VALGRIND)
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_image_abi
                       test_recovery test_slot_size_bounds test_fw_transport
-                      test_tlv_auth)
+                      test_fw_update test_jump_app test_tlv_auth)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:eboot_${TEST_NAME}>

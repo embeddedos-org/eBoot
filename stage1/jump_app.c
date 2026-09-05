@@ -14,6 +14,7 @@
 #include "eos_hal.h"
 #include "eos_bootctl.h"
 #include "eos_image.h"
+#include "eos_rollback.h"
 #include "eos_mpu_boot.h"
 
 /* Forward declarations from boot_log */
@@ -56,13 +57,26 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
         return rc;
     }
 
-    /* Anti-rollback check */
-    extern int eos_image_check_rollback(uint32_t candidate_version);
-    rc = eos_image_check_rollback(hdr.image_version);
-    if (rc != EOS_OK && rc != EOS_ERR_NOT_SUPPORTED) {
+    /* Persistent floor from the device monotonic counter. The value compared
+     * here is the authenticated EOS_TLV_MIN_SEC_VER, not image_version:
+     * firmware versions and OTP security counters are different scales, and
+     * comparing the former to the latter lets a high version / low TLV image
+     * walk past the floor. Same sequence as eos_secure_boot() step 5b. */
+    uint32_t img_counter = 0;
+    rc = eos_rollback_read_image_counter(addr, &img_counter);
+    if (rc != EOS_OK) {
         eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, rc);
         return rc;
     }
+
+    rc = eos_rollback_verify(img_counter);
+    if (rc != EOS_OK) {
+        eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, rc);
+        return rc;
+    }
+
+    /* Raised only once the image is confirmed good; see eos_bootctl_confirm(). */
+    eos_rollback_stage(img_counter);
 
     /* Increment boot attempts before jumping */
     eos_bootctl_increment_attempts(bctl);

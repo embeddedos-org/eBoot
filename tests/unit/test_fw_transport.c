@@ -308,6 +308,13 @@ static int flash_matches_image(void)
     return memcmp(&sim_flash[SIM_SLOT_B_ADDR], image_buf, image_len) == 0;
 }
 
+static int slot_b_is_unwritten(void)
+{
+    for (size_t i = 0; i < image_len; i++)
+        if (sim_flash[SIM_SLOT_B_ADDR + i] != 0xFF) return 0;
+    return 1;
+}
+
 static int tx_contains(uint8_t b)
 {
     for (size_t i = 0; i < tx_len; i++) if (tx_capture[i] == b) return 1;
@@ -389,8 +396,9 @@ TEST(test_ymodem_bad_block_complement_is_nakd)
 
 /*
  * Block 0 is attacker-supplied and is not guaranteed to contain a NUL.
- * The filename scan is bounded by the block length; this pins the defined
- * behaviour (size treated as unknown, transfer still completes).
+ * The filename scan is bounded by the block length; with no NUL there is no
+ * size field behind it either, and a length the receiver cannot read is a
+ * length it cannot use to tell image bytes from block padding.
  */
 TEST(test_ymodem_header_without_nul_is_bounded)
 {
@@ -405,8 +413,8 @@ TEST(test_ymodem_header_without_nul_is_bounded)
     rx_push_byte(XM_EOT);
     rx_push_byte(XM_EOT);
 
-    ASSERT(run_ymodem() == EOS_OK);
-    ASSERT(flash_matches_image());
+    ASSERT(run_ymodem() == EOS_ERR_INVALID);
+    ASSERT(slot_b_is_unwritten());
 }
 
 /*
@@ -430,8 +438,8 @@ TEST(test_ymodem_stx_header_without_nul_is_bounded)
     rx_push_byte(XM_EOT);
     rx_push_byte(XM_EOT);
 
-    ASSERT(run_ymodem() == EOS_OK);
-    ASSERT(flash_matches_image());
+    ASSERT(run_ymodem() == EOS_ERR_INVALID);
+    ASSERT(slot_b_is_unwritten());
 }
 
 /* Sequencing and duplicate suppression must apply on the STX path too. */
@@ -459,9 +467,10 @@ TEST(test_ymodem_header_size_overflow_is_rejected)
     rx_push_byte(XM_EOT);
     rx_push_byte(XM_EOT);
 
-    /* Size is discarded as unusable, so no truncation is applied. */
-    ASSERT(run_ymodem() == EOS_OK);
-    ASSERT(flash_matches_image());
+    /* Size is discarded as unusable, and an unusable size is a protocol
+     * error rather than a transfer of unknown length. */
+    ASSERT(run_ymodem() == EOS_ERR_INVALID);
+    ASSERT(slot_b_is_unwritten());
 }
 
 /* The first block must be block 0, not an arbitrary data block. */
@@ -473,6 +482,107 @@ TEST(test_ymodem_first_block_must_be_zero)
 
     (void)run_ymodem();
     ASSERT(tx_contains(XM_NAK));
+}
+
+/* ================================================================
+ * XMODEM
+ * ================================================================ */
+
+/*
+ * XMODEM has no length field and always sends whole 128-byte blocks, so a
+ * container whose length is not a multiple of 128 arrives with padding on
+ * the final block. eos_fw_update_write() rejects bytes past the container
+ * instead of discarding them, so the receiver has to stop at the container
+ * boundary itself.
+ *
+ * 424 bytes is 3 full blocks plus 40, so block 4 carries 88 padding bytes.
+ */
+#define XM_CONTAINER_LEN  424u
+#define XM_PAYLOAD_LEN    (XM_CONTAINER_LEN - sizeof(eos_image_header_t))
+#define XM_BLOCKS         4
+
+static uint8_t xm_image[XM_CONTAINER_LEN];
+
+/* Mirrors update_crc() in core/fw_update.c so finalize sees a matching
+ * CRC32 on the flags = 0 integrity path. */
+static uint32_t crc32_payload(const uint8_t *data, size_t len)
+{
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; bit++) {
+            if (crc & 1) crc = (crc >> 1) ^ 0xEDB88320u;
+            else         crc >>= 1;
+        }
+    }
+    return ~crc;
+}
+
+static void build_unaligned_image(void)
+{
+    eos_image_header_t hdr;
+    uint8_t *payload = &xm_image[sizeof(hdr)];
+    size_t i;
+
+    memset(xm_image, 0, sizeof(xm_image));
+    for (i = 0; i < XM_PAYLOAD_LEN; i++)
+        payload[i] = (uint8_t)(0x5A + (i & 0x1F));
+
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic       = EOS_IMG_MAGIC;
+    hdr.hdr_version = EOS_IMAGE_HDR_VERSION;
+    hdr.hdr_size    = (uint16_t)sizeof(hdr);
+    hdr.image_size  = (uint32_t)XM_PAYLOAD_LEN;
+    hdr.load_addr   = SIM_SLOT_B_ADDR;
+    hdr.entry_addr  = SIM_SLOT_B_ADDR;
+    hdr.flags       = 0;              /* CRC32 integrity path */
+    hdr.sig_type    = EOS_SIG_NONE;
+    hdr.tlv_len     = 0;
+
+    uint32_t crc = crc32_payload(payload, XM_PAYLOAD_LEN);
+    memcpy(hdr.hash, &crc, sizeof(crc));
+    memcpy(xm_image, &hdr, sizeof(hdr));
+}
+
+static int run_xmodem(eos_fw_update_ctx_t *ctx)
+{
+    const eos_fw_transport_ops_t *ops = eos_fw_transport_uart_xmodem();
+    eos_fw_transport_t tp;
+    memset(&tp, 0, sizeof(tp));
+    tp.ops = ops;
+    tp.baudrate = 115200;
+    tp.timeout_ms = 10;
+
+    ASSERT(eos_fw_update_begin(ctx, EOS_SLOT_B) == EOS_OK);
+    return ops->receive(&tp, ctx);
+}
+
+/*
+ * Regression: the strict post-container check rejected the padding on the
+ * last block, so any image that did not happen to be a multiple of 128
+ * failed to install over XMODEM.
+ */
+TEST(test_xmodem_padded_final_block_completes_and_finalizes)
+{
+    eos_fw_update_ctx_t ctx;
+    int i;
+
+    build_unaligned_image();
+    ASSERT(XM_CONTAINER_LEN % BLOCK != 0);
+
+    for (i = 0; i < XM_BLOCKS; i++) {
+        size_t off = (size_t)i * BLOCK;
+        size_t n = XM_CONTAINER_LEN - off;
+        if (n > BLOCK) n = BLOCK;
+        push_block((uint8_t)(i + 1), &xm_image[off], n);
+    }
+    rx_push_byte(XM_EOT);
+
+    ASSERT(run_xmodem(&ctx) == EOS_OK);
+    ASSERT(memcmp(&sim_flash[SIM_SLOT_B_ADDR], xm_image, XM_CONTAINER_LEN) == 0);
+    ASSERT(eos_fw_update_get_state(&ctx) == EOS_FW_STATE_VERIFY);
+    ASSERT(eos_fw_update_bytes_wanted(&ctx) == 0);
+    ASSERT(eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST) == EOS_OK);
 }
 
 /* ================================================================
@@ -551,11 +661,12 @@ int main(void)
     run_test_ymodem_stx_duplicate_block_is_not_written_twice();
     run_test_ymodem_header_size_overflow_is_rejected();
     run_test_ymodem_first_block_must_be_zero();
+    run_test_xmodem_padded_final_block_completes_and_finalizes();
     run_test_raw_valid_transfer_is_written();
     run_test_raw_oversized_length_is_rejected();
     run_test_raw_zero_length_is_rejected();
 
-    tests_run = 12;
+    tests_run = 13;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

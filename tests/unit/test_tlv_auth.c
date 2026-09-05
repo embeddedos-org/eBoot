@@ -290,11 +290,67 @@ TEST(test_oversized_tlv_len_is_rejected)
     ASSERT(eos_rollback_read_image_counter(SLOT_A_ADDR, &counter) == EOS_ERR_INVALID);
 }
 
+TEST(test_tlv_area_must_fit_in_slot)
+{
+    build_image(3, true, true);
+
+    eos_board_ops_t tiny = sim_ops;
+    tiny.slot_a_size = (uint32_t)(sizeof(eos_image_header_t) + PAYLOAD_SIZE + 4u);
+    eos_hal_init(&tiny);
+
+    uint32_t counter = 0;
+    ASSERT(eos_rollback_read_image_counter(SLOT_A_ADDR, &counter) == EOS_ERR_INVALID);
+}
+
+/*
+ * The production boot and update paths used to feed hdr.image_version into
+ * a hardware-floor comparison. Firmware versions (0x00MMmmpp) and TLV
+ * security counters are different scales. An old image with
+ * image_version = 0x00010000 and authenticated MIN_SEC_VER = 3 therefore
+ * passed a floor of 9.
+ *
+ * That helper is gone from production. This is the old comparison, kept
+ * only so the regression can show why image_version must not be the floor
+ * input. The hardware-floor decision is eos_rollback_verify(tlv_counter).
+ */
+static int legacy_broken_version_floor_check(uint32_t candidate_version)
+{
+    uint32_t hw_min_version = 0;
+    int rc = eos_hal_monotonic_read(&hw_min_version);
+    if (rc == EOS_ERR_NOT_SUPPORTED)
+        return EOS_OK;
+    if (rc != EOS_OK)
+        return rc;
+    if (candidate_version < hw_min_version)
+        return EOS_ERR_ANTI_ROLLBACK;
+    return EOS_OK;
+}
+
+TEST(test_hw_floor_uses_tlv_counter_not_image_version)
+{
+    build_image(3, true, true);
+
+    eos_image_header_t hdr;
+    ASSERT(eos_image_parse_header(SLOT_A_ADDR, &hdr) == EOS_OK);
+    ASSERT(hdr.image_version == 0x00010000u);
+
+    uint32_t counter = 0;
+    ASSERT(eos_rollback_read_image_counter(SLOT_A_ADDR, &counter) == EOS_OK);
+    ASSERT(counter == 3);
+
+    sim_counter = 9;
+
+    /* The old production check: image_version against the HW floor. */
+    ASSERT(legacy_broken_version_floor_check(hdr.image_version) == EOS_OK);
+
+    /* The authenticated counter is below the floor and must be rejected. */
+    ASSERT(eos_rollback_verify(counter) == EOS_ERR_ANTI_ROLLBACK);
+}
+
 int main(void)
 {
     printf("TLV authentication (anti-rollback counter)\n\n");
 
-    tests_run = 8;
     run_test_authenticated_tlv_counter_is_read();
     run_test_tampered_tlv_counter_is_rejected();
     run_test_tamper_is_invisible_to_signature_and_integrity();
@@ -302,8 +358,10 @@ int main(void)
     run_test_image_without_tlv_area_still_reports_zero();
     run_test_tlv_binding_fields_are_inside_the_signed_prefix();
     run_test_oversized_tlv_len_is_rejected();
+    run_test_tlv_area_must_fit_in_slot();
+    run_test_hw_floor_uses_tlv_counter_not_image_version();
 
-    tests_run = 7;
+    tests_run = 9;
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

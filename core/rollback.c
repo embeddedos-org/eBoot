@@ -56,6 +56,40 @@ static int tlv_area_matches_header(const eos_image_header_t *hdr,
     return (diff == 0) ? EOS_OK : EOS_ERR_INVALID;
 }
 
+/**
+ * Remaining bytes from @p image_addr to the end of the HAL slot that
+ * contains it. The image header is stored at the slot base on every
+ * production path; matching by containment still works if a caller
+ * passes that base.
+ */
+static int slot_remain_from(uint32_t image_addr, uint32_t *remain_out)
+{
+    static const eos_slot_t slots[] = {
+        EOS_SLOT_A, EOS_SLOT_B, EOS_SLOT_RECOVERY
+    };
+    size_t i;
+
+    if (!remain_out)
+        return EOS_ERR_INVALID;
+
+    for (i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        uint32_t base = eos_hal_slot_addr(slots[i]);
+        uint32_t size = eos_hal_slot_size(slots[i]);
+
+        if (base == 0 || size == 0)
+            continue;
+        if (image_addr < base)
+            continue;
+        if (image_addr - base >= size)
+            continue;
+
+        *remain_out = size - (image_addr - base);
+        return EOS_OK;
+    }
+
+    return EOS_ERR_INVALID;
+}
+
 int eos_rollback_read_image_counter(uint32_t image_addr, uint32_t *counter_out)
 {
     if (!counter_out) return EOS_ERR_INVALID;
@@ -65,6 +99,16 @@ int eos_rollback_read_image_counter(uint32_t image_addr, uint32_t *counter_out)
     eos_image_header_t hdr;
     int rc = eos_image_parse_header(image_addr, &hdr);
     if (rc != EOS_OK) return rc;
+
+    /* hdr_size + image_size + tlv_len must fit the slot, overflow-safe. */
+    uint32_t remain = 0;
+    rc = slot_remain_from(image_addr, &remain);
+    if (rc != EOS_OK) return rc;
+    if (hdr.hdr_size > remain) return EOS_ERR_INVALID;
+    remain -= hdr.hdr_size;
+    if (hdr.image_size > remain) return EOS_ERR_INVALID;
+    remain -= hdr.image_size;
+    if (hdr.tlv_len > remain) return EOS_ERR_INVALID;
 
     /* The TLV area follows the header and payload. */
     uint32_t tlv_addr = image_addr;
