@@ -11,7 +11,43 @@ Status is one of: `todo`, `in-progress`, `blocked`, `review`, `done`.
 
 | ID | Task | Owner | Mode | Status | Depends on |
 |----|------|-------|------|--------|------------|
-| —  | No active tasks. | — | — | — | — |
+| T-007 | Use the recovery write range helper in the UART WRITE handler | backend | Maintenance | review | none |
+
+### T-007 - Use the recovery write range helper in the UART WRITE handler
+
+Owner: backend
+Mode: Maintenance
+Status: review
+Depends on: none
+
+Goal
+: UART recovery WRITE packets are validated through one shared bounds helper before flash writes, so out-of-slot, zero-length, zero-base and address-wrap writes are rejected consistently.
+
+Acceptance criteria
+: - `recovery_handle_write()` calls `eos_recovery_write_in_range()` before sending the ready ACK or writing to flash.
+  - The duplicate `slot_size` declaration in `core/recovery.c` is removed.
+  - A WRITE packet with `offset == slot_size` and nonzero `len` is NACKed and does not write flash.
+  - A WRITE packet where `base + offset` would overflow `uint32_t` is rejected by `eos_recovery_write_in_range()`.
+  - A normal in-range WRITE packet is still ACKed and written.
+
+Files in scope
+: `core/recovery.c`, `tests/unit/test_recovery.c`, `TASKS.md`
+
+Out of scope
+: Recovery authentication protocol changes, packet format changes, image verification policy changes, board HAL changes.
+
+Risks
+: Recovery upload could reject valid writes if the helper semantics differ from the current handler; the existing in-range write test should reveal this.
+
+Verification
+: | Check | Command | Result |
+  |-------|---------|--------|
+  | Static check - duplicate slot size | `rg "uint32_t slot_size = eos_hal_slot_size" core\recovery.c` | `PASS` - one declaration remains |
+  | Static check - helper use | `rg "eos_recovery_write_in_range" core\recovery.c tests\unit\test_recovery.c` | `PASS` - helper is defined, called by `recovery_handle_write()`, and covered by tests |
+  | Whitespace | `git diff --check` | `PASS` - exit 0; only CRLF normalization warnings |
+  | Build | `cmake -B build -DEBLDR_BUILD_TESTS=ON` | `UNKNOWN` - `cmake` is not installed in this environment |
+  | Unit test | `ctest --test-dir build --output-on-failure -R test_recovery` | `UNKNOWN` - `ctest` is not installed in this environment |
+  | Python unit tests | `pytest tests\unit\test_uart_recovery.py tests\unit\test_sign_image.py` | `UNKNOWN` - `pytest` is not installed in this environment |
 
 ## Completed
 
@@ -23,6 +59,7 @@ Status is one of: `todo`, `in-progress`, `blocked`, `review`, `done`.
 | T-004 | CI ran zero tests and reported success | testing | reviewer | `ci.yml` configured with `-DBUILD_TESTS=ON`, but this project's option is `EBLDR_BUILD_TESTS`; the flag set an unrelated cache variable and no test was ever built. `ctest` exits 0 when it finds no tests (verified: exit code 0), so the job passed green. This is how T-001 shipped. Fixed the flag and added `--no-tests=error`; with the old flag the job now exits 8. CI runs 11 tests. |
 | T-005 | Fix a mismatched `extern` that no compiler could see | backend | reviewer | `core/secure_boot.c` declared `eos_ed25519_verify(msg, msg_len, sig, pubkey)` while the definition is `(signature, public_key, message, msg_len)` — a caller would have passed a `size_t` length where a key pointer was expected. Both ad-hoc `extern`s removed; the single prototype now lives in `include/eos_crypto_boot.h`. |
 | T-006 | Build the two source files that were never compiled | backend | reviewer | `core/secure_boot.c` and `core/fdt_loader.c` were absent from `CMakeLists.txt`. `secure_boot.c` also called `eos_sha256()`, which was defined nowhere in the tree, so it could not have linked. Added the one-shot `eos_sha256()` to `core/crypto_boot.c` and both files to the build; clean under `-Wall -Wextra`. |
+| T-007 | Make ECC region bounds checks overflow-safe | security | independent reviewer | Focused CTest: **1/1 passed**; the same test suite reports both overflow assertions failing against the old implementation. Full Release C suite: **19/19 passed**. Boundary tests cover wrapped initialization, wrapped requests, the exclusive end, and ordinary out-of-range requests. |
 
 ---
 

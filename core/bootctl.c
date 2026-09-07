@@ -38,6 +38,9 @@ static void bootctl_update_crc(eos_bootctl_t *bctl)
 
 bool eos_bootctl_validate(const eos_bootctl_t *bctl)
 {
+    if (!bctl)
+        return false;
+
     if (bctl->magic != EOS_BOOTCTL_MAGIC)
         return false;
 

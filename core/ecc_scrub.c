@@ -14,6 +14,7 @@
 int eos_ecc_init(eos_ecc_ctx_t *ctx, uint32_t base, uint32_t size)
 {
     if (!ctx) return -1;
+    if (size > UINT32_MAX - base) return -1;
     memset(ctx, 0, sizeof(*ctx));
     ctx->base_addr = base;
     ctx->size_bytes = size;
@@ -43,8 +44,11 @@ int eos_ecc_scrub(eos_ecc_ctx_t *ctx)
 int eos_ecc_check_region(eos_ecc_ctx_t *ctx, uint32_t addr, uint32_t len)
 {
     if (!ctx) return -1;
-    if (addr < ctx->base_addr || (addr + len) > (ctx->base_addr + ctx->size_bytes)) return -1;
-    if (addr < ctx->base_addr || addr + len > ctx->base_addr + ctx->size_bytes) return -1;
+    if (addr < ctx->base_addr) return -1;
+
+    uint32_t offset = addr - ctx->base_addr;
+    if (offset > ctx->size_bytes || len > ctx->size_bytes - offset) return -1;
+
     volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)addr;
     uint32_t words = len / 4;
 

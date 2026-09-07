@@ -35,13 +35,16 @@ payloads. Project version 3.0.2.
 ## Build
 
 Requires CMake ≥ 3.15 and a C compiler. A native build (no board selected)
-compiles the platform-agnostic core libraries and, with tests enabled, the test
-suite — these contain no architecture-specific code and build on Linux, macOS,
-and Windows.
+compiles the platform-agnostic core libraries — these contain no
+architecture-specific code and build on Linux, macOS, and Windows. Tests are
+optional and are disabled by default; enable them with `EBLDR_BUILD_TESTS=ON`.
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DEBLDR_BUILD_TESTS=ON
 cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
 Cross-compile for a target board with `EBLDR_BOARD` and a toolchain file:
@@ -67,12 +70,12 @@ others (default `none` = native core-only build).
 | `EBLDR_HARDENING` | `ON` | Compiler hardening (`-fstack-protector-strong`, `_FORTIFY_SOURCE=2`) |
 | `EBLDR_SANITIZE` | `OFF` | ASan/UBSan for host builds |
 | `EBLDR_BUILD_FUZZ` | `OFF` | Build libFuzzer targets |
-| `EBLDR_BUILD_TESTS` | `OFF` | Build unit tests (native only) |
+| `EBLDR_BUILD_TESTS` | `OFF` | Build unit tests (native only); set to `ON` to enable |
 
 ## Test
 
 ```bash
-cmake -B build -DEBLDR_BUILD_TESTS=ON
+cmake -S . -B build -DEBLDR_BUILD_TESTS=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 

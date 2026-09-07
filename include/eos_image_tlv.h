@@ -6,12 +6,22 @@
  * @file eos_image_tlv.h
  * @brief TLV (Type-Length-Value) metadata for firmware images
  *
- * mcuboot-inspired TLV area appended after the fixed image header.
- * TLVs are covered by the image signature for tamper protection.
+ * mcuboot-inspired TLV area carrying extensible image metadata.
  *
  * Layout:
- *   [image_header][TLV area][payload]
+ *   [image_header][payload][TLV area]
  *   TLV area = [tlv_info][tlv_entry_0][tlv_entry_1]...
+ *
+ * The TLV area follows the payload: image_verify.c reads the payload at
+ * hdr_size and rollback.c looks for the TLV info header at
+ * hdr_size + image_size. (This block used to document the opposite order,
+ * which matched neither.)
+ *
+ * These bytes are covered by NEITHER the signature (which stops at
+ * EOS_IMG_SIGNED_LEN) NOR hash[] (which covers exactly image_size payload
+ * bytes). An image that needs its TLVs trusted -- EOS_TLV_MIN_SEC_VER gates
+ * anti-rollback -- must bind them through eos_image_header_t::tlv_len and
+ * ::tlv_hash, which do sit inside the signed prefix.
  */
 
 #ifndef EOS_IMAGE_TLV_H

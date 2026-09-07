@@ -277,6 +277,55 @@ static void scalarmult(gf r[4], gf q[4], const uint8_t *s)
     }
 }
 
+/* The identity encodes as y = 1 with the sign bit clear. Takes a point rather
+ * than an encoding so both callers below can pass one directly. */
+static int point_is_identity(gf p[4])
+{
+    uint8_t encoded[32];
+    point_pack(encoded, p);
+
+    uint8_t diff = (uint8_t)(encoded[0] ^ 1U);
+    for (int i = 1; i < 32; i++)
+        diff |= encoded[i];
+    return diff == 0;
+}
+
+/* Reject a public key outside the prime-order subgroup.
+ *
+ * Decoding a point is not enough. Ed25519 has eight points of low order, and
+ * for any of them the verification equation can hold regardless of the
+ * message: an all-zero key with an all-zero signature verified against any
+ * content at all, which is not a weak signature but no signature.
+ *
+ * Two conditions, because neither alone is sufficient. [L]A = identity holds
+ * for every point whose order divides L -- including the identity itself,
+ * whose order is 1 -- so the identity must also be excluded explicitly.
+ *
+ * The scalar is derived from ORDER_L rather than written out a second time,
+ * so there is no separate constant to transcribe wrongly: a mistyped L would
+ * reject valid keys, and only in the field.
+ *
+ * A arrives negated from unpackneg(). [L](-A) = -[L]A and the identity is its
+ * own negation, so neither condition is affected by the sign.
+ *
+ * Formulation taken from eBoot#57 by @muhammadburhandevv-hub, which reached
+ * this before I did and states both conditions in one expression.
+ */
+static int key_has_prime_order(gf A[4])
+{
+    uint8_t order_l[32];
+    gf q[4], multiple[4];
+    int i;
+
+    for (i = 0; i < 32; i++)
+        order_l[i] = (uint8_t)ORDER_L[i];
+    for (i = 0; i < 4; i++)
+        fe_copy16(q[i], A[i]);
+
+    scalarmult(multiple, q, order_l);
+    return point_is_identity(multiple) && !point_is_identity(A);
+}
+
 static void scalarbase(gf r[4], const uint8_t *s)
 {
     gf q[4];
@@ -285,6 +334,34 @@ static void scalarbase(gf r[4], const uint8_t *s)
     fe_copy16(q[2], gf1);
     fe_mul(q[3], BX, BY);
     scalarmult(r, q, s);
+}
+
+static int point_is_identity(gf p[4])
+{
+    uint8_t encoded[32];
+    point_pack(encoded, p);
+
+    uint8_t diff = (uint8_t)(encoded[0] ^ 1U);
+    for (int i = 1; i < 32; i++)
+        diff |= encoded[i];
+    return diff == 0;
+}
+
+/* Public keys must be non-identity points in Ed25519's prime-order subgroup.
+ * Merely decoding a point is insufficient: an identity or torsion key can
+ * make the verification equation true without knowledge of a private key. */
+static int public_key_is_valid_subgroup(gf public_key[4])
+{
+    uint8_t order_l[32];
+    gf q[4], multiple[4];
+
+    for (int i = 0; i < 32; i++)
+        order_l[i] = (uint8_t)ORDER_L[i];
+    for (int i = 0; i < 4; i++)
+        fe_copy16(q[i], public_key[i]);
+
+    scalarmult(multiple, q, order_l);
+    return point_is_identity(multiple) && !point_is_identity(public_key);
 }
 
 /* Decode a compressed point into -P (the negation is what verification wants). */
@@ -416,6 +493,8 @@ int eos_ed25519_verify(const uint8_t signature[64],
     /* Decode -A from the public key; a key off the curve is rejected here. */
     gf A[4];
     if (unpackneg(A, public_key) != EOS_OK)
+        return EOS_ERR_SIGNATURE;
+    if (!public_key_is_valid_subgroup(A))
         return EOS_ERR_SIGNATURE;
 
     /* k = SHA-512(R || A || M) mod L */

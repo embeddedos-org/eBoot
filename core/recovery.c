@@ -15,6 +15,7 @@
  */
 
 #include "eos_bootctl.h"
+#include "eos_recovery.h"
 #include "eos_image.h"
 #include "eos_hal.h"
 #include "eos_crypto_boot.h"
@@ -253,7 +254,7 @@ static int recovery_handle_erase(eos_slot_t slot)
 
 /**
  * Return EOS_OK if a recovery write of `len` bytes at `offset` stays
- * inside the slot at `base`. Rejects wrap of base+offset.
+ * inside the slot at `base`. Rejects address wrap of the write range.
  * Used by the UART write handler and by host unit tests.
  */
 int eos_recovery_write_in_range(uint32_t base, uint32_t slot_size,
@@ -265,6 +266,8 @@ int eos_recovery_write_in_range(uint32_t base, uint32_t slot_size,
     if ((uint32_t)len > slot_size || offset > slot_size - (uint32_t)len)
         return EOS_ERR_INVALID;
     if (offset > UINT32_MAX - base)
+        return EOS_ERR_INVALID;
+    if ((uint32_t)len - 1u > UINT32_MAX - (base + offset))
         return EOS_ERR_INVALID;
     return EOS_OK;
 }
@@ -309,6 +312,12 @@ static int recovery_handle_verify(eos_slot_t slot)
     eos_image_header_t hdr;
     int rc = eos_image_parse_header(addr, &hdr);
     if (rc != EOS_OK)
+        return recovery_send_nack();
+
+    uint32_t slot_size = eos_hal_slot_size(slot);
+    if (slot_size == 0 ||
+        hdr.hdr_size > slot_size ||
+        hdr.image_size > slot_size - hdr.hdr_size)
         return recovery_send_nack();
 
     /* eos_image_verify_integrity() adds hdr_size internally — pass base addr only */

@@ -16,9 +16,17 @@
 #include <string.h>
 
 /* Default development key — REPLACE with production key before deployment.
- * This is the public half of a well-known test keypair.
- * Production builds MUST set EBLDR_PRODUCTION_KEY at compile time. */
+ *
+ * This is the public half of TEST 1 in RFC 8032 section 7.1. The matching
+ * private key is printed in the RFC, so anyone at all can produce a signature
+ * that a bootloader trusting this key will accept. It is a usable default for
+ * bring-up and for the unit tests, and it must never reach a device.
+ *
+ * Production builds set EBLDR_PRODUCTION_KEY, which replaces it. The #warning
+ * below is deliberate: this key going out silently is the failure mode, so a
+ * build that embeds it says so on every compile. */
 #ifndef EBLDR_PRODUCTION_KEY
+#warning "eBoot: building with the RFC 8032 test-vector public key as the secure-boot trust anchor; define EBLDR_PRODUCTION_KEY for any real device"
 static const uint8_t default_dev_key[EOS_ED25519_PUB_KEY_SIZE] = {
     0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
     0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
@@ -50,10 +58,22 @@ int eos_keystore_init(eos_keystore_t *ks)
 
     memset(ks, 0, sizeof(*ks));
 
-    /* Try OTP first */
+    /* Try OTP first.
+     *
+     * EOS_ERR_NOT_SUPPORTED means this board has no OTP at all, which is a
+     * legitimate configuration: the trust anchor is then the compiled-in key.
+     * Any other error means the board HAS an OTP and reading it failed, so the
+     * key material this device is provisioned with is unknown. Those two are
+     * not interchangeable, and treating them alike let a fault on the OTP bus
+     * silently swap the trust anchor for whatever was compiled in. */
     int rc = eos_hal_otp_read(OTP_KEY_OFFSET_SLOT0,
                               ks->slots[0].key,
                               EOS_ED25519_PUB_KEY_SIZE);
+    bool otp_present = (rc != EOS_ERR_NOT_SUPPORTED);
+
+    if (otp_present && rc != EOS_OK)
+        return EOS_ERR_KEY;
+
     if (rc == EOS_OK) {
         /* Check if key is non-zero (provisioned) */
         uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
@@ -66,21 +86,34 @@ int eos_keystore_init(eos_keystore_t *ks)
         rc = eos_hal_otp_read(OTP_KEY_OFFSET_SLOT1,
                               ks->slots[1].key,
                               EOS_ED25519_PUB_KEY_SIZE);
+        if (rc != EOS_OK && rc != EOS_ERR_NOT_SUPPORTED)
+            return EOS_ERR_KEY;
         if (rc == EOS_OK &&
             safe_compare(ks->slots[1].key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0) {
             ks->slots[1].valid = true;
         }
 
-        /* Check revocation status */
+        /* Revocation status.
+         *
+         * If this read fails we cannot show that a key has NOT been revoked.
+         * Leaving the flags clear is the wrong default: revocation exists to
+         * retire a key whose private half is believed compromised, so a device
+         * that cannot read the revocation store must not keep using the keys it
+         * covers. Treat every OTP slot as revoked; eos_keystore_get_active_key()
+         * then reports EOS_ERR_KEY rather than handing back a key that may have
+         * been retired. */
         uint8_t revoke_flags = 0;
         if (eos_hal_otp_read(OTP_REVOKE_OFFSET, &revoke_flags, 1) == EOS_OK) {
             if (revoke_flags & 0x01) ks->slots[0].revoked = true;
             if (revoke_flags & 0x02) ks->slots[1].revoked = true;
+        } else {
+            for (uint32_t i = 0; i < EOS_KEY_SLOTS; i++)
+                ks->slots[i].revoked = true;
         }
     }
 
-    /* Fall back to compiled-in key if OTP not available */
-    if (!ks->slots[0].valid && !ks->slots[1].valid) {
+    /* Fall back to compiled-in key only when the board has no OTP to consult. */
+    if (!ks->slots[0].valid && !ks->slots[1].valid && !otp_present) {
 #ifndef EBLDR_PRODUCTION_KEY
         memcpy(ks->slots[0].key, default_dev_key, EOS_ED25519_PUB_KEY_SIZE);
 #else
@@ -186,11 +219,27 @@ int eos_keystore_revoke_slot(eos_keystore_t *ks, uint32_t slot)
 
     ks->slots[slot].revoked = true;
 
-    /* Try to persist revocation to OTP */
+    /* Persist the revocation to OTP.
+     *
+     * The read must be checked before the OR: on failure revoke_flags stayed 0,
+     * so writing it back cleared every other slot's revocation bit -- revoking
+     * slot 1 un-revoked slot 0. And a write that fails leaves the revocation in
+     * RAM only, so it is gone at the next reset while this function reported
+     * EOS_OK and the caller believed the key was permanently retired. Both are
+     * reported now; the in-RAM revocation stands either way, so this boot
+     * still refuses the key. */
+    int persist_rc = EOS_OK;
     uint8_t revoke_flags = 0;
-    eos_hal_otp_read(OTP_REVOKE_OFFSET, &revoke_flags, 1);
-    revoke_flags |= (1U << slot);
-    eos_hal_otp_write(OTP_REVOKE_OFFSET, &revoke_flags, 1);
+    int read_rc = eos_hal_otp_read(OTP_REVOKE_OFFSET, &revoke_flags, 1);
+    if (read_rc == EOS_OK) {
+        revoke_flags |= (uint8_t)(1U << slot);
+        persist_rc = eos_hal_otp_write(OTP_REVOKE_OFFSET, &revoke_flags, 1);
+    } else if (read_rc == EOS_ERR_NOT_SUPPORTED) {
+        /* No OTP on this board: nothing to persist to, and nothing to clobber. */
+        persist_rc = EOS_OK;
+    } else {
+        persist_rc = read_rc;
+    }
 
     /* Update active slot */
     ks->active_slot = EOS_KEY_SLOTS;
@@ -201,7 +250,7 @@ int eos_keystore_revoke_slot(eos_keystore_t *ks, uint32_t slot)
         }
     }
 
-    return EOS_OK;
+    return persist_rc;
 }
 
 

@@ -34,8 +34,9 @@ void eos_sha256_final(eos_sha256_ctx_t *ctx, uint8_t digest[EOS_SHA256_DIGEST_SI
 
 typedef struct {
     uint64_t state[8];
-    uint64_t count;
+    uint64_t bitlen[2];              /* 128-bit message length, per FIPS 180-4 */
     uint8_t  buffer[EOS_SHA512_BLOCK_SIZE];
+    size_t   buffer_len;
 } eos_sha512_ctx_t;
 
 /**

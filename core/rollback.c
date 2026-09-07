@@ -10,11 +10,51 @@
 #include "eos_rollback.h"
 #include "eos_image.h"
 #include "eos_image_tlv.h"
+#include "eos_crypto_boot.h"
 #include "eos_hal.h"
 #include <string.h>
 
 static uint32_t g_staged_counter;
 static bool     g_staged_valid;
+
+/**
+ * Check that the TLV area at @p tlv_addr is the one the signed header vouches
+ * for, by hashing hdr->tlv_len bytes of it and comparing against hdr->tlv_hash.
+ *
+ * Streams the area in small chunks rather than buffering it, so the stack cost
+ * does not scale with EOS_TLV_MAX_SIZE.
+ */
+static int tlv_area_matches_header(const eos_image_header_t *hdr,
+                                   uint32_t tlv_addr)
+{
+    eos_sha256_ctx_t sha;
+    uint8_t chunk[64];
+    uint8_t digest[EOS_SHA256_DIGEST_SIZE];
+    uint32_t remaining = hdr->tlv_len;
+    uint32_t addr = tlv_addr;
+
+    eos_sha256_init(&sha);
+
+    while (remaining > 0) {
+        uint32_t n = (remaining > sizeof(chunk)) ? (uint32_t)sizeof(chunk)
+                                                 : remaining;
+        if (eos_hal_flash_read(addr, chunk, n) != EOS_OK)
+            return EOS_ERR_FLASH;
+        eos_sha256_update(&sha, chunk, n);
+        addr += n;
+        remaining -= n;
+    }
+
+    eos_sha256_final(&sha, digest);
+
+    /* Constant-time: this compares attacker-influenced bytes, and a bootloader
+     * offers unlimited retries to anyone with a logic analyser. */
+    volatile uint8_t diff = 0;
+    for (uint32_t i = 0; i < EOS_IMG_TLV_HASH_LEN; i++)
+        diff |= (uint8_t)(digest[i] ^ hdr->tlv_hash[i]);
+
+    return (diff == 0) ? EOS_OK : EOS_ERR_INVALID;
+}
 
 int eos_rollback_read_image_counter(uint32_t image_addr, uint32_t *counter_out)
 {
@@ -32,6 +72,35 @@ int eos_rollback_read_image_counter(uint32_t image_addr, uint32_t *counter_out)
     tlv_addr += hdr.hdr_size;
     if (tlv_addr + hdr.image_size < tlv_addr) return EOS_ERR_INVALID;
     tlv_addr += hdr.image_size;
+
+    /* Nothing else in the image covers those bytes: the signature stops at
+     * EOS_IMG_SIGNED_LEN and hash[] stops after image_size payload bytes. An
+     * attacker able to write flash could otherwise take a genuinely signed old
+     * image, raise its declared counter, and walk it straight past
+     * eos_rollback_verify() — the downgrade anti-rollback exists to prevent.
+     *
+     * hdr.tlv_len and hdr.tlv_hash are inside the signed prefix, so they are
+     * the only place a claim about this area can be trusted from.
+     *
+     * tlv_len == 0 means the image makes no such claim. The area is then
+     * unauthenticated and is not read: reporting 0 is the conservative
+     * reading, since a counter of 0 can only fail against the device floor,
+     * never raise it. */
+    if (hdr.tlv_len == 0)
+        return EOS_OK;
+
+    if (hdr.tlv_len < sizeof(eos_tlv_info_t) || hdr.tlv_len > EOS_TLV_MAX_SIZE)
+        return EOS_ERR_INVALID;
+
+    if (tlv_addr + hdr.tlv_len < tlv_addr)
+        return EOS_ERR_INVALID;
+
+    /* The header claims an authenticated area and the bytes do not match it.
+     * That is tampering, not absence — fail closed rather than degrading to 0,
+     * so the condition is reported instead of passing silently. */
+    rc = tlv_area_matches_header(&hdr, tlv_addr);
+    if (rc != EOS_OK)
+        return rc;
 
     eos_tlv_ctx_t ctx;
     rc = eos_tlv_parse(&ctx, tlv_addr);

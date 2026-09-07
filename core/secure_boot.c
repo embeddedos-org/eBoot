@@ -148,7 +148,18 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
     eos_rollback_stage(img_counter);
 
     /* ---- Step 6: Decrypt if required ---- */
-    if (cfg->require_encryption && (hdr.flags & EOS_IMG_FLAG_ENCRYPTED)) {
+    if (cfg->require_encryption) {
+        /* The policy says this device only runs encrypted images. An image
+         * without the flag does not satisfy it, so it must not boot. The
+         * condition used to require the flag as well, which meant the one
+         * image the policy exists to reject — a plaintext one — was the one
+         * case that skipped the check and booted. */
+        if (!(hdr.flags & EOS_IMG_FLAG_ENCRYPTED)) {
+            attest_record(2, hdr.image_version, hdr.hash, NULL,
+                          EOS_SBOOT_ERR_DECRYPT);
+            return EOS_SBOOT_ERR_DECRYPT;
+        }
+
         /* Use fw_decrypt module for AES-256-GCM decryption */
         /* Key is read from OTP by fw_decrypt_init() */
         extern int eos_fw_decrypt_init(void *ctx, const uint8_t *iv);
@@ -162,7 +173,11 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
          * 4. Verify GCM tag
          */
         
-        /* Fix critical bug: Return decryption error if decryption is requested but unsupported/unimplemented */
+        /* Decryption is not implemented, so an encrypted image cannot be
+         * verified either. Fail closed, and record it like every other
+         * failure path in this function does. */
+        attest_record(2, hdr.image_version, hdr.hash, NULL,
+                      EOS_SBOOT_ERR_DECRYPT);
         return EOS_SBOOT_ERR_DECRYPT;
     }
 

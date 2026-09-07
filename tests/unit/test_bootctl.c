@@ -268,6 +268,11 @@ TEST(test_version_encoding)
     ASSERT(EOS_VERSION_PATCH(v) == 65535);
 }
 
+TEST(test_validate_null)
+{
+    ASSERT(eos_bootctl_validate(NULL) == false);
+}
+
 /* ---- Main ---- */
 
 int main(void)
@@ -285,8 +290,9 @@ int main(void)
     run_test_request_recovery();
     run_test_request_factory_reset();
     run_test_version_encoding();
+    run_test_validate_null();
 
-    tests_run = 11;
+    tests_run = 12;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

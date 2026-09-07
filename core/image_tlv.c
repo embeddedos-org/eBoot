@@ -45,7 +45,8 @@ int eos_tlv_parse(eos_tlv_ctx_t *ctx, uint32_t tlv_addr)
 
         eos_tlv_entry_hdr_t entry_hdr;
         rc = eos_hal_flash_read(tlv_addr + offset, &entry_hdr, sizeof(entry_hdr));
-        if (rc != EOS_OK) break;
+        if (rc != EOS_OK)
+        return EOS_ERR_FLASH;
 
         if (entry_hdr.len == 0 && entry_hdr.type == 0) break; /* end sentinel */
 
