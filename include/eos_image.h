@@ -108,7 +108,8 @@ EOS_IMG_STATIC_ASSERT(offsetof(eos_image_header_t, tlv_hash) +
 
 /* Every remaining field, pinned.
  *
- * Four of the fourteen fields were asserted. Transposing two adjacent
+ * Three of the thirteen field offsets were asserted (the fourth pre-existing
+ * assert is sizeof, which is not a field). Transposing two adjacent
  * same-width fields moves neither sizeof nor any of those four offsets, so it
  * compiled clean: with load_addr and entry_addr swapped, all four existing
  * asserts still passed and the bootloader would load an image at its entry
