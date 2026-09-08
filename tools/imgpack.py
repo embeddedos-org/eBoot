@@ -31,12 +31,24 @@ SIG_CRC32 = 1
 
 
 def parse_version(version_str: str) -> int:
-    """Parse 'major.minor.patch' into uint32 encoding."""
+    """Parse 'major.minor.patch' into uint32 encoding.
+
+    Matches EOS_VERSION_MAKE in include/eos_types.h: 8-bit major, 8-bit
+    minor, 16-bit patch. The bootloader compares the encoded uint32
+    numerically for anti-rollback, so an out-of-range component must be an
+    error — silently masking or carrying it would misorder versions
+    (e.g. '1.256.0' would encode identically to '2.0.0', and a truncated
+    patch would encode as an *older* image).
+    """
     parts = version_str.split('.')
     if len(parts) != 3:
         raise ValueError(f"Version must be major.minor.patch, got '{version_str}'")
     major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-    return (major << 24) | (minor << 16) | (patch & 0xFFFF)
+    if not (0 <= major <= 0xFF and 0 <= minor <= 0xFF and 0 <= patch <= 0xFFFF):
+        raise ValueError(
+            f"Version components out of range in '{version_str}' "
+            f"(major/minor: 0-255, patch: 0-65535)")
+    return (major << 24) | (minor << 16) | patch
 
 
 def compute_crc32(data: bytes) -> int:
@@ -101,7 +113,11 @@ def main():
 
     load_addr = int(args.load_addr, 16)
     entry_addr = int(args.entry_addr, 16)
-    image_version = parse_version(args.version)
+    try:
+        image_version = parse_version(args.version)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     flags = int(args.flags, 16)
     image_crc = compute_crc32(firmware_data)
 

@@ -30,6 +30,7 @@
 #include "eos_types.h"
 #include <string.h>
 
+
 /* ================================================================
  * Field arithmetic mod p = 2^255 - 19
  * ================================================================ */
@@ -276,6 +277,16 @@ static void scalarmult(gf r[4], gf q[4], const uint8_t *s)
     }
 }
 
+static void scalarbase(gf r[4], const uint8_t *s)
+{
+    gf q[4];
+    fe_copy16(q[0], BX);
+    fe_copy16(q[1], BY);
+    fe_copy16(q[2], gf1);
+    fe_mul(q[3], BX, BY);
+    scalarmult(r, q, s);
+}
+
 /* The identity encodes as y = 1 with the sign bit clear. Takes a point rather
  * than an encoding so both callers below can pass one directly. */
 static int point_is_identity(gf p[4])
@@ -474,21 +485,21 @@ int eos_ed25519_verify(const uint8_t signature[64],
     eos_sha512_final(&ctx, k);
     reduce_hash(k);
 
-    /* Recompute R' = [S]B + [k](-A). A is already negated by unpackneg(), so
-     * the sum is R' rather than a difference. RFC 8032 permits the cheaper
-     * "compare encodings" check in place of a group-element comparison. */
-    gf lhs[4], rhs[4];
-    scalarmult(lhs, A, k);
-    scalarbase(rhs, &signature[32]);
-    point_add(lhs, (const gf *)rhs);
+    /* Compute [k](-A) + [S]B, which equals R for a valid signature. */
+    gf kA[4], sB[4];
+    scalarmult(kA, A, k);
+    scalarbase(sB, &signature[32]);
+    point_add(kA, (const gf *)sB);
 
-    uint8_t rcheck[32];
-    point_pack(rcheck, lhs);
+    uint8_t recovered[32];
+    point_pack(recovered, kA);
 
-    /* Constant-time comparison against R. */
     uint8_t diff = 0;
-    for (int i = 0; i < 32; i++)
-        diff |= (uint8_t)(rcheck[i] ^ signature[i]);
+    for (int i = 0; i < 32; i++) diff |= (uint8_t)(recovered[i] ^ signature[i]);
+
+    /* Wipe the challenge scalar rather than leave it in boot-path memory. */
+    memset(k, 0, sizeof(k));
+
 
     return diff == 0 ? EOS_OK : EOS_ERR_SIGNATURE;
 }

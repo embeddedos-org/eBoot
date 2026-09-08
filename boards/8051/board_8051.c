@@ -20,7 +20,7 @@
 #define MCS8051_RECOVERY      (MCS8051_FLASH_BASE + 2 * MCS8051_FLASH_SIZE / 3)
 #define MCS8051_BOOTCTL       (MCS8051_FLASH_BASE + MCS8051_FLASH_SIZE - 0x2000)
 
-static const eos_board_ops_t 8051_ops = {
+static const eos_board_ops_t mcs8051_ops = {
     .flash_base       = MCS8051_FLASH_BASE,
     .flash_size       = MCS8051_FLASH_SIZE,
     .slot_a_addr      = MCS8051_SLOT_A,
@@ -62,5 +62,5 @@ void board_8051_init_device_table(eos_device_table_t *table)
 
 const eos_board_ops_t *board_8051_get_ops(void)
 {
-    return &8051_ops;
+    return &mcs8051_ops;
 }
