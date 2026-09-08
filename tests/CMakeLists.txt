@@ -51,6 +51,11 @@ target_link_libraries(eboot_test_fw_transport PRIVATE eboot_core)
 add_test(NAME test_fw_transport COMMAND eboot_test_fw_transport)
 list(APPEND EBLDR_UNIT_TESTS test_fw_transport)
 
+# --- test_fw_update_sig: install path must authenticate, not just hash ---
+add_executable(eboot_test_fw_update_sig unit/test_fw_update_sig.c)
+target_link_libraries(eboot_test_fw_update_sig PRIVATE eboot_core)
+add_test(NAME test_fw_update_sig COMMAND eboot_test_fw_update_sig)
+
 # --- test_slot_size_bounds: verify_slot() must reject image_size > slot capacity ---
 add_executable(eboot_test_slot_size_bounds unit/test_slot_size_bounds.c)
 target_link_libraries(eboot_test_slot_size_bounds PRIVATE eboot_core)
@@ -80,6 +85,13 @@ add_executable(eboot_test_multicore unit/test_multicore.c)
 target_link_libraries(eboot_test_multicore PRIVATE eboot_core)
 add_test(NAME test_multicore COMMAND eboot_test_multicore)
 list(APPEND EBLDR_UNIT_TESTS test_multicore)
+
+# --- test_qemu_arm64_timer: Generic timer conversion ---
+add_executable(eboot_test_qemu_arm64_timer unit/test_qemu_arm64_timer.c)
+target_include_directories(eboot_test_qemu_arm64_timer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/qemu_arm64
+)
+add_test(NAME test_qemu_arm64_timer COMMAND eboot_test_qemu_arm64_timer)
 
 # --- test_board_registry: Runtime board selection ---
 add_executable(eboot_test_board_registry unit/test_board_registry.c)
@@ -111,6 +123,11 @@ target_link_libraries(eboot_test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND eboot_test_keystore)
 list(APPEND EBLDR_UNIT_TESTS test_keystore)
 
+# --- test_secure_boot_policy: debug-lock policy enforcement ---
+add_executable(eboot_test_secure_boot_policy unit/test_secure_boot_policy.c)
+target_link_libraries(eboot_test_secure_boot_policy PRIVATE eboot_core)
+add_test(NAME test_secure_boot_policy COMMAND eboot_test_secure_boot_policy)
+
 # --- test_rollback: Anti-rollback security counter ---
 add_executable(eboot_test_rollback unit/test_rollback.c)
 target_link_libraries(eboot_test_rollback PRIVATE eboot_core)
@@ -134,6 +151,12 @@ add_executable(eboot_test_ecc unit/test_ecc.c)
 target_link_libraries(eboot_test_ecc PRIVATE eboot_core)
 add_test(NAME test_ecc COMMAND eboot_test_ecc)
 list(APPEND EBLDR_UNIT_TESTS test_ecc)
+
+# --- test_fdt_loader: device tree parsing against malformed blobs ---
+# core/fdt_loader.c was in no source list, so it had never been compiled.
+add_executable(eboot_test_fdt_loader unit/test_fdt_loader.c)
+target_link_libraries(eboot_test_fdt_loader PRIVATE eboot_core)
+add_test(NAME test_fdt_loader COMMAND eboot_test_fdt_loader)
 
 # --- Valgrind test targets ---
 #

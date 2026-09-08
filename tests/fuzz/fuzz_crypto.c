@@ -14,11 +14,7 @@
 #include <stddef.h>
 
 /* Forward-declare crypto APIs */
-extern int eos_crypto_hash(const uint8_t *data, size_t len, uint8_t digest[32]);
-extern int eos_ed25519_verify(const uint8_t signature[64],
-                              const uint8_t public_key[32],
-                              const uint8_t *message,
-                              size_t msg_len);
+#include "eos_crypto_boot.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     uint8_t digest[32];

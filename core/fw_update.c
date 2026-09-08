@@ -174,14 +174,25 @@ int eos_fw_update_finalize(eos_fw_update_ctx_t *ctx, eos_upgrade_mode_t mode)
         }
     }
 
-    /* Verify digital signature if present */
-    if (ctx->header.sig_type >= EOS_SIG_ED25519) {
-        int sig_rc = eos_image_verify_signature(&ctx->header);
-        if (sig_rc != EOS_OK) {
-            ctx->state = EOS_FW_STATE_ERROR;
-            ctx->last_error = sig_rc;
-            return sig_rc;
-        }
+    /* Verify the digital signature — always, never gated on the header's own
+     * sig_type. That field is attacker-controlled: an image streamed over the
+     * update transport can declare EOS_SIG_NONE/CRC32/SHA256, and the previous
+     * `sig_type >= EOS_SIG_ED25519` guard then skipped verification entirely
+     * and installed the image unsigned. Integrity (SHA-256/CRC32) proves only
+     * that the payload matches a hash the same attacker supplied in the header;
+     * it is not authentication.
+     *
+     * eos_image_verify_signature() is the single policy point: it rejects
+     * NONE/CRC32/SHA256 and unknown types (EOS_ERR_SIGNATURE) and accepts only
+     * a valid Ed25519 signature over the signed header prefix. Every other
+     * verify path — slot_manager, recovery, stage1/jump_app — already calls it
+     * unconditionally; this makes the install path consistent with them, so an
+     * unsigned image can no longer be committed to a slot and marked bootable. */
+    int sig_rc = eos_image_verify_signature(&ctx->header);
+    if (sig_rc != EOS_OK) {
+        ctx->state = EOS_FW_STATE_ERROR;
+        ctx->last_error = sig_rc;
+        return sig_rc;
     }
 
     /* Anti-rollback check */

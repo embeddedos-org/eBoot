@@ -102,18 +102,41 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
         }
 
         /* ---- Step 4: Verify signing key against OTP root-of-trust ---- */
-        /* Extract key hash from TLV area */
-        /* The TLV_KEYHASH entry contains SHA-256 of the public key */
+        /*
+         * This step is PLANNED, not implemented: comparing the image's
+         * TLV_KEYHASH against the OTP anchor needs TLV extraction that does
+         * not exist here yet. What it must not do in the meantime is report
+         * success.
+         *
+         * It used to. An otp_read failure was discarded and boot continued,
+         * and when the read succeeded and the anchor was provisioned the body
+         * of the `if` was a comment -- so a device whose root of trust *is*
+         * provisioned booted an image signed by any key the image carried,
+         * and step 8 recorded EOS_SBOOT_OK. That is the same fail-open this
+         * PR removes from step 7, two steps earlier.
+         *
+         * Until the comparison exists, a provisioned device fails closed. An
+         * unprovisioned one (all-zero anchor) is unchanged: there is nothing
+         * to check against, and refusing would brick every un-provisioned
+         * board.
+         */
         uint8_t otp_key_hash[32];
         rc = eos_hal_otp_read(OTP_KEY_HASH_OFFSET, otp_key_hash, OTP_KEY_HASH_SIZE);
-        if (rc == EOS_OK) {
-            /* Check if OTP key hash is provisioned (not all-zeros) */
-            uint8_t zeros[32] = {0};
-            if (secure_compare(otp_key_hash, zeros, 32) != 0) {
-                /* OTP is provisioned — must match */
-                /* In a full implementation, extract key hash from TLV and compare */
-                /* For now, the signature verification implicitly uses the embedded key */
-            }
+        if (rc != EOS_OK) {
+            /* The anchor could not be read, so it cannot be checked. A
+             * verification step that cannot run must fail, not pass. */
+            attest_record(2, hdr.image_version, hdr.hash, NULL,
+                          EOS_SBOOT_ERR_SIGNATURE);
+            return EOS_SBOOT_ERR_SIGNATURE;
+        }
+
+        uint8_t zeros[32] = {0};
+        if (secure_compare(otp_key_hash, zeros, 32) != 0) {
+            /* Provisioned, and nothing here compares against it. Refuse
+             * rather than boot on a key this function has not checked. */
+            attest_record(2, hdr.image_version, hdr.hash, NULL,
+                          EOS_SBOOT_ERR_SIGNATURE);
+            return EOS_SBOOT_ERR_SIGNATURE;
         }
     }
 
@@ -182,8 +205,19 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
     }
 
     /* ---- Step 7: Lock debug interfaces ---- */
+    /*
+     * A policy that asked for the debug port to be closed and did not get
+     * it is a policy violation, not a detail. The result used to be
+     * discarded, so a board whose OTP write failed -- or one with no
+     * otp_write at all, where the HAL returns EOS_ERR_NOT_SUPPORTED --
+     * booted with SWD/JTAG open while attestation recorded EOS_SBOOT_OK.
+     */
     if (cfg->lock_debug) {
-        eos_secure_boot_lock_debug();
+        if (eos_secure_boot_lock_debug() != EOS_OK) {
+            attest_record(2, hdr.image_version, hdr.hash, NULL,
+                          EOS_SBOOT_ERR_POLICY);
+            return EOS_SBOOT_ERR_POLICY;
+        }
     }
 
     /* ---- Step 8: Record successful attestation ---- */
@@ -212,17 +246,21 @@ int eos_secure_boot_verify_key(const uint8_t key_hash[32])
     return secure_compare(key_hash, otp_hash, 32);
 }
 
-void eos_secure_boot_lock_debug(void)
+int eos_secure_boot_lock_debug(void)
 {
     /* Write lock pattern to eFuse debug lock register */
     uint8_t lock = 0xFF;
-    eos_hal_otp_write(OTP_DEBUG_LOCK_OFFSET, &lock, 1);
+    int rc = eos_hal_otp_write(OTP_DEBUG_LOCK_OFFSET, &lock, 1);
+    if (rc != EOS_OK)
+        return rc;
 
     /* On Cortex-M: disable DAP access via DHCSR if supported */
 #if defined(__ARM_ARCH)
     /* Some MCUs support disabling debug via DBGMCU register */
     /* *((volatile uint32_t *)0xE0042004) = 0; */
 #endif
+
+    return EOS_OK;
 }
 
 int eos_secure_boot_update_rollback(uint32_t new_version)
