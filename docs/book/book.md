@@ -743,6 +743,14 @@ typedef struct {
 } eos_fw_transport_t;
 ```
 
+A transport's own framing — a length prefix, a block or packet count, an
+end-of-transfer marker — bounds the transfer, but the update container is
+authoritative for completeness, and `eos_fw_update_bytes_wanted()` reports how
+much of `[header][payload][TLV area]` is still outstanding. Returning `EOS_OK`
+while that count is non-zero is a contract violation rather than a partial
+success. `EOS_OK` means the complete `[header][payload][TLV area]` update
+container has been written.
+
 ### 7.2 Built-in Transports
 
 | Transport | Protocol | Use Case |
@@ -1320,6 +1328,8 @@ typedef struct {
     eos_fw_update_state_t state;
 } eos_fw_update_ctx_t;
 ```
+
+The update container is `[header][payload][TLV area]`, and `eos_fw_update_write()` must receive all three parts. Bytes beyond the complete container are rejected rather than discarded.
 
 ### 16.2 Flash Sector Alignment
 

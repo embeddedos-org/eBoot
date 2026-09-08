@@ -8,7 +8,10 @@
  *
  * Provides decrypt-in-place for encrypted firmware updates.
  * Decryption key is retrieved from OTP/eFuse via the HAL.
- * Falls back to HAL hw_aes_decrypt if available.
+ *
+ * Software-only. The HAL's hw_aes_decrypt hook is deliberately not used --
+ * see the rationale above eos_fw_decrypt_update() for why its one-shot
+ * signature cannot express a streaming AEAD.
  */
 
 #include "eos_fw_decrypt.h"
@@ -192,16 +195,32 @@ int eos_fw_decrypt_update(eos_fw_decrypt_ctx_t *ctx, uint8_t *data, size_t len)
     if (!ctx || !data) return EOS_ERR_INVALID;
     if (!ctx->initialized) return EOS_ERR_INVALID;
 
-    /* Try HW-accelerated decryption via HAL */
-    const eos_board_ops_t *ops = eos_hal_get_ops();
-    if (ops && ops->hw_aes_decrypt) {
-        int rc = ops->hw_aes_decrypt(ctx->key, EOS_AES_KEY_SIZE,
-                                     ctx->iv, data, data, len);
-        if (rc == EOS_OK) {
-            ctx->bytes_processed += (uint32_t)len;
-            return EOS_OK;
-        }
-    }
+    /* No HW-accelerated shortcut here, deliberately.
+     *
+     * eos_board_ops_t::hw_aes_decrypt is (key, key_len, iv, in, out, len).
+     * That signature cannot express streaming GCM, and taking it broke this
+     * function two ways:
+     *
+     *  1. No counter position. Every call passed ctx->iv unchanged, so a
+     *     second chunk restarted the CTR keystream at block 0 and decrypted
+     *     against the same keystream as the first -- the one thing CTR mode
+     *     must never do.
+     *  2. No GHASH. The hook returns plaintext only, so ctx->ghash_acc was
+     *     never fed. eos_fw_decrypt_final() then computed the tag over an
+     *     empty accumulator and rejected the image, so a board with an AES
+     *     engine could not install a correctly encrypted update at all.
+     *
+     * The second is why this was never noticed: it fails closed, and no
+     * board in-tree implements the hook yet. The first is why it cannot be
+     * patched by also feeding GHASH -- the plaintext would still be wrong
+     * past the first chunk.
+     *
+     * Re-enabling this needs a hook that takes a block offset and either
+     * exposes the GHASH state or performs the whole GCM operation including
+     * the tag. Until then the software path below is the only correct one;
+     * it is checked against reference vectors in
+     * tests/unit/test_fw_decrypt.c.
+     */
 
     /* Software AES-256-CTR decryption.
      * AES-256 in CTR mode: encrypt the counter block with AES, then XOR

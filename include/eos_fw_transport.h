@@ -43,8 +43,16 @@ typedef struct {
     void (*deinit)(eos_fw_transport_t *tp);
 
     /**
-     * Receive firmware into the update context. Blocks until complete,
-     * error, or timeout. Calls eos_fw_update_write() internally.
+     * Receive firmware into the update context. Blocks until the update
+     * container is complete, or until error or timeout. Calls
+     * eos_fw_update_write() internally.
+     *
+     * Completeness is decided by the container, not by the transport's own
+     * framing. A transfer that satisfies the protocol — a declared length
+     * fully received, or an end-of-transfer marker — but leaves
+     * eos_fw_update_bytes_wanted() non-zero is an error, not a success.
+     * EOS_OK therefore means the whole [header][payload][TLV area]
+     * container was written and the context is ready to finalize.
      */
     int  (*receive)(eos_fw_transport_t *tp, eos_fw_update_ctx_t *ctx);
 

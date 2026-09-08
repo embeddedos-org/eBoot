@@ -21,6 +21,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -134,7 +135,6 @@ int main(void)
     run_test_get_by_index();
     run_test_register_null();
 
-    tests_run = 8;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

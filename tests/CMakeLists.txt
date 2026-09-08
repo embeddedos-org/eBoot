@@ -4,27 +4,36 @@
 # --- test_bootctl: Boot control block ---
 add_executable(eboot_test_bootctl unit/test_bootctl.c)
 target_link_libraries(eboot_test_bootctl PRIVATE eboot_core)
+# Every unit suite registered below appends its ctest name here, so the
+# Valgrind block at the bottom derives its list instead of repeating it.
+set(EBLDR_UNIT_TESTS "")
+
 add_test(NAME test_bootctl COMMAND eboot_test_bootctl)
+list(APPEND EBLDR_UNIT_TESTS test_bootctl)
 
 # --- test_crypto: SHA-256 against known vectors ---
 add_executable(eboot_test_crypto unit/test_crypto.c)
 target_link_libraries(eboot_test_crypto PRIVATE eboot_core)
 add_test(NAME test_crypto COMMAND eboot_test_crypto)
+list(APPEND EBLDR_UNIT_TESTS test_crypto)
 
 # --- test_image_verify: Image header parse bounds ---
 add_executable(eboot_test_image_verify unit/test_image_verify.c)
 target_link_libraries(eboot_test_image_verify PRIVATE eboot_core)
 add_test(NAME test_image_verify COMMAND eboot_test_image_verify)
+list(APPEND EBLDR_UNIT_TESTS test_image_verify)
 
 # --- test_image_abi: pins the .efw image header wire format against eFirmware ---
 add_executable(eboot_test_image_abi unit/test_image_abi.c)
 target_link_libraries(eboot_test_image_abi PRIVATE eboot_core)
 add_test(NAME test_image_abi COMMAND eboot_test_image_abi)
+list(APPEND EBLDR_UNIT_TESTS test_image_abi)
 
 # --- test_secure_boot: Secure boot policy gates ---
 add_executable(eboot_test_secure_boot unit/test_secure_boot.c)
 target_link_libraries(eboot_test_secure_boot PRIVATE eboot_core)
 add_test(NAME test_secure_boot COMMAND eboot_test_secure_boot)
+list(APPEND EBLDR_UNIT_TESTS test_secure_boot)
 
 # --- test_recovery: UART recovery write range ---
 # eboot_stage1 links eboot_core PUBLIC, so naming eboot_core here too put it on
@@ -34,81 +43,160 @@ add_test(NAME test_secure_boot COMMAND eboot_test_secure_boot)
 add_executable(eboot_test_recovery unit/test_recovery.c)
 target_link_libraries(eboot_test_recovery PRIVATE eboot_stage1)
 add_test(NAME test_recovery COMMAND eboot_test_recovery)
+list(APPEND EBLDR_UNIT_TESTS test_recovery)
 
 # --- test_fw_transport: UART raw/XMODEM/YMODEM firmware transport ---
 add_executable(eboot_test_fw_transport unit/test_fw_transport.c)
 target_link_libraries(eboot_test_fw_transport PRIVATE eboot_core)
 add_test(NAME test_fw_transport COMMAND eboot_test_fw_transport)
+list(APPEND EBLDR_UNIT_TESTS test_fw_transport)
+
+# --- test_fw_update_sig: install path must authenticate, not just hash ---
+add_executable(eboot_test_fw_update_sig unit/test_fw_update_sig.c)
+target_link_libraries(eboot_test_fw_update_sig PRIVATE eboot_core)
+add_test(NAME test_fw_update_sig COMMAND eboot_test_fw_update_sig)
+
+# --- test_fw_update: firmware update finalize / anti-rollback wiring ---
+add_executable(eboot_test_fw_update unit/test_fw_update.c)
+target_link_libraries(eboot_test_fw_update PRIVATE eboot_core)
+add_test(NAME test_fw_update COMMAND eboot_test_fw_update)
+
+# --- test_jump_app: stage-1 jump uses the authenticated TLV counter ---
+add_executable(eboot_test_jump_app unit/test_jump_app.c)
+target_link_libraries(eboot_test_jump_app PRIVATE eboot_stage1)
+add_test(NAME test_jump_app COMMAND eboot_test_jump_app)
 
 # --- test_slot_size_bounds: verify_slot() must reject image_size > slot capacity ---
 add_executable(eboot_test_slot_size_bounds unit/test_slot_size_bounds.c)
 target_link_libraries(eboot_test_slot_size_bounds PRIVATE eboot_core)
 add_test(NAME test_slot_size_bounds COMMAND eboot_test_slot_size_bounds)
 
+add_executable(eboot_test_jump_app_bounds unit/test_jump_app_bounds.c)
+target_link_libraries(eboot_test_jump_app_bounds PRIVATE eboot_core eboot_stage1)
+add_test(NAME test_jump_app_bounds COMMAND eboot_test_jump_app_bounds)
+
 # --- test_device_table: UEFI-style device table ---
 add_executable(eboot_test_device_table unit/test_device_table.c)
 target_link_libraries(eboot_test_device_table PRIVATE eboot_core)
 add_test(NAME test_device_table COMMAND eboot_test_device_table)
+list(APPEND EBLDR_UNIT_TESTS test_device_table)
 
 # --- test_runtime_svc: Runtime variable store ---
 add_executable(eboot_test_runtime_svc unit/test_runtime_svc.c)
 target_link_libraries(eboot_test_runtime_svc PRIVATE eboot_core)
 add_test(NAME test_runtime_svc COMMAND eboot_test_runtime_svc)
+list(APPEND EBLDR_UNIT_TESTS test_runtime_svc)
 
 # --- test_board_config: Declarative hardware config ---
 add_executable(eboot_test_board_config unit/test_board_config.c)
 target_link_libraries(eboot_test_board_config PRIVATE eboot_core)
 add_test(NAME test_board_config COMMAND eboot_test_board_config)
+list(APPEND EBLDR_UNIT_TESTS test_board_config)
 
 # --- test_multicore: Multicore boot management ---
 add_executable(eboot_test_multicore unit/test_multicore.c)
 target_link_libraries(eboot_test_multicore PRIVATE eboot_core)
 add_test(NAME test_multicore COMMAND eboot_test_multicore)
+list(APPEND EBLDR_UNIT_TESTS test_multicore)
+
+# --- test_qemu_arm64_timer: Generic timer conversion ---
+add_executable(eboot_test_qemu_arm64_timer unit/test_qemu_arm64_timer.c)
+target_include_directories(eboot_test_qemu_arm64_timer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/qemu_arm64
+)
+add_test(NAME test_qemu_arm64_timer COMMAND eboot_test_qemu_arm64_timer)
 
 # --- test_board_registry: Runtime board selection ---
 add_executable(eboot_test_board_registry unit/test_board_registry.c)
 target_link_libraries(eboot_test_board_registry PRIVATE eboot_core)
 add_test(NAME test_board_registry COMMAND eboot_test_board_registry)
+list(APPEND EBLDR_UNIT_TESTS test_board_registry)
 
 # --- test_slot_manager: Firmware slot management ---
 add_executable(eboot_test_slot_manager unit/test_slot_manager.c)
 target_link_libraries(eboot_test_slot_manager PRIVATE eboot_core)
 add_test(NAME test_slot_manager COMMAND eboot_test_slot_manager)
+list(APPEND EBLDR_UNIT_TESTS test_slot_manager)
 
 # --- test_boot_log: Boot log subsystem ---
 add_executable(eboot_test_boot_log unit/test_boot_log.c)
 target_link_libraries(eboot_test_boot_log PRIVATE eboot_core)
 add_test(NAME test_boot_log COMMAND eboot_test_boot_log)
+list(APPEND EBLDR_UNIT_TESTS test_boot_log)
 
 # --- test_ed25519: Ed25519 signature verification ---
 add_executable(eboot_test_ed25519 unit/test_ed25519.c)
 target_link_libraries(eboot_test_ed25519 PRIVATE eboot_core)
 add_test(NAME test_ed25519 COMMAND eboot_test_ed25519)
+list(APPEND EBLDR_UNIT_TESTS test_ed25519)
+
+# --- test_ed25519_contract: the corpus shared byte-for-byte with eos ---
+# tests/vectors/ed25519_contract_vectors.h is committed, not generated at
+# build time. What the TCB's signature verifier was tested against belongs in
+# the repository and in the release artifact: from a tag you should be able to
+# see which 76 vectors ran. Generating it also made Python 3 a hard
+# configure-time dependency of an otherwise pure-C test suite, which cost
+# minimal cross-build images the ability to configure at all.
+#
+# The reason it was generated -- that two repos would hold the same file and
+# have to keep it in step by hand -- is answered by the digest pinned in
+# test_ed25519_contract.c instead: neither copy can change without failing.
+# tools/gen_ed25519_contract_vectors.py stays as the way the file is
+# reproduced and reviewed.
+add_executable(eboot_test_ed25519_contract unit/test_ed25519_contract.c)
+target_link_libraries(eboot_test_ed25519_contract PRIVATE eboot_core)
+target_include_directories(eboot_test_ed25519_contract PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME test_ed25519_contract COMMAND eboot_test_ed25519_contract)
 
 # --- test_keystore: Key management ---
 add_executable(eboot_test_keystore unit/test_keystore.c)
 target_link_libraries(eboot_test_keystore PRIVATE eboot_core)
 add_test(NAME test_keystore COMMAND eboot_test_keystore)
+list(APPEND EBLDR_UNIT_TESTS test_keystore)
+
+# --- test_secure_boot_policy: debug-lock policy enforcement ---
+add_executable(eboot_test_secure_boot_policy unit/test_secure_boot_policy.c)
+target_link_libraries(eboot_test_secure_boot_policy PRIVATE eboot_core)
+add_test(NAME test_secure_boot_policy COMMAND eboot_test_secure_boot_policy)
 
 # --- test_rollback: Anti-rollback security counter ---
 add_executable(eboot_test_rollback unit/test_rollback.c)
 target_link_libraries(eboot_test_rollback PRIVATE eboot_core)
 add_test(NAME test_rollback COMMAND eboot_test_rollback)
+list(APPEND EBLDR_UNIT_TESTS test_rollback)
 
 # --- test_tlv_auth: TLV area must be bound to the signed header ---
 add_executable(eboot_test_tlv_auth unit/test_tlv_auth.c)
 target_link_libraries(eboot_test_tlv_auth PRIVATE eboot_core)
 add_test(NAME test_tlv_auth COMMAND eboot_test_tlv_auth)
+list(APPEND EBLDR_UNIT_TESTS test_tlv_auth)
 
 # --- test_storage: Unified storage abstraction ---
 add_executable(eboot_test_storage unit/test_storage.c)
 target_link_libraries(eboot_test_storage PRIVATE eboot_core)
 add_test(NAME test_storage COMMAND eboot_test_storage)
+list(APPEND EBLDR_UNIT_TESTS test_storage)
 
 # --- test_ecc: ECC memory range validation ---
 add_executable(eboot_test_ecc unit/test_ecc.c)
 target_link_libraries(eboot_test_ecc PRIVATE eboot_core)
 add_test(NAME test_ecc COMMAND eboot_test_ecc)
+list(APPEND EBLDR_UNIT_TESTS test_ecc)
+
+# --- test_fdt_loader: device tree parsing against malformed blobs ---
+# core/fdt_loader.c was in no source list, so it had never been compiled.
+add_executable(eboot_test_fdt_loader unit/test_fdt_loader.c)
+target_link_libraries(eboot_test_fdt_loader PRIVATE eboot_core)
+add_test(NAME test_fdt_loader COMMAND eboot_test_fdt_loader)
+
+# --- test_fw_decrypt: Streaming AES-256-GCM firmware decryption ---
+# Anchored here rather than after test_keystore: #82 inserts its own
+# triple at that anchor, and whichever of the two landed second would have
+# conflicted for no reason other than where the block was placed.
+add_executable(eboot_test_fw_decrypt unit/test_fw_decrypt.c)
+target_link_libraries(eboot_test_fw_decrypt PRIVATE eboot_core)
+add_test(NAME test_fw_decrypt COMMAND eboot_test_fw_decrypt)
 
 # --- test_fdt_loader: device tree parsing against malformed blobs ---
 # core/fdt_loader.c was in no source list, so it had never been compiled.
@@ -117,15 +205,24 @@ target_link_libraries(eboot_test_fdt_loader PRIVATE eboot_core)
 add_test(NAME test_fdt_loader COMMAND eboot_test_fdt_loader)
 
 # --- Valgrind test targets ---
+#
+# The list is derived from the suites registered above, not written out again.
+# Hand-maintained, it drifted: it had 17 of the 21 registered tests, missing
+# test_ecc, test_rollback, test_secure_boot and test_storage -- and nothing
+# failed when a name was forgotten, because a missing entry is simply a test
+# that never gets a memory-safety run.
+#
+# EBLDR_UNIT_TESTS is appended by each add_test() above, so a suite added
+# without touching this block still gets a Valgrind target.
 find_program(VALGRIND valgrind)
 if(VALGRIND)
     set(VALGRIND_OPTS --leak-check=full --error-exitcode=1 --quiet)
-    foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_keystore
+    foreach(TEST_NAME test_bootctl test_crypto test_ed25519 test_ed25519_contract test_keystore
                       test_device_table test_runtime_svc test_board_config
                       test_multicore test_board_registry test_slot_manager
                       test_boot_log test_image_verify test_image_abi
                       test_recovery test_slot_size_bounds test_fw_transport
-                      test_tlv_auth)
+                      test_fw_update test_jump_app test_tlv_auth)
         add_test(
             NAME valgrind_${TEST_NAME}
             COMMAND ${VALGRIND} ${VALGRIND_OPTS} $<TARGET_FILE:eboot_${TEST_NAME}>

@@ -95,6 +95,7 @@ static int tests_passed = 0;
         sim_tick = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -481,7 +482,6 @@ int main(void)
     run_test_unsigned_signature_types_are_rejected();
     run_test_header_version_is_validated();
     run_test_tlv_unreadable_entry_fails_closed();
-    tests_run = 17;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

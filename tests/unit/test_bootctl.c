@@ -109,6 +109,7 @@ static int tests_passed = 0;
     static void run_##name(void) { \
         setup(); \
         printf("  %-50s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -292,7 +293,6 @@ int main(void)
     run_test_version_encoding();
     run_test_validate_null();
 
-    tests_run = 12;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

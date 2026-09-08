@@ -89,6 +89,21 @@ typedef struct {
 
     /* HW-accelerated crypto (optional, software fallback used if NULL) */
     int (*hw_sha256)(const void *data, size_t len, void *digest);
+
+    /* Reserved, and currently consumed by nothing.
+     *
+     * This signature cannot express a streaming AEAD: it carries no counter
+     * position, so every chunk restarts the CTR keystream at block 0, and it
+     * returns plaintext only, so there is no way to feed GHASH. core/
+     * fw_decrypt.c used to call it and produced both keystream reuse and a
+     * tag computed over an empty accumulator; the call site was removed
+     * rather than patched, because feeding GHASH alone still leaves the
+     * plaintext wrong past the first chunk.
+     *
+     * A board that implements this hook today gets nothing, silently. Do not
+     * add a caller: define a streaming-capable contract first (init/update/
+     * final, or an explicit block offset plus an AAD/tag path), which is a
+     * change to this struct rather than to its consumers. */
     int (*hw_aes_decrypt)(const void *key, size_t key_len,
                           const void *iv, const void *in,
                           void *out, size_t len);

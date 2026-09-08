@@ -36,9 +36,10 @@ typedef enum {
     EOS_FW_STATE_IDLE       = 0,
     EOS_FW_STATE_HEADER     = 1,
     EOS_FW_STATE_PAYLOAD    = 2,
-    EOS_FW_STATE_VERIFY     = 3,
-    EOS_FW_STATE_COMPLETE   = 4,
-    EOS_FW_STATE_ERROR      = 5,
+    EOS_FW_STATE_TLV        = 3,
+    EOS_FW_STATE_VERIFY     = 4,
+    EOS_FW_STATE_COMPLETE   = 5,
+    EOS_FW_STATE_ERROR      = 6,
 } eos_fw_update_state_t;
 
 typedef struct {
@@ -56,6 +57,8 @@ typedef struct {
     /* Streaming write state */
     uint32_t payload_written;
     uint32_t payload_total;
+    uint32_t tlv_written;
+    uint32_t tlv_total;
     uint32_t write_addr;
 
     /* Integrity tracking */
@@ -79,8 +82,10 @@ typedef struct {
 int eos_fw_update_begin(eos_fw_update_ctx_t *ctx, eos_slot_t slot);
 
 /**
- * Write a chunk of firmware data. Handles header parsing and
- * payload streaming automatically.
+ * Write a chunk of firmware data. Handles header parsing, payload
+ * streaming, and the authenticated TLV tail (hdr.tlv_len bytes after
+ * the payload). Extra bytes beyond that container are rejected;
+ * they are not discarded with EOS_OK.
  *
  * @param ctx   Update context.
  * @param data  Chunk of firmware data.
@@ -88,6 +93,24 @@ int eos_fw_update_begin(eos_fw_update_ctx_t *ctx, eos_slot_t slot);
  * @return EOS_OK on success, negative on error.
  */
 int eos_fw_update_write(eos_fw_update_ctx_t *ctx, const uint8_t *data, size_t len);
+
+/**
+ * Number of container bytes eos_fw_update_write() will still accept.
+ *
+ * A block-framed transport such as XMODEM has no container length of its
+ * own and pads its final block; this is how it tells image bytes from
+ * padding instead of pushing the padding into eos_fw_update_write(), which
+ * rejects anything past the container.
+ *
+ * While the header is still arriving only the header remainder is known,
+ * because image_size and tlv_len are fields inside it. Call this again
+ * after each write rather than once per block.
+ *
+ * @param ctx   Update context.
+ * @return Bytes still wanted, or 0 once the container is complete or the
+ *         context is idle or failed.
+ */
+uint32_t eos_fw_update_bytes_wanted(const eos_fw_update_ctx_t *ctx);
 
 /**
  * Finalize the update: verify integrity, update boot control,

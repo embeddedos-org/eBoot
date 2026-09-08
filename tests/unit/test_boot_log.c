@@ -300,6 +300,6 @@ int main(void)
     RUN(test_clear_reports_erase_failure);
     RUN(test_append_does_not_advance_head_when_write_fails);
     RUN(test_entry_layout_is_stable);
-    printf("\n%d/11 tests passed\n", tests_passed);
+    printf("\n%d/%d tests passed\n", tests_passed);
     return 0;
 }
