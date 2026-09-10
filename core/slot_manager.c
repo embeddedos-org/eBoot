@@ -52,8 +52,7 @@ static int verify_slot(eos_slot_t slot)
      * boot, did not. */
     uint32_t slot_size = eos_hal_slot_size(slot);
     if (slot_size == 0 ||
-        si->header.hdr_size > slot_size ||
-        si->header.image_size > slot_size - si->header.hdr_size) {
+        !eos_image_fits_slot(&si->header, slot_size)) {
         si->state = EOS_SLOT_STATE_INVALID;
         return EOS_ERR_INVALID;
     }

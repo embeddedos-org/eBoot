@@ -32,12 +32,11 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
     if (rc != EOS_OK)
         return rc;
 
-    /* Defense-in-depth: ensure the image fits within the actual slot
-     * before any integrity verification can stream payload bytes. */
+    /* Ensure the complete image, including TLVs, fits within the slot
+     * before any integrity verification can read beyond the slot. */
     uint32_t slot_size = eos_hal_slot_size(slot);
     if (slot_size == 0 ||
-        hdr.hdr_size > slot_size ||
-        hdr.image_size > slot_size - hdr.hdr_size) {
+        !eos_image_fits_slot(&hdr, slot_size)) {
         eos_boot_log_append(EOS_LOG_IMAGE_INVALID, slot, EOS_ERR_INVALID);
         return EOS_ERR_INVALID;
     }

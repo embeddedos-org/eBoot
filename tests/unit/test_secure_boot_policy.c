@@ -181,6 +181,7 @@ TEST(test_secure_boot_refuses_when_the_debug_lock_cannot_be_taken)
 
     eos_secure_boot_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
+    cfg.slot_size         = FLASH_SIZE;
     cfg.image_addr        = FLASH_BASE;
     cfg.require_signature = false;
     cfg.require_encryption = false;
@@ -201,6 +202,7 @@ TEST(test_the_same_image_boots_when_no_debug_lock_is_asked_for)
 
     eos_secure_boot_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
+    cfg.slot_size         = FLASH_SIZE;
     cfg.image_addr        = FLASH_BASE;
     cfg.require_signature = false;
     cfg.require_encryption = false;
@@ -220,6 +222,7 @@ TEST(test_secure_boot_proceeds_when_the_debug_lock_succeeds)
 
     eos_secure_boot_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
+    cfg.slot_size         = FLASH_SIZE;
     cfg.image_addr        = FLASH_BASE;
     cfg.require_signature = false;
     cfg.require_encryption = false;
@@ -257,6 +260,7 @@ TEST(test_the_ordinary_boot_path_is_unaffected_by_the_step_4_change)
 
     eos_secure_boot_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
+    cfg.slot_size         = FLASH_SIZE;
     cfg.image_addr        = FLASH_BASE;
     cfg.require_signature = false;
     cfg.lock_debug        = false;

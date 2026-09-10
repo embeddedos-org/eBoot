@@ -37,8 +37,10 @@ static int sim_flash_read(uint32_t addr, void *buf, size_t len)
 
     memcpy(buf, &sim_flash[addr], len);
 
-    if (addr >= SLOT_A_ADDR + sizeof(eos_image_header_t) &&
-        addr < SLOT_B_ADDR)
+    uint32_t payload_start = SLOT_A_ADDR + sizeof(eos_image_header_t);
+
+    if (addr >= payload_start &&
+        addr < SLOT_A_ADDR + SLOT_A_SIZE)
         payload_bytes_read += len;
 
     return EOS_OK;
@@ -184,14 +186,34 @@ TEST(test_in_bounds_image_reaches_integrity_check)
     ASSERT(payload_bytes_read == image_size);
 }
 
+TEST(test_tlv_beyond_slot_rejected_before_payload_read)
+{
+    eos_image_header_t hdr;
+    eos_bootctl_t bctl;
+
+    uint32_t image_size =
+        SLOT_A_SIZE - sizeof(eos_image_header_t);
+
+    fill_header(&hdr, image_size);
+    hdr.tlv_len = 1;
+    write_header(SLOT_A_ADDR, &hdr);
+    memset(&bctl, 0, sizeof(bctl));
+
+    int rc = eboot_jump_to_app(&bctl, EOS_SLOT_A);
+
+    ASSERT(rc == EOS_ERR_INVALID);
+    ASSERT(payload_bytes_read == 0);
+}
+
 int main(void)
 {
     printf("=== eBootloader: Jump-App Slot-Size Bounds Tests ===\n\n");
 
     run_test_oversized_image_rejected_before_reading_payload();
     run_test_in_bounds_image_reaches_integrity_check();
+    run_test_tlv_beyond_slot_rejected_before_payload_read();
 
-    tests_run = 2;
+    tests_run = 3;
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
 
