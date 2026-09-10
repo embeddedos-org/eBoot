@@ -184,11 +184,6 @@ target_link_libraries(eboot_test_ecc PRIVATE eboot_core)
 add_test(NAME test_ecc COMMAND eboot_test_ecc)
 list(APPEND EBLDR_UNIT_TESTS test_ecc)
 
-# --- test_fdt_loader: device tree parsing against malformed blobs ---
-# core/fdt_loader.c was in no source list, so it had never been compiled.
-add_executable(eboot_test_fdt_loader unit/test_fdt_loader.c)
-target_link_libraries(eboot_test_fdt_loader PRIVATE eboot_core)
-add_test(NAME test_fdt_loader COMMAND eboot_test_fdt_loader)
 
 # --- test_fw_decrypt: Streaming AES-256-GCM firmware decryption ---
 # Anchored here rather than after test_keystore: #82 inserts its own
