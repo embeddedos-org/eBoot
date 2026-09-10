@@ -94,6 +94,11 @@ void ebldr_stage0_main(void)
         if (match1 || match2) {
             eos_boot_log_append(EOS_LOG_BOOT_FAIL, EOS_SLOT_NONE, 0xBAD1);
             eos_recovery_enter(&bctl);
+            /* eos_recovery_enter() only returns if it decides to reboot rather
+            * than halt. Either way, a Stage-1 that just failed its integrity
+            * check must never be jumped into — return so the corrupted image
+            * is never entered. */
+           return;
         }
         eos_boot_log_append(EOS_LOG_IMAGE_VALID, EOS_SLOT_NONE, 0);
 #endif
