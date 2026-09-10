@@ -27,7 +27,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
       - name: Test
-        run: ctest --test-dir build --output-on-failure -C Release
+        run: ctest --test-dir build --output-on-failure --no-tests=error -C Release
 
   cross-compile:
     name: Cross (${{ matrix.arch }})

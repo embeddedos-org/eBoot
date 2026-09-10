@@ -24,7 +24,7 @@ jobs:
         run: |
           cmake -B build -DEBLDR_BUILD_TESTS=ON -DEBLDR_HARDENING=ON
           cmake --build build --parallel
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure --no-tests=error
 
   firmware-arm-cortex-m:
     name: Firmware (${{ matrix.board }})
