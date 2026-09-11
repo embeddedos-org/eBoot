@@ -129,6 +129,7 @@ static int tests_passed = 0;
     static void run_##name(void) { \
         setup(); \
         printf("  %-58s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[OK]\n"); \
@@ -249,7 +250,6 @@ int main(void)
     run_test_sha256_sigtype_is_still_unsigned_and_rejected();
     run_test_corrupt_image_is_rejected_at_integrity_stage();
 
-    tests_run = 3;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

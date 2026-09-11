@@ -362,7 +362,6 @@ int main(void)
     run_test_tlv_area_must_fit_in_slot();
     run_test_hw_floor_uses_tlv_counter_not_image_version();
 
-    tests_run = 9;
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

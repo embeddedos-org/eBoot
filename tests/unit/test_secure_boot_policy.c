@@ -128,6 +128,11 @@ static void reset_fixture(void)
     memset(sim_otp, 0, sizeof(sim_otp));
     sim_ops.otp_read = sim_otp_read;
     sim_ops.flash_read = sim_flash_read;
+    /* Step 5b (anti-rollback, #103) reads the image's TLV counter through the
+     * HAL slot that contains it, and an image in no slot is a bad header
+     * before step 7 is ever reached. The staged image is slot A. */
+    sim_ops.slot_a_addr = FLASH_BASE;
+    sim_ops.slot_a_size = FLASH_SIZE;
     if (provide_otp_write) sim_ops.otp_write = sim_otp_write;
     otp_write_rc = EOS_OK;
     otp_write_calls = 0;

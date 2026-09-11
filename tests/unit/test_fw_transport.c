@@ -16,6 +16,7 @@
 #include "eos_image.h"
 #include "eos_image_tlv.h"
 #include "eos_hal.h"
+#include "../vectors/fw_update_test_sigs.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -102,6 +103,23 @@ static eos_reset_reason_t sim_reset_reason(void) { return EOS_RESET_POWER_ON; }
 static bool sim_recovery_pin(void) { return false; }
 static void sim_system_reset(void) {}
 
+/* Since #104 finalize verifies the image signature unconditionally, so the
+ * container the XMODEM test finalizes has to be genuinely signed. The keystore
+ * takes its anchor from OTP slot 0 when the board has OTP at all; serve the
+ * public half of the key the fixture signature was made under. */
+#define OTP_KEY_OFFSET_SLOT0  0x100u
+
+static int sim_otp_read(uint32_t offset, void *buf, size_t len)
+{
+    if (!buf) return EOS_ERR_INVALID;
+    if (offset == OTP_KEY_OFFSET_SLOT0 && len == sizeof(eos_test_sig_pubkey)) {
+        memcpy(buf, eos_test_sig_pubkey, len);
+        return EOS_OK;
+    }
+    memset(buf, 0, len);        /* slot 1 unprovisioned, nothing revoked */
+    return EOS_OK;
+}
+
 static const eos_board_ops_t sim_ops = {
     .flash_base          = 0,
     .flash_size          = SIM_FLASH_SIZE,
@@ -119,6 +137,7 @@ static const eos_board_ops_t sim_ops = {
     .flash_read          = sim_flash_read,
     .flash_write         = sim_flash_write,
     .flash_erase         = sim_flash_erase,
+    .otp_read            = sim_otp_read,
 
     .watchdog_init       = sim_noop_u32,
     .watchdog_feed       = sim_noop,
@@ -354,7 +373,8 @@ static void build_container(void)
     hdr.load_addr   = SIM_SLOT_B_ADDR;
     hdr.entry_addr  = SIM_SLOT_B_ADDR;
     hdr.flags       = 0;              /* CRC32 integrity path */
-    hdr.sig_type    = EOS_SIG_NONE;
+    hdr.sig_type    = EOS_SIG_ED25519;
+    hdr.sig_len     = EOS_SIG_MAX_SIZE;
 
     uint32_t crc = crc32_payload(payload, CONT_PAYLOAD_LEN);
     memcpy(hdr.hash, &crc, sizeof(crc));
@@ -364,6 +384,10 @@ static void build_container(void)
     eos_sha256(tlv, CONT_TLV_LEN, digest);
     hdr.tlv_len = CONT_TLV_LEN;
     memcpy(hdr.tlv_hash, digest, EOS_IMG_TLV_HASH_LEN);
+
+    /* Precomputed by tools/gen_fw_update_test_sigs.py for exactly the field
+     * values above; change any of them and regenerate. */
+    memcpy(hdr.signature, eos_test_sig_fw_transport_container, EOS_SIG_MAX_SIZE);
 
     memcpy(container, &hdr, sizeof(hdr));
 }
@@ -880,7 +904,6 @@ int main(void)
     run_test_raw_oversized_length_is_rejected();
     run_test_raw_zero_length_is_rejected();
 
-    tests_run = 19;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

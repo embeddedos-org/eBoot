@@ -300,16 +300,6 @@ static int point_is_identity(gf p[4])
     return diff == 0;
 }
 
-static void scalarbase(gf r[4], const uint8_t *s)
-{
-    gf q[4];
-    fe_copy16(q[0], BX);
-    fe_copy16(q[1], BY);
-    fe_copy16(q[2], gf1);
-    fe_mul(q[3], BX, BY);
-    scalarmult(r, q, s);
-}
-
 /* Reject a public key outside the prime-order subgroup.
  *
  * Decoding a point is not enough. Ed25519 has eight points of low order, and
