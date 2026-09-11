@@ -53,12 +53,12 @@ void eos_boot_log_init(uint32_t head);
 void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail);
 
 /**
- * @brief Read one boot log entry by index.
- * @param index  Entry index (0 to EOS_BOOT_LOG_MAX - 1).
- * @param out    Receives the entry at @p index.
- * @return EOS_OK on success, EOS_ERR_INVALID on a bad index or null @p out.
+ * @brief Current ring-buffer write position.
+ *
+ * Persisted into the boot control block on handoff so the log survives a
+ * reset. @return Head index in [0, EOS_BOOT_LOG_MAX).
  */
-int eos_boot_log_read(uint32_t index, eos_boot_log_entry_t *out);
+uint32_t eos_boot_log_get_head(void);
 
 /**
  * @brief Read one log entry by ring index.

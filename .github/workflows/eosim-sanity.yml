@@ -23,6 +23,14 @@ jobs:
   install-validate:
     name: Install & Validate (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    # Every step here is written in bash: `$(...)`, `|| { ... }`, a heredoc,
+    # and /tmp. Without this the Windows legs ran them under PowerShell, where
+    # `SITE_PACKAGES=$(...)` is an unknown command and the job went red, while
+    # the `|| { exit 1 }` guard in "Verify installation" parsed as an unexecuted
+    # script block and could never fail.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:

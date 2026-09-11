@@ -250,7 +250,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-22.04
-    needs: [test, build-arm, static-analysis]
+    needs: [test, build-arm, fuzz-build, static-analysis]
     if: always()
     steps:
       - uses: actions/checkout@v4

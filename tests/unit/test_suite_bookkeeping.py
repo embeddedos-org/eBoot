@@ -37,6 +37,14 @@ NO_TEST_MACRO = {
     "test_boot_log.c": "prints its own summary and has no TEST() macro",
     "test_ecc.c": "single-scenario suite; no per-test harness",
     "test_image_abi.c": "compile-time _Static_asserts; nothing runs per test",
+    "test_ed25519_contract.c": "one loop over the generated vector table; "
+                               "counts accepted/refused/wrong per vector",
+    "test_eos_sign_boot_path.c": "CHECK() counts failures, not tests; the "
+                                 "exit code is the failure count",
+    "test_fdt_loader.c": "RUN() macro with exit(1) on the first failed "
+                         "ASSERT; tests_passed is the count",
+    "test_qemu_arm64_timer.c": "four inline ASSERT_EQ calls that exit(1) on "
+                               "failure; no per-test harness",
 }
 
 
