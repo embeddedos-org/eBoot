@@ -242,7 +242,10 @@ TEST(test_secure_boot_proceeds_when_the_debug_lock_succeeds)
  * over the header prefix checked against the keystore anchor. A fixture for
  * that is buildable -- the keystore ships RFC 8032 TEST 1's public key and
  * the matching private key is in the RFC -- but the machinery for it belongs
- * to #88 (tools/gen_signed_image_fixture.py), not here.
+ * to #88 (tools/gen_signed_image_fixture.py), not here. (When this note was
+ * first written the shipped key was *not* that key -- it was off the curve
+ * from byte 21 on, so no such fixture could have verified; that is fixed in
+ * core/keystore.c and pinned by test_keystore.c.)
  *
  * I wrote the obvious test first and it was worthless: with
  * require_signature = true and an unsigned fixture the boot fails at step 3,
