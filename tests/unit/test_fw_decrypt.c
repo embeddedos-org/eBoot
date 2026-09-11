@@ -27,6 +27,7 @@ static int tests_passed = 0;
     static void name(void); \
     static void run_##name(void) { \
         printf("  %-52s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -265,7 +266,6 @@ int main(void)
     run_test_init_rejects_bad_arguments_and_unprovisioned_keys();
     run_test_update_and_final_reject_uninitialised_contexts();
 
-    tests_run = 8;
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

@@ -18,6 +18,7 @@
 #include "eos_crypto_boot.h"
 #include "eos_bootctl.h"
 #include "eos_hal.h"
+#include "../vectors/fw_update_test_sigs.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -65,6 +66,24 @@ static int sim_monotonic_read(uint32_t *value)
     return EOS_OK;
 }
 
+/* Since #104 finalize verifies the image signature unconditionally, and it
+ * does so before the anti-rollback check, so an image has to be genuinely
+ * signed to reach the stage these tests exercise. The keystore takes its
+ * anchor from OTP slot 0 when the board has OTP at all; serve the public
+ * half of the key the fixture signatures were made under, and nothing else. */
+#define OTP_KEY_OFFSET_SLOT0  0x100u
+
+static int sim_otp_read(uint32_t offset, void *buf, size_t len)
+{
+    if (!buf) return EOS_ERR_INVALID;
+    if (offset == OTP_KEY_OFFSET_SLOT0 && len == sizeof(eos_test_sig_pubkey)) {
+        memcpy(buf, eos_test_sig_pubkey, len);
+        return EOS_OK;
+    }
+    memset(buf, 0, len);        /* slot 1 unprovisioned, nothing revoked */
+    return EOS_OK;
+}
+
 static const eos_board_ops_t sim_ops = {
     .flash_base          = 0,
     .flash_size          = SIM_FLASH_SIZE,
@@ -79,6 +98,7 @@ static const eos_board_ops_t sim_ops = {
     .flash_write         = sim_flash_write,
     .flash_erase         = sim_flash_erase,
     .monotonic_read      = sim_monotonic_read,
+    .otp_read            = sim_otp_read,
 };
 
 static int tests_run = 0;
@@ -98,6 +118,7 @@ static int tests_passed = 0;
         sim_counter = 0; \
         eos_hal_init(&sim_ops); \
         printf("  %-58s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -135,8 +156,8 @@ static void build_image(uint8_t *out, uint32_t sec_ver)
     hdr.image_version = 0x00010000u;
     hdr.flags         = EOS_IMG_FLAG_HASH_SHA256;
     eos_sha256(payload, PAYLOAD_SIZE, hdr.hash);
-    hdr.sig_type      = EOS_SIG_NONE;
-    hdr.sig_len       = 0;
+    hdr.sig_type      = EOS_SIG_ED25519;
+    hdr.sig_len       = EOS_SIG_MAX_SIZE;
 
     uint8_t tlv[TLV_AREA_LEN];
     eos_tlv_info_t info = { EOS_TLV_INFO_MAGIC, TLV_AREA_LEN };
@@ -149,6 +170,15 @@ static void build_image(uint8_t *out, uint32_t sec_ver)
     eos_sha256(tlv, TLV_AREA_LEN, digest);
     hdr.tlv_len = TLV_AREA_LEN;
     memcpy(hdr.tlv_hash, digest, EOS_IMG_TLV_HASH_LEN);
+
+    /* Signature over the prefix, precomputed by tools/gen_fw_update_test_sigs.py
+     * for exactly the field values above. Every other sec_ver would need its
+     * own entry there, because tlv_hash is inside the signed prefix. */
+    switch (sec_ver) {
+    case 3:  memcpy(hdr.signature, eos_test_sig_fw_update_sec_ver_3, EOS_SIG_MAX_SIZE); break;
+    case 9:  memcpy(hdr.signature, eos_test_sig_fw_update_sec_ver_9, EOS_SIG_MAX_SIZE); break;
+    default: printf("[FAIL] no fixture signature for sec_ver %u\n", (unsigned)sec_ver); exit(1);
+    }
 
     memset(out, 0, IMAGE_BUF_LEN);
     memcpy(out, &hdr, sizeof(hdr));
@@ -315,7 +345,6 @@ int main(void)
     run_test_trailing_byte_is_rejected_the_same_across_chunk_boundaries();
     run_test_finalize_accepts_tlv_counter_equal_to_floor();
 
-    tests_run = 6;
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

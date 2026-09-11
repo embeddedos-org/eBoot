@@ -221,6 +221,7 @@ static int tests_passed = 0;
         eos_hal_init(&sim_ops); \
         eos_rollback_clear_staged(); \
         printf("  %-58s ", #name); \
+        tests_run++; \
         name(); \
         tests_passed++; \
         printf("[PASS]\n"); \
@@ -265,7 +266,6 @@ int main(void)
     run_test_jump_rejects_tlv_counter_below_hw_floor();
     run_test_jump_stages_tlv_counter_above_floor();
 
-    tests_run = 2;
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }
