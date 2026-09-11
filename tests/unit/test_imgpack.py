@@ -32,7 +32,13 @@ def _pack(tmp_path, version):
          "--input", str(tmp_path / "fw.bin"),
          "--output", str(tmp_path / "fw.eimg"),
          "--load-addr", "0x08010000", "--entry-addr", "0x08010100",
-         "--version", version],
+         # `--version=X`, not `--version X`: a value such as "-1.0.0" is a
+         # separate token in the second form, and whether argparse reads it
+         # as a value or as an unknown option depends on the interpreter --
+         # 3.10 refuses it with "expected one argument" before imgpack.py
+         # runs, 3.13+ accepts it. The test is about imgpack's own check,
+         # which only the joined form reaches on every version.
+         f"--version={version}"],
         capture_output=True, text=True)
 
 
