@@ -1,98 +1,75 @@
-<!-- generated: eos-ai-scaffold -->
-# Agent Responsibilities
+# AGENTS.md — eBoot
 
-Each role owns a slice of the work and does only that slice. Full briefs are in
-[.ai/](./.ai/). These are responsibilities, not a required agent count — one
-agent may hold several roles on a small change. Split when the roles need
-genuinely different context, not by default.
+eBoot (CMake project `eBootloader`, v3.0.2) is a multi-platform, modular secure
+bootloader written in C: a minimal Stage-0 (early hardware bring-up) plus a
+Stage-1 that scans, selects, verifies (Ed25519), and jumps to an application or
+RTOS image, with A/B slot management, recovery, and firmware-update transports.
+(Provenance: `README.md` intro.)
 
-One rule is structural rather than stylistic: **whoever implements does not
-approve.** Review is a separate role because self-review reliably misses the
-thing the implementer already believes is correct.
+## Layout (from `README.md` "What's inside")
 
-## Planner — [.ai/planner.md](./.ai/planner.md)
+- `stage0/` — reset entry, hardware init, watchdog, recovery entry, jump to Stage-1
+- `stage1/` — boot logic: scan, select, boot log, jump to app (`main.c`)
+- `core/` — platform-agnostic boot logic (Ed25519 verify, image TLV/verify, slot
+  manager, keystore, anti-rollback, firmware update/decrypt, UART transport,
+  boot policy/menu, recovery); builds `eboot_core`
+- `hal/` — HAL dispatch and board registry; builds `eboot_hal`
+- `include/` — public headers (`eos_secure_boot.h`, `eos_image.h`, …)
+- `boards/` — per-architecture board support
+- `configs/` — boot/flash/image YAML schemas and flash-tool config
+- `toolchains/` — cross-compile toolchain files (aarch64, arm-none-eabi, riscv64, …)
+- `tests/` — `unit/`, `functional/`, `fuzz/`, `performance/`, `simulation/`
+- `docs/` — quickstart, architecture, secure boot chain, threat model, etc.
 
-- Understand the request.
-- Break work into tasks.
-- Assign work.
+## Build (from `README.md` "Build" and `CONTRIBUTING.md` "Development Setup")
 
-## Architect — [.ai/architect.md](./.ai/architect.md)
+Requires CMake ≥ 3.15 and a C compiler. Native build compiles the
+platform-agnostic core libraries (no architecture-specific code; works on
+Linux, macOS, Windows). Tests are disabled by default; enable with
+`EBLDR_BUILD_TESTS=ON`.
 
-- Design structure.
-- Choose patterns.
-- Own dependencies, scalability and maintainability.
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEBLDR_BUILD_TESTS=ON
+cmake --build build --parallel
+```
 
-## Backend — [.ai/backend.md](./.ai/backend.md)
+Cross-compile for a target board with `EBLDR_BOARD` plus a toolchain file:
 
-- APIs
-- Database
-- Business logic
+```bash
+cmake -B build/stm32 -DEBLDR_BOARD=stm32f4 \
+  -DCMAKE_TOOLCHAIN_FILE=toolchains/arm-none-eabi.cmake
+cmake --build build/stm32 --parallel
+```
 
-## Frontend — [.ai/frontend.md](./.ai/frontend.md)
+## Test (from `README.md` "Test" and `CONTRIBUTING.md` "Test Suites")
 
-- UI
-- Components
-- Accessibility
+```bash
+cmake -S . -B build -DEBLDR_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+python run_all_tests.py
+```
 
-## Testing — [.ai/testing.md](./.ai/testing.md)
+Python tooling setup: `pip install -r requirements.txt`. Config-generation
+check: `python scripts/generate_config.py configs/example_boot.yaml /tmp/generated/`.
 
-- Unit tests
-- Integration tests
-- Regression tests
+## Lint / format
 
-## Security — [.ai/security.md](./.ai/security.md)
+Not defined: no lint or format command is documented in `README.md` or
+`CONTRIBUTING.md`. (A `.clang-tidy` config file exists in the tree, but the
+repo documents no command to invoke it; C style rules — C11, `-Wall -Wextra`
+clean — are in `CONTRIBUTING.md` "Code Guidelines".)
 
-- Authentication and authorization
-- Validation
-- Secrets
-- Dependency review
+## Contributing
 
-## Performance — [.ai/performance.md](./.ai/performance.md)
+See `CONTRIBUTING.md`: fork, create a feature branch (`git checkout -b
+feat/my-feature`), run the build and tests locally, then submit a pull request.
+Follow Conventional Commits; new features need unit tests in `tests/unit/`
+(registered with both `add_executable()` and `add_test()` in
+`tests/CMakeLists.txt`).
 
-- Profiling
-- Optimization
-- Scalability
+## Security
 
-## Reviewer — [.ai/reviewer.md](./.ai/reviewer.md)
-
-- Final review
-- Verify requirements
-- Merge findings
-
-## Documentation — [.ai/docs.md](./.ai/docs.md)
-
-- README
-- API docs
-- Changelog
-- Migration and architecture notes
-
-## Release — [.ai/release.md](./.ai/release.md)
-
-- Release notes
-- Deployment preparation
-- Rollback guidance
-
----
-
-## Switching roles
-
-Switch when the task changes domain, when specialist knowledge is required,
-when independent review is required, or when the context has grown past what
-one agent can hold accurately. Every switch runs the protocol in
-[HANDOFF.md](./HANDOFF.md).
-
-## Finding work that is not yours
-
-You will. The rule is: **record it, do not absorb it, do not drop it.**
-
-| What you found | Do |
-|----------------|-----|
-| A defect unrelated to your task | Note it in [TASKS.md](./TASKS.md) and keep going. |
-| A defect your change would sit on top of | Stop; say it blocks you; propose fixing it as its own task. |
-| A security issue | Report immediately, whatever role you hold. This one never waits for a handoff. |
-| A design decision missing from the plan | Return to the architect rather than deciding it inside an implementation. |
-| Work that belongs to a role nobody assigned | Say so. An unowned task is how requirements go missing. |
-
-Silently fixing something outside your task makes the diff unreviewable.
-Silently ignoring it means nobody ever looks again. Neither is acceptable; the
-note is what makes the difference.
+See `SECURITY.md`. Report vulnerabilities to security@embeddedos.org — do NOT
+open public issues for vulnerabilities. Response SLA: acknowledgment within
+48 hours; 90-day coordinated disclosure.
