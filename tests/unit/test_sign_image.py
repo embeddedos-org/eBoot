@@ -182,6 +182,44 @@ def test_verify_rejects_a_signed_image_under_the_wrong_key(signed_image, tmp_pat
     assert "does not verify" in r.stderr
 
 
+
+def _pack_unsigned(tmp_path, payload=None):
+    """Pack a raw payload into an unsigned .eimg via imgpack.py."""
+    payload = payload if payload is not None else b"\xA5" * 512
+    (tmp_path / "fw.bin").write_bytes(payload)
+    r = _run(TOOLS / "imgpack.py",
+             "--input", tmp_path / "fw.bin", "--output", tmp_path / "fw.eimg",
+             "--load-addr", "0x08010000", "--entry-addr", "0x08010100",
+             "--version", "1.0.0")
+    assert r.returncode == 0, r.stderr
+    return tmp_path / "fw.eimg"
+
+
+def test_sha256_method_sets_the_integrity_flag(tmp_path):
+    """--method sha256 must set EOS_IMG_FLAG_HASH_SHA256."""
+    image = _pack_unsigned(tmp_path)
+    r = _run(TOOLS / "sign_image.py", "--image", image, "--method", "sha256")
+    assert r.returncode == 0, r.stderr
+
+    data = image.read_bytes()
+    flags = struct.unpack_from("<I", data, FLAGS_OFFSET)[0]
+    assert flags & IMG_FLAG_HASH_SHA256, (
+        "SHA-256 signing left EOS_IMG_FLAG_HASH_SHA256 unset")
+    assert data[SIG_TYPE_OFFSET] == 2  # SIG_SHA256
+
+
+def test_sha256_method_verifies_as_sha256(tmp_path):
+    """--verify must take the SHA-256 path after --method sha256."""
+    image = _pack_unsigned(tmp_path, bytes(range(256)) * 4)
+    r = _run(TOOLS / "sign_image.py", "--image", image, "--method", "sha256")
+    assert r.returncode == 0, r.stderr
+
+    r = _run(TOOLS / "sign_image.py", "--image", image, "--verify")
+    assert r.returncode == 0, f"{r.stdout}\n{r.stderr}"
+    assert "SHA-256:        OK" in r.stdout
+    assert "CRC32:" not in r.stdout
+
+
 def test_verify_requires_a_signature_when_a_key_is_given(tmp_path):
     """An unsigned image must not pass --verify just because its CRC is fine."""
     (tmp_path / "fw.bin").write_bytes(b"\xA5" * 512)
