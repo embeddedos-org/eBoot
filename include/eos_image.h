@@ -209,6 +209,17 @@ int eos_image_verify_signature(const eos_image_header_t *hdr);
 int eos_image_check_version(uint32_t candidate_version, uint32_t min_version);
 
 /**
+ * @brief Check whether an image fits completely within its flash slot.
+ *
+ * Validates the image header, payload, and TLV area against the slot size.
+ *
+ * @param hdr       Image header.
+ * @param slot_size Available slot size in bytes.
+ * @return true if the complete image fits within the slot, false otherwise.
+ */
+bool eos_image_fits_slot(const eos_image_header_t *hdr, uint32_t slot_size);
+
+/**
  * @brief Compute CRC32 over a flash region, reporting read failures.
  *
  * Preferred over eos_crc32() anywhere the result is used to decide whether an

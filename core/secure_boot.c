@@ -85,6 +85,15 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
         return EOS_SBOOT_ERR_BAD_HEADER;
     }
 
+    /* The complete image must fit in the configured slot before any
+     * integrity/TLV processing can read beyond the slot boundary. */
+    if (cfg->slot_size == 0 ||
+        !eos_image_fits_slot(&hdr, cfg->slot_size)) {
+        attest_record(2, hdr.image_version, hdr.hash, NULL,
+                      EOS_SBOOT_ERR_BAD_HEADER);
+        return EOS_SBOOT_ERR_BAD_HEADER;
+    }
+
     /* ---- Step 2: Verify integrity (SHA-256 hash) ---- */
     /* Bug Fix: Pass image_addr directly to verify_integrity since verify_integrity already adds hdr_size */
     rc = eos_image_verify_integrity(&hdr, cfg->image_addr);

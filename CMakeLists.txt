@@ -111,6 +111,7 @@ add_library(eboot_core STATIC
     core/debug_lock.c
     core/fw_decrypt.c
     core/image_tlv.c
+    core/image_slot_bounds.c
 )
 target_include_directories(eboot_core PUBLIC ${EBLDR_INCLUDE_DIR})
 target_link_libraries(eboot_core PUBLIC eboot_hal)

@@ -138,6 +138,7 @@ static eos_secure_boot_config_t base_cfg(void)
     eos_secure_boot_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.image_addr        = IMAGE_ADDR;
+    cfg.slot_size         = 0x8000u;
     cfg.require_signature = false;
     cfg.lock_debug        = false;
     return cfg;
@@ -198,6 +199,23 @@ TEST(test_decrypt_failure_is_attested)
     ASSERT(log->entries[log->count - 1].verify_result == EOS_SBOOT_ERR_DECRYPT);
 }
 
+TEST(test_tlv_beyond_slot_is_rejected)
+{
+    write_image(0);
+
+    eos_image_header_t hdr;
+    memcpy(&hdr, &sim_flash[IMAGE_ADDR], sizeof(hdr));
+
+    hdr.tlv_len = 1;
+    memcpy(&sim_flash[IMAGE_ADDR], &hdr, sizeof(hdr));
+
+    eos_secure_boot_config_t cfg = base_cfg();
+    cfg.slot_size = sizeof(eos_image_header_t) + PAYLOAD_LEN;
+
+    uint32_t entry = 0;
+    ASSERT(eos_secure_boot(&cfg, &entry) == EOS_SBOOT_ERR_BAD_HEADER);
+}
+
 int main(void)
 {
     printf("Secure boot policy tests\n");
@@ -205,6 +223,7 @@ int main(void)
     run_test_encrypted_image_rejected_while_decrypt_unimplemented();
     run_test_plaintext_image_boots_when_encryption_not_required();
     run_test_decrypt_failure_is_attested();
+    run_test_tlv_beyond_slot_is_rejected();
     /* Compare, and let the exit code carry it. `return 0` meant a suite that
      * ran nothing at all still reported success -- the ASSERT macro exits on
      * failure, so the only thing this return could ever have signalled is

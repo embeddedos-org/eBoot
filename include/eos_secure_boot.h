@@ -28,6 +28,7 @@ typedef struct {
     bool     require_encryption;    /* Enforce AES-GCM decryption */
     bool     lock_debug;            /* Disable SWD/JTAG after boot */
     bool     enable_attestation;    /* Log boot measurements */
+    uint32_t slot_size;              /* Flash capacity available to this image */
 } eos_secure_boot_config_t;
 
 /* ---- Secure Boot Result ---- */
