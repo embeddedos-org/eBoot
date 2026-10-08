@@ -134,6 +134,53 @@ jobs:
             echo "${{ matrix.platform }}: PASSED (no-firmware contract)"
           fi
 
+  # eBoot#147: the gate above proves the install, platform discovery, and
+  # the honest no-firmware failure -- but executes zero firmware. This job
+  # builds a minimal ARM32 smoke image from tools/eosim-smoke/ and runs it
+  # through the native engine on stm32f4 (flash base 0x08000000, which is
+  # where the engine loads --firmware images). A full eBoot stage0 does
+  # hardware init the engine does not model, so the smoke image is the
+  # honest minimum: 4 instructions the decoder supports (3x MOV, UDF halt).
+  # Success is the engine's clean-halt contract: exit 0, PASSED, cycles > 0.
+  real-firmware:
+    name: Real Firmware (stm32f4, native engine)
+    needs: install-validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install EoSim
+        uses: embeddedos-org/.github/.github/actions/install-eosim@master
+        with:
+          version: ${{ env.EOSIM_VERSION }}
+      - name: Install ARM toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
+      - name: Build smoke firmware
+        run: |
+          arm-none-eabi-as -marm tools/eosim-smoke/smoke.s -o /tmp/smoke.o
+          arm-none-eabi-objcopy -O binary /tmp/smoke.o /tmp/smoke.bin
+          ls -l /tmp/smoke.bin
+          # 4 ARM32 words; anything else means the source drifted from the
+          # contract the assertions below check.
+          [ "$(stat -c%s /tmp/smoke.bin)" -eq 16 ] || { echo "::error::smoke.bin is not 16 bytes"; exit 1; }
+      - name: Execute real firmware
+        run: |
+          set +e
+          out=$(eosim run stm32f4 --firmware /tmp/smoke.bin --headless --timeout 60 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          [ "$code" -eq 0 ] || { echo "::error::expected exit 0, got $code"; exit 1; }
+          echo "$out" | grep -q "PASSED" || { echo "::error::expected the PASSED contract message"; exit 1; }
+          cycles=$(echo "$out" | sed -n 's/.*PASSED (\([0-9][0-9]*\) cycles.*/\1/p')
+          [ -n "$cycles" ] && [ "$cycles" -gt 0 ] || { echo "::error::expected cycles > 0, got '$cycles'"; exit 1; }
+          echo "stm32f4: real firmware executed ($cycles cycles)"
+
   nested-guest-install:
     name: Guest OS Install (${{ matrix.guest }})
     needs: install-validate
@@ -239,7 +286,7 @@ jobs:
   sanity-gate:
     name: EoSim Sanity Gate
     if: always()
-    needs: [install-validate, nested-simulation, nested-guest-install, windows-sanity, macos-sanity]
+    needs: [install-validate, nested-simulation, real-firmware, nested-guest-install, windows-sanity, macos-sanity]
     runs-on: ubuntu-latest
     steps:
       # Iterates toJSON(needs) rather than naming one dependency. The
