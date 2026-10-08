@@ -217,6 +217,14 @@ External boundaries:
 | MPU isolation between stages | T-204, T-306 | v0.3.0 |
 | Flash write protection for bootloader | T-101, T-306 | v0.3.0 |
 
+### Watch items — external dependencies
+
+| Item | Detail | eBoot impact | Status |
+|---|---|---|---|
+| ESP-IDF v6.1 disables ECDSA Secure Boot V2 on ESP32-H2/C5/P4 | Disabled "due to a security vulnerability found in the ECDSA based Secure Boot flow"; details promised in chip errata. 192-bit curve removed. | If eBoot's ESP32 trust path assumes the ECDSA-SBv2 flow, it inherits the vulnerability. Verify the assumption and plan the migration to the v6.1-supported flow. | Monitored |
+| ESP-IDF v6.1: ESP32-P4 default silicon rev v3.0 | Images must target the revision they ship for. | eBoot ESP32-P4 bring-up docs must name the rev. | Monitored |
+| ESP-IDF v6.1 fixes LP-SPI MISO bug (v6.0-6.0.3) |  | Relevant to SPI flash attach on affected parts. | Monitored |
+
 ---
 
 ## 7. Risk Assessment Method
