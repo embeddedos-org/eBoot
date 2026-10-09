@@ -169,6 +169,16 @@ External boundaries:
 | T-703 | Repudiation | No record of who authorized a firmware update | Low | Medium | Low | Boot log records update source, version, timestamp | Planned |
 | T-704 | Denial of Service | Repeated invalid update attempts exhaust flash erase cycles | Low | Medium | Low | Rate limiting on update requests; validate header before erase | Monitored |
 
+**External evidence — CVE-2026-86326 (Moxa, Oct 2026).** Moxa MGate
+MB3000/EIP3000/5000 gateways do not verify firmware authenticity
+(CVSSv4 8.6, MPSA-269540) — and **no firmware fix shipped at disclosure**;
+customers were given a compensating-controls playbook only. This is the
+exact flaw class the #162 Ed25519 envelope answers, and the "no fix
+shipped" detail is why eBoot's verify-before-boot must be fail-closed
+(boot refuses unsigned firmware) rather than advisory: when the vendor
+never patches, the device's only protection is the one baked into the
+boot chain.
+
 ---
 
 ## 5. Risk Summary
