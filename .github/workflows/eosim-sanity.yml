@@ -162,7 +162,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
       - name: Build smoke firmware
         run: |
-          arm-none-eabi-as -marm tools/eosim-smoke/smoke.s -o /tmp/smoke.o
+          arm-none-eabi-as tools/eosim-smoke/smoke.s -o /tmp/smoke.o
           arm-none-eabi-objcopy -O binary /tmp/smoke.o /tmp/smoke.bin
           ls -l /tmp/smoke.bin
           # 4 ARM32 words; anything else means the source drifted from the

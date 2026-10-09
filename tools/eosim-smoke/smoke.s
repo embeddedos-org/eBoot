@@ -8,7 +8,7 @@
 @ then halt. It proves the sanity gate executes real instructions from a
 @ real file -- not zeroed memory (eBoot#147).
 @
-@ Build: arm-none-eabi-as -marm smoke.s -o smoke.o
+@ Build: arm-none-eabi-as smoke.s -o smoke.o
 @        arm-none-eabi-objcopy -O binary smoke.o smoke.bin
 @ Run:   eosim run stm32f4 --firmware smoke.bin --headless --timeout 60
 @ Expect: exit 0, "PASSED (4 cycles, halted)".

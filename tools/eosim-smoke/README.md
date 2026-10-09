@@ -18,7 +18,7 @@ from a real file, fetched and executed instruction by instruction.
 ## Build
 
 ```bash
-arm-none-eabi-as -marm tools/eosim-smoke/smoke.s -o /tmp/smoke.o
+arm-none-eabi-as tools/eosim-smoke/smoke.s -o /tmp/smoke.o
 arm-none-eabi-objcopy -O binary /tmp/smoke.o /tmp/smoke.bin
 ```
 
