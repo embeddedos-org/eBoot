@@ -179,6 +179,20 @@ shipped" detail is why eBoot's verify-before-boot must be fail-closed
 never patches, the device's only protection is the one baked into the
 boot chain.
 
+**External evidence — CVE-2026-84411 (MikroTik RouterOS, Oct 2026).**
+Unauthenticated RCE via integer underflow in the RouterOS HTTP login
+(CVSS 9.8, CISA advisory) — a single crafted request, all RouterOS <7.24.
+Patched in 7.24, but field adoption is ~zero as of Oct 5: the patch exists
+and the fleet is still vulnerable. The "patch-available-but-not-deployed"
+class — the device's own boot chain cannot rely on the vendor's update
+cadence reaching it in time.
+
+**External evidence — CVE-2026-105484 (TOTOLINK X6000R, Oct 2026).**
+Unauthenticated RCE (CVSS 10.0) with **no patched firmware confirmed at
+disclosure** — a second "no firmware fix at disclosure" case alongside the
+Moxa row above. When neither a patch nor a timeline exists, fail-closed
+verify-before-boot is the only control the device actually has.
+
 ---
 
 ## 5. Risk Summary
