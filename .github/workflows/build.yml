@@ -102,3 +102,47 @@ jobs:
             --suppress=missingInclude \
             --error-exitcode=1 \
             core/ hal/ 2>&1 || true
+
+  build-r5:
+    name: Cross-assemble Cortex-R5 stage-0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Assemble and link the R5 stage-0
+        run: |
+          # Regression guard for #137: r5_stage0_startup.S is the only emitter
+          # of the Cortex-R .vectors section (eight branch instructions).
+          # Before it existed, --gc-sections discarded stage-0 and the R5
+          # image linked to 0 bytes -- and no CI job ever assembled this file,
+          # so the defect was invisible. The two stage-0 entry points are
+          # stubbed here: this job verifies the startup code assembles, links
+          # against cortex_r5_stage0.ld, and keeps its vector table; the full
+          # stage-0 C build is the board build's job, not this smoke leg's.
+          cat > r5_stubs.c <<'STUB'
+          void ebldr_hw_init_minimal(void) {}
+          void ebldr_stage0_main(void) {}
+          STUB
+          arm-none-eabi-gcc -mcpu=cortex-r5 -marm -c boards/cortex_r5/r5_stage0_startup.S -o r5_stage0.o
+          arm-none-eabi-gcc -mcpu=cortex-r5 -marm -c r5_stubs.c -o r5_stubs.o
+          arm-none-eabi-gcc -mcpu=cortex-r5 -marm -nostdlib -T boards/cortex_r5/cortex_r5_stage0.ld -Wl,--gc-sections r5_stage0.o r5_stubs.o -o r5_stage0.elf
+
+      - name: The vector table survived the link (the #137 assertion)
+        run: |
+          arm-none-eabi-readelf -S r5_stage0.elf | tee sections.txt
+          python3 - <<'PY'
+          import re
+          txt = open('sections.txt').read()
+          m = re.search(r'\.vectors\s+PROGBITS\s+([0-9a-f]+)\s+[0-9a-f]+\s+([0-9a-f]+)', txt)
+          assert m, '.vectors section missing from the linked image'
+          addr, size = int(m.group(1), 16), int(m.group(2), 16)
+          assert addr == 0, f'.vectors at {addr:#x}, expected 0x0 (reset fetches there)'
+          assert size == 32, f'.vectors is {size} bytes, expected 32 (eight branch instructions)'
+          print('.vectors: 32 bytes at 0x0')
+          PY
+          arm-none-eabi-objcopy -O binary r5_stage0.elf r5_stage0.bin
+          test -s r5_stage0.bin || { echo '::error::r5_stage0.bin is empty -- the #137 defect is back'; exit 1; }
+          arm-none-eabi-size r5_stage0.elf
