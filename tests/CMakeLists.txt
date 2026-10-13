@@ -202,6 +202,12 @@ target_link_libraries(eboot_test_fw_decrypt PRIVATE eboot_core)
 add_test(NAME test_fw_decrypt COMMAND eboot_test_fw_decrypt)
 list(APPEND EBLDR_UNIT_TESTS test_fw_decrypt)
 
+# --- test_boot_verify_failclosed: signed-image verification negatives ---
+add_executable(eboot_test_boot_verify_failclosed unit/test_boot_verify_failclosed.c)
+target_link_libraries(eboot_test_boot_verify_failclosed PRIVATE eboot_core)
+add_test(NAME test_boot_verify_failclosed COMMAND eboot_test_boot_verify_failclosed)
+list(APPEND EBLDR_UNIT_TESTS test_boot_verify_failclosed)
+
 # --- test_fdt_loader: device tree parsing against malformed blobs ---
 # core/fdt_loader.c was in no source list, so it had never been compiled.
 add_executable(eboot_test_fdt_loader unit/test_fdt_loader.c)
@@ -286,3 +292,4 @@ foreach(_t IN LISTS _eboot_test_targets)
             "builds both together. The add_test(NAME ...) label can stay as it is.")
     endif()
 endforeach()
+
