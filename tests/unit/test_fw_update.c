@@ -221,6 +221,53 @@ TEST(test_write_streams_tlv_then_finalize_rejects_below_floor)
     ASSERT(eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST) == EOS_ERR_ANTI_ROLLBACK);
 }
 
+TEST(test_finalize_bad_signature_below_floor_reports_signature)
+{
+    uint8_t image[IMAGE_BUF_LEN];
+    eos_fw_update_ctx_t ctx;
+
+    build_image(image, 3);
+
+    /* Corrupt the signature itself (not a signed field): verification
+     * must fail, and per ADR-020 the counter is never consulted, so
+     * even with the floor above this image's counter the refusal is
+     * EOS_ERR_SIGNATURE, not EOS_ERR_ANTI_ROLLBACK. */
+    eos_image_header_t *hdr = (eos_image_header_t *)image;
+    hdr->signature[0] ^= 0xFF;
+
+    ASSERT(eos_fw_update_begin(&ctx, EOS_SLOT_B) == EOS_OK);
+    ASSERT(eos_fw_update_write(&ctx, image, IMAGE_BUF_LEN) == EOS_OK);
+    ASSERT(eos_fw_update_get_state(&ctx) == EOS_FW_STATE_VERIFY);
+
+    sim_counter = 9;
+
+    ASSERT(eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST) == EOS_ERR_SIGNATURE);
+}
+
+TEST(test_finalize_tampered_tlv_area_is_refused)
+{
+    uint8_t image[IMAGE_BUF_LEN];
+    eos_fw_update_ctx_t ctx;
+
+    build_image(image, 3);
+
+    /* Flip the counter byte inside the TLV area after signing. The
+     * header signature still verifies (tlv_hash is what it binds, and
+     * it is untouched), but the TLV bytes no longer match that hash:
+     * reading the counter must fail closed (EOS_ERR_INVALID) instead
+     * of degrading to counter 0, which against a floor of 0 would
+     * otherwise let the tampered image install. */
+    image[STREAMED_LEN + TLV_VALUE_OFF] ^= 0xFF;
+
+    ASSERT(eos_fw_update_begin(&ctx, EOS_SLOT_B) == EOS_OK);
+    ASSERT(eos_fw_update_write(&ctx, image, IMAGE_BUF_LEN) == EOS_OK);
+    ASSERT(eos_fw_update_get_state(&ctx) == EOS_FW_STATE_VERIFY);
+
+    sim_counter = 0;
+
+    ASSERT(eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST) == EOS_ERR_INVALID);
+}
+
 TEST(test_write_does_not_reach_verify_until_tlv_arrives)
 {
     uint8_t image[IMAGE_BUF_LEN];
@@ -346,6 +393,8 @@ int main(void)
     printf("Firmware update (finalize anti-rollback)\n\n");
 
     run_test_write_streams_tlv_then_finalize_rejects_below_floor();
+    run_test_finalize_bad_signature_below_floor_reports_signature();
+    run_test_finalize_tampered_tlv_area_is_refused();
     run_test_write_does_not_reach_verify_until_tlv_arrives();
     run_test_write_rejects_bytes_past_the_image_container();
     run_test_bytes_wanted_tracks_the_remaining_container();
