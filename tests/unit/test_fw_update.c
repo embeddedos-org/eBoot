@@ -13,6 +13,7 @@
  */
 
 #include "eos_fw_update.h"
+#include "eos_rollback.h"
 #include "eos_image.h"
 #include "eos_image_tlv.h"
 #include "eos_crypto_boot.h"
@@ -388,6 +389,74 @@ TEST(test_finalize_accepts_tlv_counter_equal_to_floor)
     ASSERT(eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST) == EOS_OK);
 }
 
+/* ---- Direct reads: eos_rollback_read_image_counter ----
+ *
+ * The finalize tests above exercise the counter reader indirectly,
+ * through the install path. These pin the reader's own contract:
+ * it parses the header at a flash address, binds the TLV area to
+ * the header's signed tlv_hash, and reports the MIN_SEC_VER entry.
+ * It does not verify the image signature — that ordering (signature
+ * first, then counter) is finalize's job per ADR-020 — so placing
+ * the image bytes in the slot directly is a faithful fixture here.
+ */
+
+TEST(test_read_image_counter_returns_tlv_counter)
+{
+    uint8_t image[IMAGE_BUF_LEN];
+    uint32_t counter = 0;
+
+    build_image(image, 7);
+    memcpy(&sim_flash[SIM_SLOT_B_ADDR], image, IMAGE_BUF_LEN);
+
+    ASSERT(eos_rollback_read_image_counter(SIM_SLOT_B_ADDR, &counter) == EOS_OK);
+    ASSERT(counter == 7);
+}
+
+TEST(test_read_image_counter_no_tlv_reports_zero)
+{
+    uint8_t image[IMAGE_BUF_LEN];
+    uint32_t counter = 99;
+
+    build_image(image, 7);
+    /* tlv_len == 0 means the image makes no counter claim: the area
+     * is unauthenticated and is not read; 0 is the conservative
+     * reading (it can only fail against a device floor). */
+    ((eos_image_header_t *)image)->tlv_len = 0;
+    memcpy(&sim_flash[SIM_SLOT_B_ADDR], image, IMAGE_BUF_LEN);
+
+    ASSERT(eos_rollback_read_image_counter(SIM_SLOT_B_ADDR, &counter) == EOS_OK);
+    ASSERT(counter == 0);
+}
+
+TEST(test_read_image_counter_rejects_null_out)
+{
+    ASSERT(eos_rollback_read_image_counter(SIM_SLOT_B_ADDR, NULL) == EOS_ERR_INVALID);
+}
+
+TEST(test_read_image_counter_tampered_tlv_fails_closed)
+{
+    uint8_t image[IMAGE_BUF_LEN];
+    uint32_t counter = 0;
+
+    build_image(image, 3);
+    /* Same tamper as the finalize case, read directly: the TLV
+     * bytes no longer match the signed tlv_hash, so the reader
+     * fails closed instead of trusting the raised counter. */
+    image[STREAMED_LEN + TLV_VALUE_OFF] ^= 0xFF;
+    memcpy(&sim_flash[SIM_SLOT_B_ADDR], image, IMAGE_BUF_LEN);
+
+    ASSERT(eos_rollback_read_image_counter(SIM_SLOT_B_ADDR, &counter) == EOS_ERR_INVALID);
+}
+
+TEST(test_read_image_counter_erased_flash_fails)
+{
+    uint32_t counter = 0;
+
+    /* The TEST wrapper leaves flash erased (0xFF): no valid header
+     * parses, so the read must fail, never report a counter. */
+    ASSERT(eos_rollback_read_image_counter(SIM_SLOT_A_ADDR, &counter) != EOS_OK);
+}
+
 int main(void)
 {
     printf("Firmware update (finalize anti-rollback)\n\n");
@@ -400,6 +469,11 @@ int main(void)
     run_test_bytes_wanted_tracks_the_remaining_container();
     run_test_trailing_byte_is_rejected_the_same_across_chunk_boundaries();
     run_test_finalize_accepts_tlv_counter_equal_to_floor();
+    run_test_read_image_counter_returns_tlv_counter();
+    run_test_read_image_counter_no_tlv_reports_zero();
+    run_test_read_image_counter_rejects_null_out();
+    run_test_read_image_counter_tampered_tlv_fails_closed();
+    run_test_read_image_counter_erased_flash_fails();
 
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
