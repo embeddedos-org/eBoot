@@ -405,11 +405,11 @@ TEST(test_read_image_counter_returns_tlv_counter)
     uint8_t image[IMAGE_BUF_LEN];
     uint32_t counter = 0;
 
-    build_image(image, 7);
+    build_image(image, 9);
     memcpy(&sim_flash[SIM_SLOT_B_ADDR], image, IMAGE_BUF_LEN);
 
     ASSERT(eos_rollback_read_image_counter(SIM_SLOT_B_ADDR, &counter) == EOS_OK);
-    ASSERT(counter == 7);
+    ASSERT(counter == 9);
 }
 
 TEST(test_read_image_counter_no_tlv_reports_zero)
@@ -417,7 +417,7 @@ TEST(test_read_image_counter_no_tlv_reports_zero)
     uint8_t image[IMAGE_BUF_LEN];
     uint32_t counter = 99;
 
-    build_image(image, 7);
+    build_image(image, 9);
     /* tlv_len == 0 means the image makes no counter claim: the area
      * is unauthenticated and is not read; 0 is the conservative
      * reading (it can only fail against a device floor). */
