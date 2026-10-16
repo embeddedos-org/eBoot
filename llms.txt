@@ -1,0 +1,33 @@
+# eBoot
+
+> llms.txt for the eBoot repository (embeddedos-org/eBoot).
+> Status: multi-platform, modular secure bootloader in C
+> (CMake project `eBootloader`), version 3.0.2. Two-stage boot
+> chain: a minimal Stage-0 for early hardware bring-up, and a
+> Stage-1 that scans, selects, verifies, and jumps to an
+> application or RTOS image. Image authentication uses Ed25519
+> signatures, with A/B slot management, recovery, and
+> firmware-update transports in the core.
+
+eBoot is the boot component of the EmbeddedOS ecosystem,
+providing verified boot for EoS and other payloads. Signature
+verification and recovery-command authentication are not
+options: no build of this bootloader skips either.
+
+## Docs
+
+- [Architecture](docs/architecture.md) — the two-stage design and module layout
+- [Secure boot chain](docs/secure_boot_chain.md) — the verified boot sequence end to end
+- [Security](docs/security.md) — security properties and guarantees
+- [Threat model](docs/threat_model.md) — attackers, assets, and mitigations
+- [Update flow](docs/update-flow.md) — firmware update and A/B slot flow
+- [Key lifecycle](docs/key_lifecycle.md) — key generation, provisioning, rotation, revocation
+- [Memory map](docs/memory-map.md) — flash/RAM layout for stages and slots
+- [Installation & usage](docs/installation_usage.md) — building and using eBoot
+- [Quickstart](docs/quickstart.md) — the shortest path to a booting image
+- [eFlash](docs/eflash.md) — the flash tooling surface
+- [MCUboot comparison](docs/mcuboot_comparison.md) — how eBoot compares with MCUboot
+
+## Machine-readable
+
+- [llms-full.txt](llms-full.txt) — the docs above concatenated as one document
