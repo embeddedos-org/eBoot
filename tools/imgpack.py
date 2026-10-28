@@ -24,6 +24,8 @@ EOS_IMG_MAGIC = 0x454F5349
 EOS_IMAGE_HDR_VERSION = 1
 EOS_HASH_SIZE = 32
 EOS_SIG_MAX_SIZE = 64
+UINT32_MAX = 0xFFFFFFFF
+MAX_IMAGE_SIZE = 16 * 1024 * 1024
 
 # Signature types
 SIG_NONE = 0
@@ -56,6 +58,39 @@ def compute_crc32(data: bytes) -> int:
     return zlib.crc32(data) & 0xFFFFFFFF
 
 
+def parse_uint32(value: str, label: str) -> int:
+    """Parse a hexadecimal CLI value that fits the image's uint32 fields."""
+    try:
+        parsed = int(value, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a hexadecimal uint32, got '{value}'") from exc
+    if not 0 <= parsed <= UINT32_MAX:
+        raise ValueError(f"{label} is outside the uint32 range: '{value}'")
+    return parsed
+
+
+def validate_image_layout(image_size: int, load_addr: int, entry_addr: int) -> None:
+    """Reject images the bootloader will refuse before writing an artifact."""
+    if image_size <= 0 or image_size > MAX_IMAGE_SIZE:
+        raise ValueError(
+            f"image size must be between 1 and {MAX_IMAGE_SIZE} bytes; got {image_size}"
+        )
+    if not 0 <= load_addr <= UINT32_MAX or not 0 <= entry_addr <= UINT32_MAX:
+        raise ValueError("load and entry addresses must fit uint32")
+    if load_addr == 0:
+        # The firmware parser treats zero as an unset load address and skips
+        # the runtime entry-range check for compatibility with XIP targets.
+        return
+    if image_size > UINT32_MAX - load_addr:
+        raise ValueError("load address plus image size overflows uint32")
+    image_end = load_addr + image_size
+    if entry_addr < load_addr or entry_addr >= image_end:
+        raise ValueError(
+            f"entry address 0x{entry_addr:08X} is outside the image range "
+            f"[0x{load_addr:08X}, 0x{image_end:08X})"
+        )
+
+
 def build_header(
     image_size: int,
     load_addr: int,
@@ -65,6 +100,12 @@ def build_header(
     flags: int = 0,
 ) -> bytes:
     """Build the eos_image_header_t binary structure."""
+
+    validate_image_layout(image_size, load_addr, entry_addr)
+    if not 0 <= image_version <= UINT32_MAX:
+        raise ValueError("image version must fit uint32")
+    if not 0 <= image_crc <= UINT32_MAX or not 0 <= flags <= UINT32_MAX:
+        raise ValueError("image CRC and flags must fit uint32")
 
     # Hash field: store CRC32 in first 4 bytes, rest zeroed
     hash_field = struct.pack('<I', image_crc) + b'\x00' * (EOS_HASH_SIZE - 4)
@@ -104,21 +145,31 @@ def main():
     args = parser.parse_args()
 
     input_path = Path(args.input)
-    if not input_path.exists():
+    if not input_path.is_file():
         print(f"Error: input file not found: {args.input}", file=sys.stderr)
         sys.exit(1)
 
-    firmware_data = input_path.read_bytes()
+    output_path = Path(args.output)
+    if input_path.resolve() == output_path.resolve():
+        print("Error: input and output paths must be different", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        firmware_data = input_path.read_bytes()
+    except OSError as e:
+        print(f"Error: cannot read input file: {e}", file=sys.stderr)
+        sys.exit(1)
     image_size = len(firmware_data)
 
-    load_addr = int(args.load_addr, 16)
-    entry_addr = int(args.entry_addr, 16)
     try:
+        load_addr = parse_uint32(args.load_addr, "load address")
+        entry_addr = parse_uint32(args.entry_addr, "entry address")
+        flags = parse_uint32(args.flags, "flags")
         image_version = parse_version(args.version)
+        validate_image_layout(image_size, load_addr, entry_addr)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    flags = int(args.flags, 16)
     image_crc = compute_crc32(firmware_data)
 
     header = build_header(
@@ -130,8 +181,17 @@ def main():
         flags=flags,
     )
 
-    output_path = Path(args.output)
-    output_path.write_bytes(header + firmware_data)
+    temporary_path = output_path.with_name(output_path.name + ".tmp")
+    try:
+        temporary_path.write_bytes(header + firmware_data)
+        temporary_path.replace(output_path)
+    except OSError as e:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        print(f"Error: cannot write output image: {e}", file=sys.stderr)
+        sys.exit(1)
 
     ver_major = (image_version >> 24) & 0xFF
     ver_minor = (image_version >> 16) & 0xFF

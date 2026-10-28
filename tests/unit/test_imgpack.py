@@ -25,13 +25,20 @@ TOOLS = REPO_ROOT / "tools"
 IMAGE_VERSION_OFFSET = 20
 
 
-def _pack(tmp_path, version):
-    (tmp_path / "fw.bin").write_bytes(b"\x5A" * 256)
+def _pack(
+    tmp_path,
+    version,
+    *,
+    load_addr="0x08010000",
+    entry_addr="0x08010010",
+    firmware=b"\x5A" * 256,
+):
+    (tmp_path / "fw.bin").write_bytes(firmware)
     return subprocess.run(
         [sys.executable, str(TOOLS / "imgpack.py"),
          "--input", str(tmp_path / "fw.bin"),
          "--output", str(tmp_path / "fw.eimg"),
-         "--load-addr", "0x08010000", "--entry-addr", "0x08010100",
+         "--load-addr", load_addr, "--entry-addr", entry_addr,
          # `--version=X`, not `--version X`: a value such as "-1.0.0" is a
          # separate token in the second form, and whether argparse reads it
          # as a value or as an unknown option depends on the interpreter --
@@ -72,3 +79,46 @@ def test_out_of_range_version_is_rejected(tmp_path, version):
     assert not (tmp_path / "fw.eimg").exists(), (
         f"output image was written for rejected version '{version}'")
     assert "out of range" in r.stderr
+
+
+@pytest.mark.parametrize(
+    ("load_addr", "entry_addr"),
+    [
+        ("0x08010000", "0x08010100"),  # exclusive image end
+        ("0x08010000", "0x0800FFFF"),  # before the image
+        ("0x08010000", "0x100000000"),  # entry does not fit uint32
+        ("0x100000000", "0x100000000"),  # load does not fit uint32
+        ("0xFFFFFFF0", "0xFFFFFFF0"),  # load + 256-byte image wraps
+    ],
+)
+def test_invalid_runtime_layout_is_rejected_before_output(
+    tmp_path, load_addr, entry_addr
+):
+    r = _pack(
+        tmp_path, "1.2.3", load_addr=load_addr, entry_addr=entry_addr
+    )
+    assert r.returncode != 0
+    assert not (tmp_path / "fw.eimg").exists()
+    assert "Error:" in r.stderr
+
+
+def test_empty_firmware_is_rejected(tmp_path):
+    r = _pack(tmp_path, "1.2.3", firmware=b"")
+    assert r.returncode != 0
+    assert not (tmp_path / "fw.eimg").exists()
+    assert "image size" in r.stderr
+
+
+def test_cli_rejects_input_equal_to_output(tmp_path):
+    same_path = tmp_path / "firmware.bin"
+    same_path.write_bytes(b"\x5A" * 256)
+    r = subprocess.run(
+        [sys.executable, str(TOOLS / "imgpack.py"),
+         "--input", str(same_path), "--output", str(same_path),
+         "--version=1.2.3", "--load-addr", "0x08010000",
+         "--entry-addr", "0x08010010"],
+        capture_output=True, text=True,
+    )
+    assert r.returncode != 0
+    assert same_path.read_bytes() == b"\x5A" * 256
+    assert "must be different" in r.stderr
