@@ -158,8 +158,10 @@ void main(void) {
 # Install Python tool dependencies
 python3 -m pip install -r requirements.txt
 
-# Pack firmware with eboot image header
-python tools/imgpack.py firmware.bin --output firmware.packed.bin
+# Pack firmware with eboot image header. The input limits (size, load and
+# entry addresses) are listed in quickstart.md and in tools/imgpack.py.
+python tools/imgpack.py --input firmware.bin --output firmware.packed.bin \
+    --version 1.0.0 --load-addr 0x08010000 --entry-addr 0x08010100
 
 # Sign the image
 python tools/sign_image.py firmware.packed.bin --key signing_key.pem
