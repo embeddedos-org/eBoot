@@ -94,7 +94,13 @@ python3 sign_image.py --genkey --output keys/
 cmake -B build -DEBLDR_BOARD=<board> -DCMAKE_BUILD_TYPE=Release \
       -DEBLDR_PRODUCTION_KEY=$(cat keys/public_key.hex)
 
-# Pack a raw firmware binary into an .eimg container.
+# Pack a raw firmware binary into an .eimg container. imgpack refuses what
+# the bootloader refuses (core/image_verify.c): an input that is empty or
+# over 16 MiB (16777216 bytes), checked before it is read; addresses or
+# flags that do not fit 32 bits; and, when --load-addr is non-zero, a load
+# address + size past 0xFFFFFFFF or an --entry-addr outside
+# [load-addr, load-addr + size). --load-addr 0 means "unset" and skips the
+# entry check, as the bootloader does.
 python3 imgpack.py --input firmware.bin --output firmware.eimg \
     --load-addr 0x08010000 --entry-addr 0x08010100 --version 1.0.0
 

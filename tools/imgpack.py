@@ -11,11 +11,30 @@ a proper header (magic, version, CRC32, addresses).
 Usage:
     python imgpack.py --input firmware.bin --output firmware.eimg \
         --version 1.0.0 --load-addr 0x08010000 --entry-addr 0x08010000
+
+Input limits (the same rules core/image_verify.c applies at boot):
+    - The input must be a regular file of 1 to 16 MiB (16777216 bytes).
+      Its size is checked before it is read.
+    - --load-addr, --entry-addr and --flags are hexadecimal and must fit
+      32 bits.
+    - With a non-zero load address, load address + size must not pass
+      0xFFFFFFFF, and the entry address must lie in
+      [load address, load address + size).
+    - A load address of 0 means "unset": the entry-address range check is
+      skipped, as the bootloader skips it.
+
+The output is written to a new temporary file in the output's directory
+and then renamed over the output, so a failed run leaves no partial image.
+If the output is a symlink, its target is replaced and the link is kept.
+An existing output keeps its permission bits.
 """
 
 import argparse
+import os
+import shutil
 import struct
 import sys
+import tempfile
 import zlib
 from pathlib import Path
 
@@ -69,12 +88,17 @@ def parse_uint32(value: str, label: str) -> int:
     return parsed
 
 
-def validate_image_layout(image_size: int, load_addr: int, entry_addr: int) -> None:
-    """Reject images the bootloader will refuse before writing an artifact."""
+def validate_image_size(image_size: int) -> None:
+    """Reject an image size the bootloader refuses (0, or over 16 MiB)."""
     if image_size <= 0 or image_size > MAX_IMAGE_SIZE:
         raise ValueError(
             f"image size must be between 1 and {MAX_IMAGE_SIZE} bytes; got {image_size}"
         )
+
+
+def validate_image_layout(image_size: int, load_addr: int, entry_addr: int) -> None:
+    """Reject images the bootloader will refuse before writing an artifact."""
+    validate_image_size(image_size)
     if not 0 <= load_addr <= UINT32_MAX or not 0 <= entry_addr <= UINT32_MAX:
         raise ValueError("load and entry addresses must fit uint32")
     if load_addr == 0:
@@ -131,6 +155,44 @@ def build_header(
     return header
 
 
+def write_output_atomically(output_path: Path, data: bytes) -> None:
+    """Write data to output_path so that a failed run leaves no partial image.
+
+    The data goes to a temporary file that mkstemp creates exclusively, with
+    a unique name, in the destination directory: it can never be the input,
+    another run's file or a planted symlink. It is then renamed over the
+    destination. An output symlink is written through, as a direct write
+    would: its target is replaced and the link is left in place.
+    """
+    target = output_path.resolve() if output_path.is_symlink() else output_path
+    fd, temp_name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as temp_file:
+            temp_file.write(data)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        try:
+            # Repacking must not loosen an existing image's permissions.
+            shutil.copymode(target, temp_name)
+        except FileNotFoundError:
+            # A new output gets what a plain create would give it; mkstemp's
+            # 0600 would be stricter than the old direct write.
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(temp_name, 0o666 & ~umask)
+        os.replace(temp_name, target)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup_error:
+            print(f"Warning: cannot remove temporary file {temp_name}: "
+                  f"{cleanup_error}", file=sys.stderr)
+        raise
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='eBootloader Image Packer — creates .eimg images'
@@ -155,9 +217,16 @@ def main():
         sys.exit(1)
 
     try:
-        firmware_data = input_path.read_bytes()
+        # Check the size before reading, and never read more than one byte
+        # past the limit, so an oversized input cannot exhaust memory.
+        validate_image_size(input_path.stat().st_size)
+        with input_path.open("rb") as input_file:
+            firmware_data = input_file.read(MAX_IMAGE_SIZE + 1)
     except OSError as e:
         print(f"Error: cannot read input file: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     image_size = len(firmware_data)
 
@@ -181,15 +250,9 @@ def main():
         flags=flags,
     )
 
-    temporary_path = output_path.with_name(output_path.name + ".tmp")
     try:
-        temporary_path.write_bytes(header + firmware_data)
-        temporary_path.replace(output_path)
+        write_output_atomically(output_path, header + firmware_data)
     except OSError as e:
-        try:
-            temporary_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         print(f"Error: cannot write output image: {e}", file=sys.stderr)
         sys.exit(1)
 
