@@ -12,12 +12,24 @@
 #include "eos_fwsvc.h"
 #include "eos_rollback.h"
 #include "eos_image_tlv.h"
+#include "eos_bootctl.h"
 #include <string.h>
 
 int eos_fw_update_begin(eos_fw_update_ctx_t *ctx, eos_slot_t slot)
 {
     if (!ctx) return EOS_ERR_INVALID;
     if (slot != EOS_SLOT_A && slot != EOS_SLOT_B) return EOS_ERR_INVALID;
+
+    /* Never erase the slot the device is running from. The boot control
+     * block names it; when neither copy is valid eos_bootctl_load() falls
+     * back to the factory defaults (Slot A active), which is the slot the
+     * bootloader would boot, so that slot is protected too. Any other load
+     * failure means the active slot is unknown, and erasing either slot
+     * could destroy the running image, so the update is refused. */
+    eos_bootctl_t bctl;
+    int load_rc = eos_bootctl_load(&bctl);
+    if (load_rc != EOS_OK && load_rc != EOS_ERR_CRC) return load_rc;
+    if ((eos_slot_t)bctl.active_slot == slot) return EOS_ERR_INVALID;
 
     memset(ctx, 0, sizeof(*ctx));
     ctx->target_slot = slot;
