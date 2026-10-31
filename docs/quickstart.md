@@ -102,7 +102,7 @@ cmake -B build -DEBLDR_BOARD=<board> -DCMAKE_BUILD_TYPE=Release \
 # [load-addr, load-addr + size). --load-addr 0 means "unset" and skips the
 # entry check, as the bootloader does.
 python3 imgpack.py --input firmware.bin --output firmware.eimg \
-    --load-addr 0x08010000 --entry-addr 0x08010100 --version 1.0.0
+    --load-addr 0x08020000 --entry-addr 0x08020100 --version 1.0.0
 
 # Sign it. This also sets the SHA-256 flag and marks the header as v2.
 python3 sign_image.py --image firmware.eimg --method ed25519 \
