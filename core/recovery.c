@@ -511,6 +511,22 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
     eos_bootctl_save(bctl);
 
+    /* Carry out a factory reset the application requested with
+     * eos_fw_factory_reset(): erase both slots and return the boot control
+     * block to its defaults, which also clears the request. The flag used to
+     * route the boot here and nothing more -- no slot was erased, and since
+     * only FORCE_RECOVERY is cleared above, every later boot came back to
+     * recovery. If an erase fails the flag is left set, so the reset is
+     * retried on the next boot rather than reported as done. */
+    if (bctl->flags & EOS_FLAG_FACTORY_RESET) {
+        if (eos_slot_erase(EOS_SLOT_A) == EOS_OK &&
+            eos_slot_erase(EOS_SLOT_B) == EOS_OK) {
+            eos_bootctl_init_defaults(bctl);
+            if (eos_bootctl_save(bctl) == EOS_OK)
+                eos_boot_log_append(EOS_LOG_FACTORY_RESET, EOS_SLOT_NONE, 0);
+        }
+    }
+
     /* Reset auth state on entry */
     auth_state = RCVR_AUTH_NONE;
     auth_fail_count = 0;

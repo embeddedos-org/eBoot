@@ -609,6 +609,58 @@ TEST(test_info_reports_a_board_without_an_entropy_source)
     ASSERT((out_buf[21] & RCVR_CAP_OTP) != 0);   /* OTP is still there */
 }
 
+/* eos_fw_factory_reset() sets EOS_FLAG_FACTORY_RESET and documents that the
+ * next boot "erases both slots and resets boot control to defaults". The
+ * flag routed the boot into recovery and nothing else: the slots were left
+ * as they were, and the flag was never cleared, so every boot after that
+ * came back to recovery. */
+TEST(test_requested_factory_reset_is_carried_out_on_entry)
+{
+    memset(&sim_flash[SIM_SLOT_A_ADDR], 0x5A, SIM_SLOT_A_SIZE);
+    memset(&sim_flash[SIM_SLOT_B_ADDR], 0x5A, SIM_SLOT_B_SIZE);
+
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    bctl.active_slot = EOS_SLOT_B;
+    bctl.boot_count = 42;
+    ASSERT(eos_bootctl_request_factory_reset(&bctl) == EOS_OK);
+
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+
+    for (uint32_t i = 0; i < SIM_SLOT_A_SIZE; i++)
+        ASSERT(sim_flash[SIM_SLOT_A_ADDR + i] == 0xFF);
+    for (uint32_t i = 0; i < SIM_SLOT_B_SIZE; i++)
+        ASSERT(sim_flash[SIM_SLOT_B_ADDR + i] == 0xFF);
+
+    /* The persisted control block is back to defaults, request cleared. */
+    eos_bootctl_t saved;
+    ASSERT(eos_bootctl_load(&saved) == EOS_OK);
+    ASSERT((saved.flags & EOS_FLAG_FACTORY_RESET) == 0);
+    ASSERT(saved.active_slot == EOS_SLOT_A);
+    ASSERT(saved.boot_count == 0);
+}
+
+/* Only a factory-reset request erases anything: an ordinary entry into
+ * recovery leaves both slots alone. */
+TEST(test_plain_recovery_entry_erases_nothing)
+{
+    memset(&sim_flash[SIM_SLOT_A_ADDR], 0x5A, SIM_SLOT_A_SIZE);
+    memset(&sim_flash[SIM_SLOT_B_ADDR], 0x5A, SIM_SLOT_B_SIZE);
+
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    ASSERT(eos_bootctl_request_recovery(&bctl) == EOS_OK);
+
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+
+    ASSERT(sim_flash[SIM_SLOT_A_ADDR] == 0x5A);
+    ASSERT(sim_flash[SIM_SLOT_B_ADDR] == 0x5A);
+}
+
 int main(void)
 {
     printf("=== test_recovery ===\n");
@@ -621,6 +673,8 @@ int main(void)
     run_test_verify_rejects_oversized_image_before_reading_payload();
     run_test_info_sends_the_packed_layout_the_client_parses_and_nothing_else();
     run_test_info_reports_a_board_without_an_entropy_source();
+    run_test_requested_factory_reset_is_carried_out_on_entry();
+    run_test_plain_recovery_entry_erases_nothing();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
