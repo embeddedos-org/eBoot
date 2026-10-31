@@ -124,41 +124,32 @@ static int stm32f4_flash_write(uint32_t addr, const void *buf, size_t len)
 
 static int stm32f4_flash_erase(uint32_t addr, size_t len)
 {
-    (void)len;
-
-    /* Determine sector number from address */
-    int sector = -1;
-    if      (addr >= 0x08000000 && addr < 0x08004000) sector = 0;
-    else if (addr >= 0x08004000 && addr < 0x08008000) sector = 1;
-    else if (addr >= 0x08008000 && addr < 0x0800C000) sector = 2;
-    else if (addr >= 0x0800C000 && addr < 0x08010000) sector = 3;
-    else if (addr >= 0x08010000 && addr < 0x08020000) sector = 4;
-    else if (addr >= 0x08020000 && addr < 0x08040000) sector = 5;
-    else if (addr >= 0x08040000 && addr < 0x08060000) sector = 6;
-    else if (addr >= 0x08060000 && addr < 0x08080000) sector = 7;
-    else if (addr >= 0x08080000 && addr < 0x080A0000) sector = 8;
-    else if (addr >= 0x080A0000 && addr < 0x080C0000) sector = 9;
-    else if (addr >= 0x080C0000 && addr < 0x080E0000) sector = 10;
-    else if (addr >= 0x080E0000 && addr < 0x08100000) sector = 11;
-
-    if (sector < 0)
+    /* Erase every sector [addr, addr + len) touches. Only the sector
+     * holding addr used to be erased and len was ignored, so erasing a
+     * 256K slot cleared its first sector and left stale image bytes in
+     * the rest -- which the following program step cannot overwrite. */
+    int first, last;
+    if (stm32f4_flash_sector_range(addr, len, &first, &last) != 0)
         return EOS_ERR_INVALID;
 
     flash_unlock();
-    flash_wait_busy();
 
-    FLASH_CR &= ~(0xF << 3);      /* Clear SNB bits */
-    FLASH_CR |= (sector << 3);    /* Set sector number */
-    FLASH_CR |= (1 << 1);         /* SER — sector erase */
-    FLASH_CR |= (1 << 16);        /* STRT — start erase */
+    for (int sector = first; sector <= last; sector++) {
+        flash_wait_busy();
 
-    flash_wait_busy();
+        FLASH_CR &= ~(0xF << 3);      /* Clear SNB bits */
+        FLASH_CR |= (sector << 3);    /* Set sector number */
+        FLASH_CR |= (1 << 1);         /* SER — sector erase */
+        FLASH_CR |= (1 << 16);        /* STRT — start erase */
 
-    if (FLASH_SR & 0xF0) {
-        FLASH_SR = 0xF0;
-        FLASH_CR &= ~(1 << 1);
-        flash_lock();
-        return EOS_ERR_FLASH;
+        flash_wait_busy();
+
+        if (FLASH_SR & 0xF0) {
+            FLASH_SR = 0xF0;
+            FLASH_CR &= ~(1 << 1);
+            flash_lock();
+            return EOS_ERR_FLASH;
+        }
     }
 
     FLASH_CR &= ~(1 << 1); /* Clear SER */

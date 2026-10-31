@@ -45,7 +45,7 @@
 │    48 KB — image scan, boot policy, boot log      │
 ├─ ─ ─ ─ ─ ─ TB-3: Stage-1 → Application ─ ─ ─ ─ ┤
 │              Application Firmware                 │
-│         448 KB × 2 slots (A/B)                    │
+│         256 KB × 2 slots (A/B)                    │
 └──────────────────────────────────────────────────┘
 
 External boundaries:
@@ -80,7 +80,7 @@ External boundaries:
 
 ### 3.2 Flash Contents
 
-- **Regions:** Slot A (448 KB), Slot B (448 KB), Recovery (16 KB), Boot control primary (8 KB), Boot control backup (8 KB), Boot log (8 KB), Device config (24 KB)
+- **Regions:** Slot A (256 KB), Slot B (256 KB), Recovery (128 KB), Boot control primary (128 KB), Boot control backup (128 KB), Boot log (64 KB) -- one or more whole flash sectors each
 - **Attack vector:** Direct flash modification (physical), corrupted OTA writes, bit-flip attacks
 
 ### 3.3 JTAG/SWD Debug Interface

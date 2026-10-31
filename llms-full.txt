@@ -57,14 +57,16 @@ Address Range              Size    Region
 ─────────────────────────────────────────────────────
 0x08000000 - 0x08003FFF    16K     Stage-0 (eBootloader)
 0x08004000 - 0x0800FFFF    48K     Stage-1 (E-Boot)
-0x08010000 - 0x0807FFFF    448K    Slot A (active firmware)
-0x08080000 - 0x080EFFFF    448K    Slot B (candidate firmware)
-0x080F0000 - 0x080F3FFF    16K     Recovery image
-0x080F4000 - 0x080F5FFF    8K      Boot control (primary)
-0x080F6000 - 0x080F7FFF    8K      Boot control (backup)
-0x080F8000 - 0x080F9FFF    8K      Boot log
-0x080FA000 - 0x080FFFFF    24K     Device config / reserved
+0x08010000 - 0x0801FFFF    64K     Boot log
+0x08020000 - 0x0805FFFF    256K    Slot A (active firmware)
+0x08060000 - 0x0809FFFF    256K    Slot B (candidate firmware)
+0x080A0000 - 0x080BFFFF    128K    Recovery image
+0x080C0000 - 0x080DFFFF    128K    Boot control (primary)
+0x080E0000 - 0x080FFFFF    128K    Boot control (backup)
 ```
+
+The F407 erases whole sectors (4 x 16K, 1 x 64K, 7 x 128K), so every
+region owns whole sectors and erasing one never touches another.
 
 ## Boot Flow
 
@@ -190,7 +192,7 @@ The eBootloader implements a staged chain of trust where each boot stage verifie
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                   APPLICATION FIRMWARE                               │
-│                   448 KB × 2 slots (A/B)                            │
+│                   256 KB × 2 slots (A/B)                            │
 │                                                                     │
 │  • Application entry point (vector table)                           │
 │  • Self-test → eos_fw_confirm_running_image()                       │
@@ -657,7 +659,7 @@ Planned for future releases.
 │    48 KB — image scan, boot policy, boot log      │
 ├─ ─ ─ ─ ─ ─ TB-3: Stage-1 → Application ─ ─ ─ ─ ┤
 │              Application Firmware                 │
-│         448 KB × 2 slots (A/B)                    │
+│         256 KB × 2 slots (A/B)                    │
 └──────────────────────────────────────────────────┘
 
 External boundaries:
@@ -692,7 +694,7 @@ External boundaries:
 
 ### 3.2 Flash Contents
 
-- **Regions:** Slot A (448 KB), Slot B (448 KB), Recovery (16 KB), Boot control primary (8 KB), Boot control backup (8 KB), Boot log (8 KB), Device config (24 KB)
+- **Regions:** Slot A (256 KB), Slot B (256 KB), Recovery (128 KB), Boot control primary (128 KB), Boot control backup (128 KB), Boot log (64 KB) -- one or more whole flash sectors each
 - **Attack vector:** Direct flash modification (physical), corrupted OTA writes, bit-flip attacks
 
 ### 3.3 JTAG/SWD Debug Interface
@@ -1477,19 +1479,17 @@ value for `EBLDR_PRODUCTION_KEY`.
 ├──────────────────────────────────────────────────────────┤
 │ 0x08004000  Stage-1 (E-Boot)                    48 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x08010000  Slot A (Active Firmware)            448 KB   │
+│ 0x08010000  Boot Log                             64 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x08080000  Slot B (Candidate Firmware)         448 KB   │
+│ 0x08020000  Slot A (Active Firmware)            256 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F0000  Recovery Image (Golden)              16 KB   │
+│ 0x08060000  Slot B (Candidate Firmware)         256 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F4000  Boot Control (Primary)                8 KB   │
+│ 0x080A0000  Recovery Image (Golden)             128 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F6000  Boot Control (Backup)                 8 KB   │
+│ 0x080C0000  Boot Control (Primary)              128 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F8000  Boot Log                              8 KB   │
-├──────────────────────────────────────────────────────────┤
-│ 0x080FA000  Device Config / Reserved             24 KB   │
+│ 0x080E0000  Boot Control (Backup)               128 KB   │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -1498,8 +1498,8 @@ value for `EBLDR_PRODUCTION_KEY`.
 1. **Stage-0 is never updated in the field** — it must remain immutable
    after manufacturing to guarantee recovery is always possible.
 
-2. **Boot control is dual-copied** — primary at 0x080F4000, backup at
-   0x080F6000. Both carry CRC32 protection. On load, if primary is
+2. **Boot control is dual-copied** — primary at 0x080C0000, backup at
+   0x080E0000. Both carry CRC32 protection. On load, if primary is
    corrupt the backup is used.
 
 3. **Slot A and Slot B are identical in size** — this simplifies the
@@ -1510,6 +1510,11 @@ value for `EBLDR_PRODUCTION_KEY`.
 
 5. **Boot log is a circular buffer** — the `log_head` field in the boot
    control block tracks the write position.
+
+6. **Every region owns whole erase sectors** — flash is erased a sector at
+   a time, so a region that shares a sector is wiped whenever its neighbour
+   is erased. On the F407 (4 x 16K, 1 x 64K, 7 x 128K sectors) that is why
+   the small regions take a full sector each.
 
 ## Adapting to Other MCUs
 
@@ -1698,7 +1703,7 @@ python3 -m pip install -r requirements.txt
 # Pack firmware with eboot image header. The input limits (size, load and
 # entry addresses) are listed in quickstart.md and in tools/imgpack.py.
 python tools/imgpack.py --input firmware.bin --output firmware.packed.bin \
-    --version 1.0.0 --load-addr 0x08010000 --entry-addr 0x08010100
+    --version 1.0.0 --load-addr 0x08020000 --entry-addr 0x08020100
 
 # Sign the image
 python tools/sign_image.py firmware.packed.bin --key signing_key.pem
@@ -1874,7 +1879,7 @@ cmake -B build -DEBLDR_BOARD=<board> -DCMAKE_BUILD_TYPE=Release \
 # [load-addr, load-addr + size). --load-addr 0 means "unset" and skips the
 # entry check, as the bootloader does.
 python3 imgpack.py --input firmware.bin --output firmware.eimg \
-    --load-addr 0x08010000 --entry-addr 0x08010100 --version 1.0.0
+    --load-addr 0x08020000 --entry-addr 0x08020100 --version 1.0.0
 
 # Sign it. This also sets the SHA-256 flag and marks the header as v2.
 python3 sign_image.py --image firmware.eimg --method ed25519 \

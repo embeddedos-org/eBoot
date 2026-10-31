@@ -8,19 +8,17 @@
 ├──────────────────────────────────────────────────────────┤
 │ 0x08004000  Stage-1 (E-Boot)                    48 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x08010000  Slot A (Active Firmware)            448 KB   │
+│ 0x08010000  Boot Log                             64 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x08080000  Slot B (Candidate Firmware)         448 KB   │
+│ 0x08020000  Slot A (Active Firmware)            256 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F0000  Recovery Image (Golden)              16 KB   │
+│ 0x08060000  Slot B (Candidate Firmware)         256 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F4000  Boot Control (Primary)                8 KB   │
+│ 0x080A0000  Recovery Image (Golden)             128 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F6000  Boot Control (Backup)                 8 KB   │
+│ 0x080C0000  Boot Control (Primary)              128 KB   │
 ├──────────────────────────────────────────────────────────┤
-│ 0x080F8000  Boot Log                              8 KB   │
-├──────────────────────────────────────────────────────────┤
-│ 0x080FA000  Device Config / Reserved             24 KB   │
+│ 0x080E0000  Boot Control (Backup)               128 KB   │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -29,8 +27,8 @@
 1. **Stage-0 is never updated in the field** — it must remain immutable
    after manufacturing to guarantee recovery is always possible.
 
-2. **Boot control is dual-copied** — primary at 0x080F4000, backup at
-   0x080F6000. Both carry CRC32 protection. On load, if primary is
+2. **Boot control is dual-copied** — primary at 0x080C0000, backup at
+   0x080E0000. Both carry CRC32 protection. On load, if primary is
    corrupt the backup is used.
 
 3. **Slot A and Slot B are identical in size** — this simplifies the
@@ -41,6 +39,11 @@
 
 5. **Boot log is a circular buffer** — the `log_head` field in the boot
    control block tracks the write position.
+
+6. **Every region owns whole erase sectors** — flash is erased a sector at
+   a time, so a region that shares a sector is wiped whenever its neighbour
+   is erased. On the F407 (4 x 16K, 1 x 64K, 7 x 128K sectors) that is why
+   the small regions take a full sector each.
 
 ## Adapting to Other MCUs
 
