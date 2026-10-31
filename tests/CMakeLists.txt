@@ -242,6 +242,16 @@ target_link_libraries(eboot_test_keystore_production PRIVATE eboot_core)
 add_test(NAME test_keystore_production COMMAND eboot_test_keystore_production)
 list(APPEND EBLDR_UNIT_TESTS test_keystore_production)
 
+# --- test_watchdog_rollback: a hung image rolls back instead of entering recovery ---
+# Compiles stage-0's recovery trigger check for the host (stage0/ is otherwise
+# built only by a cross build) and runs it ahead of the stage-1 boot policy.
+add_executable(eboot_test_watchdog_rollback
+    unit/test_watchdog_rollback.c
+    ../stage0/recovery_entry.c)
+target_link_libraries(eboot_test_watchdog_rollback PRIVATE eboot_core)
+add_test(NAME test_watchdog_rollback COMMAND eboot_test_watchdog_rollback)
+list(APPEND EBLDR_UNIT_TESTS test_watchdog_rollback)
+
 # --- Valgrind test targets ---
 #
 # The list is derived from the suites registered above, not written out again.
