@@ -242,6 +242,19 @@ target_link_libraries(eboot_test_keystore_production PRIVATE eboot_core)
 add_test(NAME test_keystore_production COMMAND eboot_test_keystore_production)
 list(APPEND EBLDR_UNIT_TESTS test_keystore_production)
 
+# --- test_stage0_boot_log: stage-0 opens the boot log and hands the head on ---
+# stage0/ is otherwise only built by a cross build. These three files have no
+# architecture-specific code, so the suite compiles them for the host; jump()
+# and the recovery UART are simulated by the board ops in the test.
+add_executable(eboot_test_stage0_boot_log
+    unit/test_stage0_boot_log.c
+    ../stage0/jump_stage1.c
+    ../stage0/recovery_entry.c
+    ../stage0/watchdog.c)
+target_link_libraries(eboot_test_stage0_boot_log PRIVATE eboot_core)
+add_test(NAME test_stage0_boot_log COMMAND eboot_test_stage0_boot_log)
+list(APPEND EBLDR_UNIT_TESTS test_stage0_boot_log)
+
 # --- Valgrind test targets ---
 #
 # The list is derived from the suites registered above, not written out again.

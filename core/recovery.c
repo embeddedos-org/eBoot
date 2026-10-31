@@ -509,6 +509,9 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
     eos_hal_uart_init(RCVR_BAUD_RATE);
 
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
+    /* Persist the log head with the flag, so the entries the caller and
+     * this function appended are not overwritten on the next boot. */
+    bctl->log_head = eos_boot_log_get_head();
     eos_bootctl_save(bctl);
 
     /* Reset auth state on entry */
