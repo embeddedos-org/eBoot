@@ -24,11 +24,12 @@ bool ebldr_recovery_triggered(const eos_bootctl_t *bctl)
     if (bctl->flags & EOS_FLAG_FACTORY_RESET)
         return true;
 
-    /* Watchdog reset with too many boot attempts */
-    eos_reset_reason_t reason = eos_hal_get_reset_reason();
-    if (reason == EOS_RESET_WATCHDOG &&
-        bctl->boot_attempts >= bctl->max_attempts)
-        return true;
+    /* Exhausted boot attempts are not a recovery trigger. An image that
+     * hangs is reset by the watchdog until boot_attempts reaches
+     * max_attempts, and that is the condition on which stage-1's
+     * eos_boot_policy_select() rolls back to the other slot. Diverting it
+     * to recovery here meant the rollback never ran. Stage-1 still enters
+     * recovery itself when there is no valid slot to roll back to. */
 
     return false;
 }
