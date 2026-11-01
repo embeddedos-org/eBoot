@@ -274,6 +274,42 @@ TEST(test_the_ordinary_boot_path_is_unaffected_by_the_step_4_change)
     ASSERT(entry == 0x20000001U);
 }
 
+/* ---- Anti-rollback counter placement ----
+ *
+ * eos_secure_boot_update_rollback() wrote its 4 bytes at OTP 0x180, which is
+ * where core/recovery.c reads the recovery shared secret. OTP bits only move
+ * one way, so every counter update permanently corrupted the secret and
+ * locked authenticated recovery out. It must write only the security_version
+ * field: OTP base 0x100 + 0x44 per docs/key_lifecycle.md 3.2. */
+#define OTP_ROLLBACK_OFFSET        0x144
+#define OTP_RECOVERY_SECRET_OFFSET 0x180
+#define OTP_RECOVERY_SECRET_SIZE   32
+
+TEST(test_update_rollback_writes_only_the_counter_field)
+{
+    provide_otp_write = 1;
+    reset_fixture();
+    memset(sim_otp, 0xA5, sizeof(sim_otp));
+
+    ASSERT(eos_secure_boot_update_rollback(0x01020304U) == EOS_OK);
+    ASSERT(otp_write_calls == 1);
+
+    /* The counter, big-endian, in its own field. */
+    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 0] == 0x01);
+    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 1] == 0x02);
+    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 2] == 0x03);
+    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 3] == 0x04);
+
+    /* Nothing else -- the recovery secret above all -- is touched. */
+    for (uint32_t i = 0; i < OTP_SIZE; i++) {
+        if (i >= OTP_ROLLBACK_OFFSET && i < OTP_ROLLBACK_OFFSET + 4)
+            continue;
+        ASSERT(sim_otp[i] == 0xA5);
+    }
+    for (uint32_t i = 0; i < OTP_RECOVERY_SECRET_SIZE; i++)
+        ASSERT(sim_otp[OTP_RECOVERY_SECRET_OFFSET + i] == 0xA5);
+}
+
 int main(void)
 {
     printf("=== eBootloader: Secure Boot Debug-Lock Policy Tests ===\n\n");
@@ -285,6 +321,7 @@ int main(void)
     run_test_the_same_image_boots_when_no_debug_lock_is_asked_for();
     run_test_secure_boot_proceeds_when_the_debug_lock_succeeds();
     run_test_the_ordinary_boot_path_is_unaffected_by_the_step_4_change();
+    run_test_update_rollback_writes_only_the_counter_field();
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
