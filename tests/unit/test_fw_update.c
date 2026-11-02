@@ -389,6 +389,54 @@ TEST(test_finalize_accepts_tlv_counter_equal_to_floor)
     ASSERT(eos_fw_update_finalize(&ctx, EOS_UPGRADE_TEST) == EOS_OK);
 }
 
+/* ---- Active-slot protection ----
+ *
+ * begin() erases the whole target slot before a byte of the new image
+ * arrives. Pointing it at the slot the device is running from destroyed
+ * the running firmware; it must refuse and leave that slot untouched.
+ */
+
+static void persist_bootctl_active(eos_slot_t active)
+{
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    bctl.active_slot = active;
+    ASSERT(eos_bootctl_save(&bctl) == EOS_OK);
+}
+
+TEST(test_begin_refuses_active_slot_and_leaves_it_intact)
+{
+    eos_fw_update_ctx_t ctx;
+
+    persist_bootctl_active(EOS_SLOT_B);
+    memset(&sim_flash[SIM_SLOT_B_ADDR], 0x5A, SIM_SLOT_B_SIZE);
+
+    ASSERT(eos_fw_update_begin(&ctx, EOS_SLOT_B) == EOS_ERR_INVALID);
+    ASSERT(sim_flash[SIM_SLOT_B_ADDR] == 0x5A);
+    ASSERT(sim_flash[SIM_SLOT_B_ADDR + SIM_SLOT_B_SIZE - 1] == 0x5A);
+}
+
+TEST(test_begin_accepts_inactive_slot)
+{
+    eos_fw_update_ctx_t ctx;
+
+    persist_bootctl_active(EOS_SLOT_A);
+    ASSERT(eos_fw_update_begin(&ctx, EOS_SLOT_B) == EOS_OK);
+    ASSERT(eos_fw_update_get_state(&ctx) == EOS_FW_STATE_HEADER);
+}
+
+TEST(test_begin_refuses_default_active_slot_without_bootctl)
+{
+    eos_fw_update_ctx_t ctx;
+
+    /* No valid boot control block: the bootloader boots its defaults,
+     * Slot A, so Slot A is the running image and must not be erased. */
+    memset(&sim_flash[SIM_SLOT_A_ADDR], 0x5A, SIM_SLOT_A_SIZE);
+
+    ASSERT(eos_fw_update_begin(&ctx, EOS_SLOT_A) == EOS_ERR_INVALID);
+    ASSERT(sim_flash[SIM_SLOT_A_ADDR] == 0x5A);
+}
+
 /* ---- Direct reads: eos_rollback_read_image_counter ----
  *
  * The finalize tests above exercise the counter reader indirectly,
@@ -469,6 +517,9 @@ int main(void)
     run_test_bytes_wanted_tracks_the_remaining_container();
     run_test_trailing_byte_is_rejected_the_same_across_chunk_boundaries();
     run_test_finalize_accepts_tlv_counter_equal_to_floor();
+    run_test_begin_refuses_active_slot_and_leaves_it_intact();
+    run_test_begin_accepts_inactive_slot();
+    run_test_begin_refuses_default_active_slot_without_bootctl();
     run_test_read_image_counter_returns_tlv_counter();
     run_test_read_image_counter_no_tlv_reports_zero();
     run_test_read_image_counter_rejects_null_out();

@@ -16,10 +16,14 @@
 #include "eos_hal.h"
 #include <string.h>
 
-/* OTP offsets for root-of-trust */
+/* OTP offsets for root-of-trust. The map is docs/key_lifecycle.md 3.2
+ * with OTP base 0x100: key slots at 0x100/0x120 and the revoke mask at
+ * 0x140 (core/keystore.c), the security_version counter at 0x144. 0x180
+ * holds the recovery shared secret (core/recovery.c), so the counter must
+ * never be written there. */
 #define OTP_KEY_HASH_OFFSET     0x100
 #define OTP_KEY_HASH_SIZE       32
-#define OTP_ROLLBACK_OFFSET     0x180
+#define OTP_ROLLBACK_OFFSET     0x144
 #define OTP_DEBUG_LOCK_OFFSET   0x1F0
 
 /* Global attestation log — persisted in RAM for kernel to read */

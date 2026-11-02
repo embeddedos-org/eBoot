@@ -242,6 +242,29 @@ target_link_libraries(eboot_test_keystore_production PRIVATE eboot_core)
 add_test(NAME test_keystore_production COMMAND eboot_test_keystore_production)
 list(APPEND EBLDR_UNIT_TESTS test_keystore_production)
 
+# --- test_stage0_boot_log: stage-0 opens the boot log and hands the head on ---
+# stage0/ is otherwise only built by a cross build. These three files have no
+# architecture-specific code, so the suite compiles them for the host; jump()
+# and the recovery UART are simulated by the board ops in the test.
+add_executable(eboot_test_stage0_boot_log
+    unit/test_stage0_boot_log.c
+    ../stage0/jump_stage1.c
+    ../stage0/recovery_entry.c
+    ../stage0/watchdog.c)
+target_link_libraries(eboot_test_stage0_boot_log PRIVATE eboot_core)
+add_test(NAME test_stage0_boot_log COMMAND eboot_test_stage0_boot_log)
+list(APPEND EBLDR_UNIT_TESTS test_stage0_boot_log)
+
+# --- test_watchdog_rollback: a hung image rolls back instead of entering recovery ---
+# Compiles stage-0's recovery trigger check for the host (stage0/ is otherwise
+# built only by a cross build) and runs it ahead of the stage-1 boot policy.
+add_executable(eboot_test_watchdog_rollback
+    unit/test_watchdog_rollback.c
+    ../stage0/recovery_entry.c)
+target_link_libraries(eboot_test_watchdog_rollback PRIVATE eboot_core)
+add_test(NAME test_watchdog_rollback COMMAND eboot_test_watchdog_rollback)
+list(APPEND EBLDR_UNIT_TESTS test_watchdog_rollback)
+
 # --- test_stm32f4_flash_layout: erase covers its range, regions own their sectors ---
 # board_stm32f4.c is cross-only, but its sector range helper and memory map
 # live in board_stm32f4.h as plain C.
