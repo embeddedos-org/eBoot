@@ -22,7 +22,9 @@ extern bool ebldr_recovery_triggered(const eos_bootctl_t *bctl);
 extern int  eos_recovery_enter(eos_bootctl_t *bctl);
 
 /* Forward declarations from boot_log */
+extern void eos_boot_log_init(uint32_t head);
 extern void eos_boot_log_append(uint32_t event, uint32_t slot, uint32_t detail);
+extern uint32_t eos_boot_log_get_head(void);
 
 /**
  * @brief Stage-0 main entry point.
@@ -41,6 +43,11 @@ void ebldr_stage0_main(void)
     /* Load boot control block */
     int rc = eos_bootctl_load(&bctl);
     (void)rc; /* defaults applied if both copies corrupt */
+
+    /* Open the boot log at the head the control block persisted. Until
+     * this runs eos_boot_log_append() is a no-op, so every stage-0 entry
+     * below was silently dropped. */
+    eos_boot_log_init(bctl.log_head);
 
     /* Record reset reason */
     bctl.last_reset_reason = eos_hal_get_reset_reason();
@@ -126,6 +133,13 @@ void ebldr_stage0_main(void)
         }
         eos_boot_log_append(EOS_LOG_IMAGE_VALID, EOS_SLOT_NONE, 0);
 #endif
+
+        /* Stage-1 is a separate image that re-opens the log at the head it
+         * loads from the control block. Persist the head past stage-0's
+         * entries, or stage-1 appends over them. A failed save costs the
+         * log, not the boot, so it does not stop the jump. */
+        bctl.log_head = eos_boot_log_get_head();
+        (void)eos_bootctl_save(&bctl);
 
         /* Stage-1 is located immediately after stage-0 in flash */
         eos_hal_disable_interrupts();
