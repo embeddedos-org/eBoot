@@ -56,7 +56,7 @@ The eBootloader implements a staged chain of trust where each boot stage verifie
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                   APPLICATION FIRMWARE                               │
-│                   448 KB × 2 slots (A/B)                            │
+│                   256 KB × 2 slots (A/B)                            │
 │                                                                     │
 │  • Application entry point (vector table)                           │
 │  • Self-test → eos_fw_confirm_running_image()                       │

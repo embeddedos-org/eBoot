@@ -34,14 +34,16 @@ Address Range              Size    Region
 ─────────────────────────────────────────────────────
 0x08000000 - 0x08003FFF    16K     Stage-0 (eBootloader)
 0x08004000 - 0x0800FFFF    48K     Stage-1 (E-Boot)
-0x08010000 - 0x0807FFFF    448K    Slot A (active firmware)
-0x08080000 - 0x080EFFFF    448K    Slot B (candidate firmware)
-0x080F0000 - 0x080F3FFF    16K     Recovery image
-0x080F4000 - 0x080F5FFF    8K      Boot control (primary)
-0x080F6000 - 0x080F7FFF    8K      Boot control (backup)
-0x080F8000 - 0x080F9FFF    8K      Boot log
-0x080FA000 - 0x080FFFFF    24K     Device config / reserved
+0x08010000 - 0x0801FFFF    64K     Boot log
+0x08020000 - 0x0805FFFF    256K    Slot A (active firmware)
+0x08060000 - 0x0809FFFF    256K    Slot B (candidate firmware)
+0x080A0000 - 0x080BFFFF    128K    Recovery image
+0x080C0000 - 0x080DFFFF    128K    Boot control (primary)
+0x080E0000 - 0x080FFFFF    128K    Boot control (backup)
 ```
+
+The F407 erases whole sectors (4 x 16K, 1 x 64K, 7 x 128K), so every
+region owns whole sectors and erasing one never touches another.
 
 ## Boot Flow
 

@@ -265,6 +265,17 @@ target_link_libraries(eboot_test_watchdog_rollback PRIVATE eboot_core)
 add_test(NAME test_watchdog_rollback COMMAND eboot_test_watchdog_rollback)
 list(APPEND EBLDR_UNIT_TESTS test_watchdog_rollback)
 
+# --- test_stm32f4_flash_layout: erase covers its range, regions own their sectors ---
+# board_stm32f4.c is cross-only, but its sector range helper and memory map
+# live in board_stm32f4.h as plain C.
+add_executable(eboot_test_stm32f4_flash_layout unit/test_stm32f4_flash_layout.c)
+target_include_directories(eboot_test_stm32f4_flash_layout PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/stm32f4
+)
+target_link_libraries(eboot_test_stm32f4_flash_layout PRIVATE eboot_core)
+add_test(NAME test_stm32f4_flash_layout COMMAND eboot_test_stm32f4_flash_layout)
+list(APPEND EBLDR_UNIT_TESTS test_stm32f4_flash_layout)
+
 # --- Valgrind test targets ---
 #
 # The list is derived from the suites registered above, not written out again.
