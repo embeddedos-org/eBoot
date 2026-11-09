@@ -327,3 +327,17 @@ foreach(_t IN LISTS _eboot_test_targets)
     endif()
 endforeach()
 
+# --- printf format guard ---
+#
+# A format warning in a unit-test program is an error: test_boot_log once
+# printed "11/<garbage> tests passed" behind a warning nobody acted on.
+# Applies to the unit-test programs in this directory (and the sources they
+# compile directly); the libraries, firmware and tests/fuzz are unchanged.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    foreach(_t IN LISTS _eboot_test_targets)
+        get_target_property(_type ${_t} TYPE)
+        if(_type STREQUAL "EXECUTABLE")
+            target_compile_options(${_t} PRIVATE -Werror=format)
+        endif()
+    endforeach()
+endif()
