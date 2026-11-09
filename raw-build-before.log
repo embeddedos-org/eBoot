@@ -1,0 +1,6 @@
+# BEFORE: tests/CMakeLists.txt from the fix, tests/unit/test_boot_log.c at base 8f29290
+$ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEBLDR_BUILD_TESTS=ON && cmake --build build -j2
+FAILED: [code=1] tests/CMakeFiles/eboot_test_boot_log.dir/unit/test_boot_log.c.o 
+<repo>/tests/unit/test_boot_log.c:303:19: error: more '%' conversions than data arguments [-Werror,-Wformat-insufficient-args]
+ninja: build stopped: subcommand failed.
+build exit code: 1

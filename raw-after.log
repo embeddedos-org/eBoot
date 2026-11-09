@@ -1,0 +1,23 @@
+# AFTER: fix tree (amended commit)
+$ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEBLDR_BUILD_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+configure exit code: 0
+$ cmake --build build -j2
+build exit code: 0
+warnings mentioning format: 0
+other warnings: core/keystore.c:45:2: warning: "eBoot: building with the RFC 8032 test-vector public key as the secure-boot trust anchor; define EBLDR_PRODUCTION_KEY for any real device" [-W#warnings]
+$ jq: compile entries with -Werror=format, by target object dir
+  total entries with flag: 42
+  entries with flag in eboot_core / eboot_hal / eboot_stage1 library objects: 0 of 42
+  non-tests/ sources compiled into test programs with the flag:
+    build/tests/generated/test_production_key.c
+    core/keystore.c
+    stage0/jump_stage1.c
+    stage0/recovery_entry.c
+    stage0/watchdog.c
+$ ./build/tests/eboot_test_boot_log | tail -1
+11/11 tests passed
+$ ctest --test-dir build --output-on-failure --no-tests=error -j2 --timeout 120
+100% tests passed out of 36
+$ git diff --check 8f29290 HEAD
+no whitespace errors
+head: bdfe6d3

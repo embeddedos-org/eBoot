@@ -1,0 +1,17 @@
+# master CI run 41501662283 (head 8f292909): every -Wformat warning, by job
+$ gh run view 41501662283 -R embeddedos-org/eBoot --log | grep -E 'Wformat|C compiler identification'
+Build & Test (Linux x86_64)	-- The C compiler identification is GNU 12.3.0
+Build & Test (Linux x86_64)	tests/unit/test_boot_log.c:303:19: warning: format ‘%d’ expects a matching ‘int’ argument [-Wformat=]
+Fuzz Harness Build	-- The C compiler identification is Clang 14.0.0
+Fuzz Harness Build	tests/unit/test_boot_log.c:303:19: warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+Cross-compile ARM Cortex-M4	-- The C compiler identification is GNU 10.3.1
+Cross-compile ARM Cortex-M4	core/power_init.c:84:32: warning: format '%u' expects argument of type 'unsigned int', but argument 3 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/bmc_handoff.c:55:34: warning: format '%x' expects argument of type 'unsigned int', but argument 2 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/bmc_handoff.c:55:55: warning: format '%x' expects argument of type 'unsigned int', but argument 5 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/bmc_handoff.c:55:64: warning: format '%u' expects argument of type 'unsigned int', but argument 6 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/ecc_scrub.c:65:28: warning: format '%x' expects argument of type 'unsigned int', but argument 2 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/ecc_scrub.c:65:36: warning: format '%u' expects argument of type 'unsigned int', but argument 3 has type 'long unsigned int' [-Wformat=]
+Cross-compile ARM Cortex-M4	core/ecc_scrub.c:65:47: warning: format '%u' expects argument of type 'unsigned int', but argument 4 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/ecc_scrub.c:65:50: warning: format '%u' expects argument of type 'unsigned int', but argument 5 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/ecc_scrub.c:65:56: warning: format '%u' expects argument of type 'unsigned int', but argument 6 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
+Cross-compile ARM Cortex-M4	core/ecc_scrub.c:65:62: warning: format '%u' expects argument of type 'unsigned int', but argument 7 has type 'uint32_t' {aka 'const long unsigned int'} [-Wformat=]
