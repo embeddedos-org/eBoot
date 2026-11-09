@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+static int tests_run = 0;
 static int tests_passed = 0;
 
 #define ASSERT(condition)                                                     \
@@ -32,6 +33,7 @@ static int tests_passed = 0;
 #define RUN(test)                                                             \
     do {                                                                      \
         reset_fixture();                                                      \
+        tests_run++;                                                          \
         test();                                                               \
         tests_passed++;                                                       \
         printf("[PASS] %s\n", #test);                                         \
@@ -300,6 +302,6 @@ int main(void)
     RUN(test_clear_reports_erase_failure);
     RUN(test_append_does_not_advance_head_when_write_fails);
     RUN(test_entry_layout_is_stable);
-    printf("\n%d/%d tests passed\n", tests_passed);
+    printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return 0;
 }
