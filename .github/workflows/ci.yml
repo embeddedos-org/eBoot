@@ -215,7 +215,7 @@ jobs:
         run: |
           cmake -B build/release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=OFF
+            -DEBLDR_BUILD_TESTS=OFF
           cmake --build build/release --parallel $(nproc)
 
       - name: Package artifacts
