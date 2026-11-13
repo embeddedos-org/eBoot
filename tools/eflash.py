@@ -326,25 +326,36 @@ def cmd_flash(args):
         sys.exit(1)
 
     address = args.address or cfg.get("flash_address", "")
-    flash_cmd = flash_cmd.replace("{image}", str(image))
-    flash_cmd = flash_cmd.replace("{address}", address)
-    flash_cmd = flash_cmd.replace("{board}", board)
+
+    # Every command this run will execute takes the same template values:
+    # filling in only flash_command left reset_command running with a
+    # literal "{port}" on ESP32.
+    verify_tpl = (cfg.get("verify_command") or "") if args.verify else ""
+    reset_tpl = (cfg.get("reset_command") or "") if args.reset else ""
+    templates = [flash_cmd, verify_tpl, reset_tpl]
 
     # Handle extra args (e.g., --port for ESP32, --device for x86)
     port = getattr(args, "port", None)
     device = getattr(args, "device", None)
-    if port:
-        flash_cmd = flash_cmd.replace("{port}", port)
-    elif "{port}" in flash_cmd:
+    if not port and any("{port}" in t for t in templates):
         system = platform.system()
-        default_port = "/dev/ttyUSB0" if system == "Linux" else "COM3"
-        print(f"  No --port specified, using default: {default_port}")
-        flash_cmd = flash_cmd.replace("{port}", default_port)
-    if device:
-        flash_cmd = flash_cmd.replace("{device}", device)
-    elif "{device}" in flash_cmd:
+        port = "/dev/ttyUSB0" if system == "Linux" else "COM3"
+        print(f"  No --port specified, using default: {port}")
+    if not device and any("{device}" in t for t in templates):
         print("Error: --device is required for this board", file=sys.stderr)
         sys.exit(1)
+
+    def fill(template: str) -> str:
+        cmd = template.replace("{image}", str(image))
+        cmd = cmd.replace("{address}", address)
+        cmd = cmd.replace("{board}", board)
+        if port:
+            cmd = cmd.replace("{port}", port)
+        if device:
+            cmd = cmd.replace("{device}", device)
+        return cmd
+
+    flash_cmd = fill(flash_cmd)
 
     image_size = Path(image).stat().st_size
     print(f"eFlash — Flashing {board}")
@@ -358,15 +369,14 @@ def cmd_flash(args):
 
     if rc == 0:
         # Optional verify
-        if args.verify and cfg.get("verify_command"):
-            verify_cmd = cfg["verify_command"].replace("{image}", str(image))
+        if verify_tpl:
             print("\nVerifying...")
-            rc = run_command(verify_cmd, args.dry_run)
+            rc = run_command(fill(verify_tpl), args.dry_run)
 
         # Optional reset
-        if rc == 0 and args.reset and cfg.get("reset_command"):
+        if rc == 0 and reset_tpl:
             print("\nResetting device...")
-            rc = run_command(cfg["reset_command"], args.dry_run)
+            rc = run_command(fill(reset_tpl), args.dry_run)
 
     if rc == 0:
         print("\nFlash complete.")
