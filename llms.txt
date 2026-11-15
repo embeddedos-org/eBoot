@@ -23,6 +23,7 @@ options: no build of this bootloader skips either.
 - [Update flow](docs/update-flow.md) — firmware update and A/B slot flow
 - [Key lifecycle](docs/key_lifecycle.md) — key generation, provisioning, rotation, revocation
 - [Memory map](docs/memory-map.md) — flash/RAM layout for stages and slots
+- [Board ops status](docs/board-ops-status.md) — what each board port's ops table provides: code, stub or absent (generated)
 - [Installation & usage](docs/installation_usage.md) — building and using eBoot
 - [Quickstart](docs/quickstart.md) — the shortest path to a booting image
 - [eFlash](docs/eflash.md) — the flash tooling surface
