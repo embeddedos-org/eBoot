@@ -82,6 +82,21 @@ static const eos_board_ops_t bare_ops = {
 };
 """
 
+# demo_flash_write and demo_ready are only CALLED here, each in front of a
+# block. A call in that position has the shape of a definition.
+CALLS = """
+static int helper(uint32_t addr) { (void)addr; return EOS_OK; }
+
+static int board_init(void)
+{
+    if (demo_flash_write(0, NULL, 0)) {
+        return EOS_ERR_GENERIC;
+    }
+    while (demo_ready()) { }
+    return EOS_OK;
+}
+"""
+
 
 def make_tree(tmp_path, boards):
     (tmp_path / "include").mkdir()
@@ -123,6 +138,23 @@ def test_comment_stripping_keeps_line_numbers():
     assert stripped.split() == ["a", "b", "c"]
 
 
+def test_comment_markers_inside_a_string_are_not_comments():
+    text = 'puts("http://x /* y */"); // real comment\n'
+    stripped = bos.strip_comments(text)
+    assert '"http://x /* y */"' in stripped
+    assert "real comment" not in stripped
+    assert len(stripped) == len(text)
+
+
+def test_literal_contents_can_be_blanked_without_moving_anything():
+    text = "a = '{'; s = \"}\\\"{\"; /* { */ b = '\\'';"
+    blanked = bos.strip_comments(text, literals=True)
+    assert len(blanked) == len(text)
+    assert "{" not in blanked and "}" not in blanked
+    assert blanked.startswith("a = ' '; s = \"")
+    assert blanked.rstrip().endswith("b = '  ';")
+
+
 def test_unbalanced_braces_are_an_error():
     with pytest.raises(ValueError, match="unbalanced"):
         bos.matching_brace("{ {", 0)
@@ -151,6 +183,11 @@ def test_a_board_file_without_a_table_is_an_error():
     ("\n#ifdef REAL\n return EOS_OK;\n#endif\n", "int", bos.CODE),
     ("return ticks;", "uint32_t", bos.CODE),          # a variable, not a constant
     ("(void)a; (void)b; return EOS_OK;", "int", bos.OK_STUB),
+    ("(void)(a); (void) ( b ); return (EOS_OK);", "int", bos.OK_STUB),
+    ("return ((0));", "int", bos.OK_STUB),
+    ("return (EOS_ERR_GENERIC);", "int", bos.ERR_STUB),
+    ("return (a) + (b);", "int", bos.CODE),          # not one parenthesised value
+    ("(void)f(a); return EOS_OK;", "int", bos.CODE),  # a call, result discarded
     ("return 0;", "int", bos.OK_STUB),
     ("(void)a; return EOS_ERR_GENERIC;", "int", bos.ERR_STUB),
     ("return -1;", "int", bos.ERR_STUB),
@@ -212,6 +249,37 @@ def test_a_prototype_is_not_a_definition():
     assert bos.classify(text, "f", "int") == bos.EXTERN
 
 
+def test_a_call_followed_by_a_block_is_not_a_definition():
+    assert bos.function_bodies(CALLS, "demo_flash_write") == []
+    assert bos.function_bodies(CALLS, "demo_ready") == []
+    # called here, defined somewhere else: extern, not "returns an error"
+    assert bos.classify(CALLS, "demo_flash_write", "int") == bos.EXTERN
+    # the definitions in the same text are still found
+    assert bos.classify(CALLS, "helper", "int") == bos.OK_STUB
+    assert bos.classify(CALLS, "board_init", "int") == bos.CODE
+
+
+def test_a_call_site_does_not_change_the_kind_of_the_definition():
+    text = CALLS + (
+        "static int demo_flash_write(uint32_t a, const void *b, size_t n)\n"
+        "{\n    (void)a; (void)b; (void)n;\n    return EOS_OK;\n}\n")
+    # read as two bodies, the call's block made this stub look like code
+    assert bos.function_bodies(text, "demo_flash_write") == [
+        "\n    (void)a; (void)b; (void)n;\n    return EOS_OK;\n"]
+    assert bos.classify(text, "demo_flash_write", "int") == bos.OK_STUB
+
+
+def test_a_brace_in_a_literal_neither_ends_nor_hides_a_body():
+    text = ("static void put(void) { uart_putc('{'); }\n"
+            "static int f(void) { return EOS_OK; }\n"
+            "static void say(void) { uart_puts(\"}\"); }\n"
+            "static int g(void) { return EOS_OK; }\n")
+    assert bos.function_bodies(text, "put") == [" uart_putc('{'); "]
+    assert bos.function_bodies(text, "say") == [" uart_puts(\"}\"); "]
+    assert bos.classify(text, "f", "int") == bos.OK_STUB
+    assert bos.classify(text, "g", "int") == bos.OK_STUB
+
+
 # ---- the whole document --------------------------------------------------
 
 def test_collect_counts_every_board_and_operation(tmp_path):
@@ -233,6 +301,25 @@ def test_a_tree_without_boards_is_an_error(tmp_path):
         bos.collect(root)
 
 
+def test_errors_name_the_file_they_are_about(tmp_path):
+    root = make_tree(tmp_path, {"demo": BOARD, "broken": "int unrelated;\n",
+                                "open": BOARD + "static void f(void) {\n"})
+    with pytest.raises(ValueError, match=(
+            r"^boards/broken/board_broken\.c: no eos_board_ops_t table$")):
+        bos.collect(root)
+    (root / "boards" / "broken" / "board_broken.c").write_text(BARE, encoding="utf-8")
+    # one brace too many anywhere in a file: refused, not guessed around
+    with pytest.raises(ValueError, match=(
+            r"^boards/open/board_open\.c: unbalanced braces: "
+            r"\d+ '\{' and \d+ '\}'$")):
+        bos.collect(root)
+    (root / "include" / "eos_hal.h").write_text(
+        "typedef struct { int x; } other_t;", encoding="utf-8")
+    with pytest.raises(ValueError, match=(
+            r"^include/eos_hal\.h: eos_board_ops_t not found$")):
+        bos.collect(root)
+
+
 def test_markdown_names_the_ports_that_report_success_without_working(tmp_path):
     status = bos.collect(make_tree(tmp_path, {"demo": BOARD, "bare": BARE}))
     text = bos.render_markdown(status)
@@ -240,6 +327,10 @@ def test_markdown_names_the_ports_that_report_success_without_working(tmp_path):
     assert "| `demo` | C | S! | E | 0 | K | C | X |" in text
     assert "| `bare` | – | – | – | – | – | – | – |" in text
     assert "not a supported board" in " ".join(text.split())
+    # an absent operation is not always refused: the legend sends the reader
+    # to the wrapper instead of promising an error
+    assert "`hal/hal_core.c`" in text
+    assert "returns an error or a default" not in text
     assert json.loads(bos.render_json(status)) == status
 
 
@@ -255,9 +346,12 @@ def test_markdown_says_none_when_no_operation_is_stubbed(tmp_path):
 def test_write_then_check_then_drift(tmp_path, capsys):
     root = make_tree(tmp_path, {"demo": BOARD})
     assert bos.main(["--check"], root=root) == 1          # nothing written yet
-    assert "out of date: docs/board-ops-status.json" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert ("out of date: docs/board-ops-status.json "
+            "(run python3 tools/board_ops_status.py)") in out
 
     assert bos.main([], root=root) == 0
+    assert b"\r" not in (root / "docs" / "board-ops-status.md").read_bytes()
     assert "wrote docs/board-ops-status.md" in capsys.readouterr().out
     assert bos.main(["--check"], root=root) == 0
     assert capsys.readouterr().out == ""
@@ -275,7 +369,8 @@ def test_write_then_check_then_drift(tmp_path, capsys):
 
 def test_the_committed_status_files_describe_this_tree(capsys):
     """Fails when a board port or eos_board_ops_t changes without the status
-    files being regenerated: run tools/board_ops_status.py and commit both."""
+    files being regenerated: run python3 tools/board_ops_status.py and commit
+    both."""
     assert bos.main(["--check"]) == 0, capsys.readouterr().out
 
 

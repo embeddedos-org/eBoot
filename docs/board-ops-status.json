@@ -2,7 +2,7 @@
   "schema": 1,
   "generated_by": "tools/board_ops_status.py",
   "source": "boards/*/board_*.c against include/eos_hal.h",
-  "caveat": "'code' means the port has code for the operation; it is not a statement that the code is correct or has run on hardware",
+  "caveat": "'code' means the port has code for the operation; it is not a statement that the code is correct or has run on hardware. 'absent' means the port supplies nothing; what the caller sees instead is decided per operation by the wrapper in hal/hal_core.c, where there is one, and is not recorded here",
   "operations": [
     "flash_read",
     "flash_write",

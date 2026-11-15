@@ -10,8 +10,8 @@ at a function may still do nothing. This tool reads include/eos_hal.h for the
 list of operations and every boards/*/board_*.c for what each port supplies,
 and classifies each (board, operation) pair:
 
-    absent    NULL or not named in the table: nothing is called
-    code      a function whose body does something
+    absent    NULL or not named in the table: no port function is called
+    code      a function whose body is not recognised as one of the stubs below
     ok-stub   a function that discards its arguments and returns success
     err-stub  a function that discards its arguments and returns an error
     no-op     a void function with an empty body
@@ -19,11 +19,17 @@ and classifies each (board, operation) pair:
     extern    a function that is not defined in the board file
 
 "code" means the port has code for the operation. It does not mean the code is
-correct, and nothing recorded here has been run on hardware.
+correct, and nothing recorded here has been run on hardware. A stub written in
+a way this tool does not recognise is reported as "code" too.
+
+"absent" says only that the port supplies nothing. What the caller then sees
+is decided per operation by the wrapper in hal/hal_core.c, where there is
+one, and is not recorded here: some wrappers return an error, some return a
+default value, and for a void operation the caller gets no signal at all.
 
 Usage:
-    tools/board_ops_status.py            rewrite docs/board-ops-status.{json,md}
-    tools/board_ops_status.py --check    exit 1 if those files are out of date
+    python3 tools/board_ops_status.py           rewrite docs/board-ops-status.{json,md}
+    python3 tools/board_ops_status.py --check   exit 1 if they are out of date
 """
 
 import argparse
@@ -45,16 +51,32 @@ SYMBOL = {CODE: "C", OK_STUB: "S!", ERR_STUB: "E", NO_OP: "0", CONST: "K",
 
 _CONSTANT = re.compile(
     r"true|false|NULL|[A-Z][A-Z0-9_]*|-?\d+[uUlL]*|0[xX][0-9a-fA-F]+[uUlL]*")
+_DISCARD = re.compile(r"\(\s*void\s*\)\s*(?:\w+|\(\s*\w+\s*\))")   # (void)a  (void)(a)
 _SUCCESS = re.compile(r"EOS_OK|0")
 _ERROR = re.compile(r"EOS_ERR\w*|-\d+")
 
 
-def strip_comments(text):
-    """Blank out C comments, keeping every newline so offsets stay on the
-    same line."""
+_COMMENT_OR_LITERAL = re.compile(
+    r"/\*.*?\*/|//[^\n]*"
+    r"|\"(?:\\.|[^\"\\\n])*\""
+    r"|'(?:\\.|[^'\\\n])*'", re.S)
+
+
+def strip_comments(text, literals=False):
+    """Blank out C comments and, with literals=True, the contents of string
+    and character literals. Every character keeps its offset and every
+    newline stays, so an index into the result is an index into `text`.
+
+    Comments and literals are found in one pass: a comment marker inside a
+    string is not a comment, and a quote inside a comment opens nothing."""
     def blank(match):
-        return re.sub(r"[^\n]", " ", match.group(0))
-    return re.sub(r"/\*.*?\*/|//[^\n]*", blank, text, flags=re.S)
+        token = match.group(0)
+        if token[0] == "/":
+            return re.sub(r"[^\n]", " ", token)
+        if literals:
+            return token[0] + " " * (len(token) - 2) + token[-1]
+        return token
+    return _COMMENT_OR_LITERAL.sub(blank, text)
 
 
 def matching_brace(text, open_at):
@@ -98,12 +120,20 @@ def ops_table(board_text):
 
 
 def function_bodies(board_text, name):
-    """Bodies of every definition of `name` in the file (comments removed)."""
+    """Bodies of every file-scope definition of `name` (comments removed).
+
+    `if (name(x)) {` has the shape of a definition. What tells the two apart
+    is where they stand: a definition is outside every brace, a call never
+    is. Braces are counted with literals blanked, so '{' or "}" in a string
+    neither opens nor closes anything."""
     text = strip_comments(board_text)
+    scan = strip_comments(board_text, literals=True)
     bodies = []
-    for match in re.finditer(r"\b%s\s*\([^;{}]*\)\s*\{" % re.escape(name), text):
+    for match in re.finditer(r"\b%s\s*\([^;{}]*\)\s*\{" % re.escape(name), scan):
+        if scan.count("{", 0, match.start()) != scan.count("}", 0, match.start()):
+            continue
         open_at = match.end() - 1
-        bodies.append(text[open_at + 1:matching_brace(text, open_at)])
+        bodies.append(text[open_at + 1:matching_brace(scan, open_at)])
     return bodies
 
 
@@ -113,12 +143,17 @@ def classify_body(body, return_type):
         return CODE
     returned = None
     for statement in (s.strip() for s in body.split(";")):
-        if not statement or re.fullmatch(r"\(\s*void\s*\)\s*\w+", statement):
+        if not statement or _DISCARD.fullmatch(statement):
             continue
         result = re.fullmatch(r"return\b\s*(.*)", statement, flags=re.S)
         if not result:
             return CODE
         returned = result.group(1).strip()
+        while True:                     # return (EOS_OK);
+            inner = re.fullmatch(r"\(\s*([^()]*|\(.*\))\s*\)", returned, flags=re.S)
+            if not inner:
+                break
+            returned = inner.group(1).strip()
         if returned and not _CONSTANT.fullmatch(returned):
             return CODE
     if return_type == "void" or returned is None:
@@ -147,17 +182,33 @@ def classify(board_text, initialiser, return_type):
 
 def collect(root):
     """The whole status document as a dict."""
-    operations = hal_operations((root / HAL_HEADER).read_text(encoding="utf-8"))
+    try:
+        operations = hal_operations(
+            (root / HAL_HEADER).read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ValueError("%s: %s" % (HAL_HEADER, exc)) from None
     boards = []
     for path in sorted(root.glob("boards/*/board_*.c")):
+        rel = path.relative_to(root).as_posix()
         text = path.read_text(encoding="utf-8")
-        table, fields = ops_table(text)
+        try:
+            # Definitions are told from calls by brace depth (function_bodies),
+            # so a file whose braces do not pair up cannot be read reliably:
+            # everything after the stray one would count as "not defined here".
+            scan = strip_comments(text, literals=True)
+            if scan.count("{") != scan.count("}"):
+                raise ValueError("unbalanced braces: %d '{' and %d '}'"
+                                 % (scan.count("{"), scan.count("}")))
+            table, fields = ops_table(text)
+            kinds = {name: classify(text, fields.get(name), rtype)
+                     for name, rtype in operations}
+        except ValueError as exc:
+            raise ValueError("%s: %s" % (rel, exc)) from None
         boards.append({
             "board": path.parent.name,
-            "file": path.relative_to(root).as_posix(),
+            "file": rel,
             "ops_table": table,
-            "operations": {name: classify(text, fields.get(name), rtype)
-                           for name, rtype in operations},
+            "operations": kinds,
         })
     if not boards:
         raise ValueError("no board ports found")
@@ -174,7 +225,10 @@ def collect(root):
         "source": "boards/*/board_*.c against " + HAL_HEADER,
         "caveat": ("'code' means the port has code for the operation; it is "
                    "not a statement that the code is correct or has run on "
-                   "hardware"),
+                   "hardware. 'absent' means the port supplies nothing; what "
+                   "the caller sees instead is decided per operation by the "
+                   "wrapper in hal/hal_core.c, where there is one, and is not "
+                   "recorded here"),
         "operations": [name for name, _ in operations],
         "boards": boards,
         "summary": {"boards": len(boards), "by_operation": by_operation},
@@ -195,7 +249,8 @@ def render_markdown(status):
     out = [
         "# Board ops status\n\n",
         "<!-- Generated by tools/board_ops_status.py. Do not edit by hand:\n",
-        "     run the tool and commit both this file and the .json. -->\n\n",
+        "     run `python3 tools/board_ops_status.py` and commit both this\n",
+        "     file and the .json. -->\n\n",
         "What each board port's `eos_board_ops_t` table provides, read from\n",
         "`boards/*/board_*.c` against `include/eos_hal.h`. The same data is in\n",
         "[`board-ops-status.json`](board-ops-status.json).\n\n",
@@ -205,9 +260,15 @@ def render_markdown(status):
         "a supported board.\n\n",
         "## Legend\n\n",
         "| Mark | Kind | Meaning |\n|---|---|---|\n",
-        "| `C` | code | a function whose body does something |\n",
-        "| `–` | absent | `NULL` or not named: nothing is called — the HAL "
-        "wrapper returns an error or a default |\n",
+        "| `C` | code | a function whose body this tool does not recognise "
+        "as one of the stubs below. Whether that body performs the operation "
+        "is not checked |\n",
+        "| `–` | absent | `NULL` or not named in the table: no port function "
+        "is called. What the caller sees instead is decided per operation by "
+        "the wrapper in `hal/hal_core.c`, where there is one, and is not "
+        "recorded here — some wrappers return an error, some return a default "
+        "value, and for a `void` operation the caller gets no signal at all "
+        "|\n",
         "| `S!` | ok-stub | a function that discards its arguments and returns "
         "success — the caller is told the operation happened |\n",
         "| `E` | err-stub | a function that discards its arguments and returns "
@@ -261,10 +322,13 @@ def main(argv=None, root=ROOT):
                  if not (root / rel).is_file()
                  or (root / rel).read_text(encoding="utf-8") != text]
         for rel in stale:
-            print("out of date: %s (run tools/board_ops_status.py)" % rel)
+            print("out of date: %s (run python3 tools/board_ops_status.py)"
+                  % rel)
         return 1 if stale else 0
     for rel, text in wanted.items():
-        (root / rel).write_text(text, encoding="utf-8", newline="\n")
+        # open(), not Path.write_text(newline=): that argument needs 3.10
+        with open(root / rel, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
         print("wrote %s" % rel)
     return 0
 
