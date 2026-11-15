@@ -183,6 +183,11 @@ chore: bump version to 0.4.0
 3. Add the board to `CMakeLists.txt` via `eboot_add_board()`
 4. Optionally add linker scripts (`<name>_stage0.ld`, `<name>_stage1.ld`)
 5. Add the board name to the help text in `CMakeLists.txt`
+6. Run `python3 tools/board_ops_status.py` and commit the regenerated
+   `docs/board-ops-status.md` and `docs/board-ops-status.json`. Do the same
+   after changing an existing port's ops table or `eos_board_ops_t`:
+   `tests/unit/test_board_ops_status.py` fails while the two files do not
+   describe the tree
 
 ## Reporting Issues
 
