@@ -71,6 +71,7 @@ others (default `none` = native core-only build).
 | `EBLDR_BUILD_TESTS` | `OFF` | Build unit tests (native only); set to `ON` to enable |
 | `EBLDR_PRODUCTION_KEY` | `""` (empty) | Ed25519 public key (64 hex chars) compiled in as the trust anchor for a board without OTP; a Release build of a real board refuses to configure without it |
 | `EBLDR_ALLOW_DEV_KEY` | `OFF` | Let a Release build of a real board fall back to the RFC 8032 test key (bring-up and CI cross-compiles only; never a device) |
+| `EBLDR_ALLOW_NO_ROLLBACK_COUNTER` | `OFF` | Let a build boot and install images with no monotonic counter, i.e. with anti-rollback disabled (bring-up and host/sim builds only; never a device). A release-shaped build of a real board refuses to configure with it `ON` |
 
 Ed25519 signature verification and recovery-command authentication are not
 options: no build of this bootloader skips either. `EBLDR_REQUIRE_SIGNATURES`

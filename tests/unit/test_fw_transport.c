@@ -96,6 +96,18 @@ static int sim_uart_recv(void *buf, size_t len, uint32_t timeout_ms)
 
 static uint32_t sim_tick_val = 0;
 static uint32_t sim_get_tick(void) { return sim_tick_val++; }
+/* Trivial monotonic counter at floor 0, so the anti-rollback check in
+ * eos_fw_update_finalize() passes and this suite keeps measuring the
+ * transport, not rollback. eos_rollback_verify() fails closed without one;
+ * a board with no counter ops is covered by test_rollback.c instead. */
+static uint32_t sim_counter = 0;
+static int sim_monotonic_read(uint32_t *value)
+{
+    if (!value) return EOS_ERR_INVALID;
+    *value = sim_counter;
+    return EOS_OK;
+}
+static int sim_monotonic_increment(void) { sim_counter++; return EOS_OK; }
 static void sim_noop(void) {}
 static void sim_noop_u32(uint32_t x) { (void)x; }
 static void sim_jump(uint32_t addr) { (void)addr; }
@@ -152,6 +164,8 @@ static const eos_board_ops_t sim_ops = {
     .disable_interrupts  = sim_noop,
     .enable_interrupts   = sim_noop,
     .deinit_peripherals  = sim_noop,
+    .monotonic_read      = sim_monotonic_read,
+    .monotonic_increment = sim_monotonic_increment,
 };
 
 static void setup(void)
@@ -163,6 +177,7 @@ static void setup(void)
     rx_pos = 0;
     tx_len = 0;
     sim_tick_val = 0;
+    sim_counter = 0;
     eos_hal_init(&sim_ops);
 }
 

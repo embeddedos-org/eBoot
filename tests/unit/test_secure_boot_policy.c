@@ -57,6 +57,18 @@ static uint8_t sim_otp[OTP_SIZE];
 static int otp_write_rc;
 static int otp_write_calls;
 static int provide_otp_write;
+/* Trivial monotonic counter at floor 0, so the anti-rollback step (step 5b
+ * of eos_secure_boot) passes and this suite keeps measuring the debug-lock
+ * policy, not rollback. eos_rollback_verify() fails closed without one; a
+ * board with no counter ops is covered by test_rollback.c instead. */
+static uint32_t sim_counter = 0;
+static int sim_monotonic_read(uint32_t *value)
+{
+    if (!value) return EOS_ERR_INVALID;
+    *value = sim_counter;
+    return EOS_OK;
+}
+static int sim_monotonic_increment(void) { sim_counter++; return EOS_OK; }
 
 static int sim_otp_read(uint32_t offset, void *buf, size_t len)
 {
@@ -133,6 +145,9 @@ static void reset_fixture(void)
      * before step 7 is ever reached. The staged image is slot A. */
     sim_ops.slot_a_addr = FLASH_BASE;
     sim_ops.slot_a_size = FLASH_SIZE;
+    sim_ops.monotonic_read = sim_monotonic_read;
+    sim_ops.monotonic_increment = sim_monotonic_increment;
+    sim_counter = 0;
     if (provide_otp_write) sim_ops.otp_write = sim_otp_write;
     otp_write_rc = EOS_OK;
     otp_write_calls = 0;

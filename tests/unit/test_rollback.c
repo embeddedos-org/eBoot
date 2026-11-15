@@ -97,12 +97,30 @@ TEST(test_verify_rejects_downgrade)
     ASSERT(eos_rollback_verify(0) == EOS_ERR_ANTI_ROLLBACK);
 }
 
+#ifndef EBLDR_ALLOW_NO_ROLLBACK_COUNTER
+TEST(test_verify_fails_closed_without_hardware)
+{
+    eos_hal_init(&g_ops_no_counter);
+    /* No counter, no floor to compare against: verification refuses rather
+     * than assuming the image is current. Both callers (stage1/jump_app.c,
+     * core/fw_update.c) treat any non-OK return as a refusal, so no image
+     * boots or installs on a board that cannot prove it is current. */
+    ASSERT(eos_rollback_verify(0) == EOS_ERR_NOT_SUPPORTED);
+    ASSERT(eos_rollback_verify(9) == EOS_ERR_NOT_SUPPORTED);
+    ASSERT(eos_rollback_get_device_counter(&(uint32_t){0}) == EOS_ERR_NOT_SUPPORTED);
+}
+
+#else /* EBLDR_ALLOW_NO_ROLLBACK_COUNTER */
+/* Permissive only under the explicit opt-in, for builds with no counter by
+ * design (host tests, sim, bring-up). A release-shaped build of a real
+ * board cannot select it — see CMakeLists.txt. */
 TEST(test_verify_permissive_without_hardware)
 {
     eos_hal_init(&g_ops_no_counter);
     ASSERT(eos_rollback_verify(0) == EOS_OK);
     ASSERT(eos_rollback_get_device_counter(&(uint32_t){0}) == EOS_ERR_NOT_SUPPORTED);
 }
+#endif
 
 /* ---- Commit ---- */
 
@@ -223,7 +241,11 @@ int main(void)
     run_test_verify_accepts_equal_counter();
     run_test_verify_accepts_newer_counter();
     run_test_verify_rejects_downgrade();
+#ifndef EBLDR_ALLOW_NO_ROLLBACK_COUNTER
+    run_test_verify_fails_closed_without_hardware();
+#else
     run_test_verify_permissive_without_hardware();
+#endif
     run_test_commit_raises_floor();
     run_test_commit_without_stage_is_noop();
     run_test_commit_is_idempotent();

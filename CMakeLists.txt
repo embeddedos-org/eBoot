@@ -31,6 +31,10 @@ a board without OTP. A Release build of a real board refuses to configure withou
 option(EBLDR_ALLOW_DEV_KEY
     "Let a Release build of a real board fall back to the RFC 8032 test key \
 (bring-up and CI cross-compiles only; never a device)" OFF)
+option(EBLDR_ALLOW_NO_ROLLBACK_COUNTER
+    "Let a build boot and install images with no monotonic counter, i.e. \
+with anti-rollback disabled (bring-up and host/sim builds only; never a \
+device)" OFF)
 
 set(EBLDR_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -75,6 +79,34 @@ elseif(NOT EBLDR_BOARD STREQUAL "none" AND NOT EBLDR_ALLOW_DEV_KEY
         "-DEBLDR_ALLOW_DEV_KEY=ON.")
 else()
     message(STATUS "  Trust anchor: RFC 8032 test key (development only; see core/keystore.c)")
+endif()
+
+# ====================================================================
+# Anti-rollback without a monotonic counter
+# ====================================================================
+# eos_rollback_verify() fails closed when the board has no monotonic
+# counter — which today is every board under boards/, none of which
+# implements monotonic_read. The permissive behaviour survives only as an
+# explicit opt-in for builds with no counter by design (host tests, sim,
+# bring-up), and a release-shaped build of a real board cannot select it:
+# such a build would ship a bootloader that boots any signed image,
+# however old. The gate reuses the production-key gate's definition of
+# release-shaped: only Debug is exempt.
+if(EBLDR_ALLOW_NO_ROLLBACK_COUNTER AND NOT EBLDR_BOARD STREQUAL "none"
+   AND NOT _ebldr_build_type STREQUAL "DEBUG")
+    if(CMAKE_BUILD_TYPE STREQUAL "")
+        set(_ebldr_build_desc "build with no CMAKE_BUILD_TYPE")
+    else()
+        set(_ebldr_build_desc "${CMAKE_BUILD_TYPE} build")
+    endif()
+    message(FATAL_ERROR
+        "EBLDR_ALLOW_NO_ROLLBACK_COUNTER=ON: a ${_ebldr_build_desc} of board "
+        "'${EBLDR_BOARD}' would boot and install any signed image with "
+        "anti-rollback disabled. Only a Debug build is exempt. Build it as "
+        "Debug for bring-up, or use a board with a monotonic counter.")
+endif()
+if(EBLDR_ALLOW_NO_ROLLBACK_COUNTER)
+    add_compile_definitions(EBLDR_ALLOW_NO_ROLLBACK_COUNTER)
 endif()
 
 # ====================================================================

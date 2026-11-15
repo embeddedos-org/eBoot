@@ -66,6 +66,18 @@ static int sim_flash_erase(uint32_t addr, size_t len)
 
 static uint32_t sim_tick = 0;
 static uint32_t sim_get_tick(void) { return sim_tick++; }
+/* Trivial monotonic counter at floor 0, so the anti-rollback step (step 5b
+ * of eos_secure_boot) passes and this suite keeps measuring signature
+ * verification, not rollback. eos_rollback_verify() fails closed without
+ * one; a board with no counter ops is covered by test_rollback.c instead. */
+static uint32_t sim_counter = 0;
+static int sim_monotonic_read(uint32_t *value)
+{
+    if (!value) return EOS_ERR_INVALID;
+    *value = sim_counter;
+    return EOS_OK;
+}
+static int sim_monotonic_increment(void) { sim_counter++; return EOS_OK; }
 static void sim_noop(void) {}
 static void sim_noop_u32(uint32_t x) { (void)x; }
 static void sim_jump(uint32_t addr) { (void)addr; }
@@ -102,6 +114,8 @@ static const eos_board_ops_t sim_ops = {
     .disable_interrupts  = sim_noop,
     .enable_interrupts   = sim_noop,
     .deinit_peripherals  = sim_noop,
+    .monotonic_read      = sim_monotonic_read,
+    .monotonic_increment = sim_monotonic_increment,
 };
 
 static int tests_run = 0;
@@ -112,6 +126,7 @@ static int tests_passed = 0;
     static void run_##name(void) { \
         memset(sim_flash, 0xFF, sizeof(sim_flash)); \
         sim_tick = 0; \
+        sim_counter = 0; \
         eos_hal_init(&sim_ops); \
         stage_valid_image(); \
         printf("  %-50s ", #name); \

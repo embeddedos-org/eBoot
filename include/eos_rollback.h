@@ -52,11 +52,17 @@ int eos_rollback_get_device_counter(uint32_t *counter_out);
 /**
  * @brief Reject an image whose security counter is below the device floor.
  *
- * Boards without a monotonic counter return EOS_OK, since failing closed would
- * make every such board unbootable. Detect that case at provisioning time via
- * eos_rollback_get_device_counter().
+ * Fails closed: a board without a monotonic counter returns
+ * EOS_ERR_NOT_SUPPORTED, so neither the boot path (stage1/jump_app.c) nor
+ * the install path (core/fw_update.c) accepts an image whose currency
+ * cannot be proven. The only exception is a build with
+ * EBLDR_ALLOW_NO_ROLLBACK_COUNTER defined — bring-up and host/sim builds
+ * with no counter by design; a release-shaped build of a real board
+ * cannot select it (see CMakeLists.txt). Detect the no-counter case at
+ * provisioning time via eos_rollback_get_device_counter().
  *
- * @return EOS_OK if acceptable, EOS_ERR_ANTI_ROLLBACK if too old.
+ * @return EOS_OK if acceptable, EOS_ERR_ANTI_ROLLBACK if too old,
+ *         EOS_ERR_NOT_SUPPORTED if the board has no counter.
  */
 int eos_rollback_verify(uint32_t image_counter);
 
