@@ -60,6 +60,13 @@ cmake --build build/stm32 --parallel
 `esp32`, `x86_64_efi`, `imx8m`, `am64x`, `samd51`, `sifive_u`, `cortex_r5`, and
 others (default `none` = native core-only build).
 
+Accepted by the build is not the same as implemented. Most ports provide a
+memory map and nothing else, and some register operations that do nothing.
+[`docs/board-ops-status.md`](docs/board-ops-status.md) lists, for every port,
+which HAL operations it has code for, which are stubs and which are absent. It
+is generated from the board sources by `tools/board_ops_status.py`, and the
+test suite fails when it is out of date.
+
 ### Security options
 
 | Option | Default | Meaning |
@@ -94,8 +101,8 @@ python run_all_tests.py
 ## Docs
 
 See [`docs/`](docs/): `quickstart.md`, `architecture.md`, `secure_boot_chain.md`,
-`key_lifecycle.md`, `threat_model.md`, `memory-map.md`, `update-flow.md`, and the
-`security_review_checklist.md`.
+`key_lifecycle.md`, `threat_model.md`, `memory-map.md`, `update-flow.md`,
+`board-ops-status.md`, and the `security_review_checklist.md`.
 
 ## License
 
