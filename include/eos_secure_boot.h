@@ -121,8 +121,9 @@ int eos_secure_boot_lock_debug(void);
  * only ever rises and only through the counter's own encoding (on STM32F4
  * a unary fuse bitmap in the security_version OTP field). A lower version
  * is a no-op, never a decrement; an advance larger than
- * EOS_ROLLBACK_MAX_STEP is refused, so one call cannot exhaust the fuse
- * bank.
+ * EOS_ROLLBACK_MAX_STEP is refused. The cap limits burns per call; it does
+ * not reserve remaining capacity — a small advance can still burn the last
+ * fuse, after which the floor can no longer rise.
  *
  * @param new_version  New minimum version to enforce.
  * @return EOS_OK on success or when there is nothing to do;

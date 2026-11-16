@@ -279,8 +279,10 @@ int eos_secure_boot_update_rollback(uint32_t new_version)
      * instead. The previous implementation did exactly that.
      *
      * The advance is capped at EOS_ROLLBACK_MAX_STEP, the same refusal
-     * eos_rollback_commit() applies: a huge jump would exhaust the fuse
-     * bank and permanently end the device's ability to raise its floor. */
+     * eos_rollback_commit() applies: it limits burns per call, so one call
+     * cannot demand an implausible jump. It does not reserve remaining
+     * capacity -- a small advance can still burn the last fuse, after
+     * which the floor can no longer rise. */
     uint32_t current = 0;
     int rc = eos_hal_monotonic_read(&current);
     if (rc != EOS_OK) return rc;
