@@ -177,7 +177,24 @@ int eos_rollback_verify(uint32_t image_counter)
     uint32_t floor = 0;
     int rc = eos_hal_monotonic_read(&floor);
 
-    if (rc == EOS_ERR_NOT_SUPPORTED) return EOS_OK;
+    if (rc == EOS_ERR_NOT_SUPPORTED) {
+        /* Fail closed. No board implements the monotonic counter yet, so
+         * returning EOS_OK here made anti-rollback a no-op on every board:
+         * any signed image, however old, booted and installed. A board
+         * with no counter cannot prove an image is current, so verification
+         * refuses rather than assumes.
+         *
+         * EBLDR_ALLOW_NO_ROLLBACK_COUNTER restores the permissive return
+         * for builds with no counter by design (host tests, sim,
+         * bring-up); a release-shaped build of a real board cannot select
+         * it (see CMakeLists.txt). eos_rollback_commit() already fails
+         * closed the same way; this makes verify consistent with it. */
+#ifdef EBLDR_ALLOW_NO_ROLLBACK_COUNTER
+        return EOS_OK;
+#else
+        return EOS_ERR_NOT_SUPPORTED;
+#endif
+    }
     if (rc != EOS_OK) return rc;
 
     if (image_counter < floor) return EOS_ERR_ANTI_ROLLBACK;
