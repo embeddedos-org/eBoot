@@ -287,6 +287,15 @@ The security version is a monotonic counter that can only increment. It is store
 | Dedicated flash sector | Counter with anti-tearing write | Reversible (with flash access) |
 | Secure element | SE-managed counter | Irreversible |
 
+On STM32F4 the OTP counter is a unary fuse bitmap in the
+`security_version` field: the value is the number of cleared (0) bits in
+the four bytes at OTP offset `0x144`, so the floor can only rise and each
+increment burns exactly one fuse. Four bytes hold 32 steps; see
+`docs/secure_boot_chain.md` §4.1. The encoding is the board's
+(`boards/stm32f4`); `eos_secure_boot_update_rollback()` advances it
+through the monotonic counter rather than writing a value, because OTP
+bits only clear and a value write could not raise it.
+
 ### 6.2 Revocation Flow
 
 ```

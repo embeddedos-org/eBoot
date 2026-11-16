@@ -47,13 +47,13 @@ a supported board.
 | `disable_interrupts` | 11 | 0 | 0 | 0 | 0 | 0 | 72 |
 | `enable_interrupts` | 11 | 0 | 0 | 0 | 0 | 0 | 72 |
 | `deinit_peripherals` | 8 | 0 | 0 | 3 | 0 | 0 | 72 |
-| `otp_read` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
-| `otp_write` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
+| `otp_read` | 1 | 0 | 0 | 0 | 0 | 0 | 82 |
+| `otp_write` | 1 | 0 | 0 | 0 | 0 | 0 | 82 |
 | `rng_get` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
 | `debug_lock` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
 | `debug_status` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
-| `monotonic_read` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
-| `monotonic_increment` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
+| `monotonic_read` | 1 | 0 | 0 | 0 | 0 | 0 | 82 |
+| `monotonic_increment` | 1 | 0 | 0 | 0 | 0 | 0 | 82 |
 | `hw_sha256` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
 | `hw_aes_decrypt` | 0 | 0 | 0 | 0 | 0 | 0 | 83 |
 
@@ -146,7 +146,7 @@ Columns are the operations in `eos_board_ops_t` order: 1 `flash_read`, 2 `flash_
 | `sifive_u` | C | S! | S! | – | – | K | C | K | C | C | C | C | C | C | C | C | – | – | – | – | – | – | – | – | – |
 | `sparc` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
 | `sparc64` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
-| `stm32f4` | C | C | C | C | C | C | C | C | C | C | C | C | C | C | C | C | – | – | – | – | – | – | – | – | – |
+| `stm32f4` | C | C | C | C | C | C | C | C | C | C | C | C | C | C | C | C | C | C | – | – | – | C | C | – | – |
 | `stm32h7` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
 | `stm32mp1` | C | S! | S! | 0 | 0 | K | C | K | C | – | – | – | K | – | – | – | – | – | – | – | – | – | – | – | – |
 | `strongarm` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |

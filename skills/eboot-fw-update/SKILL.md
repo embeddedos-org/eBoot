@@ -83,9 +83,11 @@ ctest --test-dir build --output-on-failure
   read; bytes past the image container are rejected by
   `eos_fw_update_write()` on every chunk boundary.
 - **What if the board has no monotonic counter?** —
-  `eos_rollback_verify()` returns `EOS_OK` (failing closed would
-  make such boards unbootable). Detect the case at provisioning
-  time: `eos_rollback_get_device_counter()` returns
+  `eos_rollback_verify()` returns `EOS_ERR_NOT_SUPPORTED` (fail-closed;
+  the permissive behaviour survives only as the explicit build-time
+  opt-in `EBLDR_ALLOW_NO_ROLLBACK_COUNTER`, for builds with no counter
+  by design). STM32F4 is the first board with a counter. Detect the case
+  at provisioning time: `eos_rollback_get_device_counter()` returns
   `EOS_ERR_NOT_SUPPORTED` there.
 
 ## Discipline
