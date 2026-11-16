@@ -23,7 +23,16 @@
 #define RCC_APB1ENR     (*(volatile uint32_t *)(RCC_BASE + 0x40))
 
 /* Flash interface */
+#ifdef EBLDR_TEST_FLASH_REGS
+/* Host unit tests redirect the flash registers at a RAM array so the OTP
+ * burn path runs without hardware: tests/unit/test_stm32f4_otp_counter.c
+ * compiles this file with EBLDR_TEST_FLASH_REGS and provides
+ * eboot_test_flash_regs[]. Device builds are unaffected. */
+extern uint32_t eboot_test_flash_regs[];
+#define FLASH_IF_BASE   ((uintptr_t)eboot_test_flash_regs)
+#else
 #define FLASH_IF_BASE   0x40023C00
+#endif
 #define FLASH_ACR       (*(volatile uint32_t *)(FLASH_IF_BASE + 0x00))
 #define FLASH_KEYR      (*(volatile uint32_t *)(FLASH_IF_BASE + 0x04))
 #define FLASH_SR        (*(volatile uint32_t *)(FLASH_IF_BASE + 0x0C))
@@ -71,7 +80,7 @@ static volatile uint32_t tick_ms = 0;
 
 static int stm32f4_flash_read(uint32_t addr, void *buf, size_t len)
 {
-    memcpy(buf, (const void *)addr, len);
+    memcpy(buf, (const void *)(uintptr_t)addr, len);
     return EOS_OK;
 }
 
@@ -94,10 +103,13 @@ static void flash_wait_busy(void)
         ;
 }
 
-static int stm32f4_flash_write(uint32_t addr, const void *buf, size_t len)
+/* Program bytes through the flash interface (PSIZE x8, byte by byte).
+ * Shared by flash_write and the OTP write below: OTP bytes on the F407
+ * program exactly like flash bytes (RM0090 §3.7). Takes a uintptr_t so a
+ * host unit test can pass the redirected OTP window (a RAM address, which
+ * does not fit in the HAL's uint32_t address type). */
+static int flash_program_bytes(uintptr_t addr, const uint8_t *buf, size_t len)
 {
-    const uint8_t *src = (const uint8_t *)buf;
-
     flash_unlock();
     flash_wait_busy();
 
@@ -106,7 +118,7 @@ static int stm32f4_flash_write(uint32_t addr, const void *buf, size_t len)
     FLASH_CR |= (1 << 0);  /* PG bit */
 
     for (size_t i = 0; i < len; i++) {
-        *(volatile uint8_t *)(addr + i) = src[i];
+        *(volatile uint8_t *)(addr + i) = buf[i];
         flash_wait_busy();
 
         if (FLASH_SR & 0xF0) { /* Error flags */
@@ -120,6 +132,11 @@ static int stm32f4_flash_write(uint32_t addr, const void *buf, size_t len)
     FLASH_CR &= ~(1 << 0); /* Clear PG */
     flash_lock();
     return EOS_OK;
+}
+
+static int stm32f4_flash_write(uint32_t addr, const void *buf, size_t len)
+{
+    return flash_program_bytes(addr, (const uint8_t *)buf, len);
 }
 
 static int stm32f4_flash_erase(uint32_t addr, size_t len)
@@ -154,6 +171,109 @@ static int stm32f4_flash_erase(uint32_t addr, size_t len)
 
     FLASH_CR &= ~(1 << 1); /* Clear SER */
     flash_lock();
+    return EOS_OK;
+}
+
+/* ---- OTP (one-time programmable) and monotonic counter ---- */
+
+/* The OTP array the counter lives in. On device it is the STM32F407 OTP
+ * array (RM0090 §3.5); host unit tests redirect it at a RAM buffer so the
+ * counter logic runs without hardware (tests/unit/test_stm32f4_otp_counter.c
+ * compiles this file with EBLDR_TEST_OTP_WINDOW and provides the array). */
+#ifdef EBLDR_TEST_OTP_WINDOW
+extern uint8_t eboot_test_otp_window[];
+#define STM32F4_OTP_WINDOW ((uintptr_t)eboot_test_otp_window)
+#else
+#define STM32F4_OTP_WINDOW ((uintptr_t)STM32F4_OTP_BASE)
+#endif
+
+static int stm32f4_otp_read(uint32_t offset, void *buf, size_t len)
+{
+    if (!buf) return EOS_ERR_INVALID;
+    if ((uint64_t)offset + len > STM32F4_OTP_SIZE) return EOS_ERR_INVALID;
+    memcpy(buf, (const void *)(STM32F4_OTP_WINDOW + offset), len);
+    return EOS_OK;
+}
+
+static int stm32f4_otp_write(uint32_t offset, const void *buf, size_t len)
+{
+    if (!buf) return EOS_ERR_INVALID;
+    if ((uint64_t)offset + len > STM32F4_OTP_SIZE) return EOS_ERR_INVALID;
+
+    const uint8_t *src = (const uint8_t *)buf;
+
+    /* OTP bits only clear (1 -> 0). A write that asks to set a bit cannot
+     * be performed; refuse the whole write before programming anything, so
+     * a failed write leaves the field untouched instead of half-written.
+     * Callers that need to set bits are asking for RAM semantics from
+     * one-time storage, and silently programming only the clearable part
+     * would report success for bytes that did not land. */
+    for (size_t i = 0; i < len; i++) {
+        uint8_t current = *(volatile uint8_t *)(STM32F4_OTP_WINDOW + offset + i);
+        if ((uint8_t)(src[i] & (uint8_t)~current) != 0)
+            return EOS_ERR_INVALID;
+    }
+
+    if (len == 0) return EOS_OK;
+
+    int rc = flash_program_bytes(STM32F4_OTP_WINDOW + offset, src, len);
+    if (rc != EOS_OK) return rc;
+
+    /* A fuse burn can fail without reporting an error: verify the bytes
+     * read back are the bytes asked for. */
+    for (size_t i = 0; i < len; i++) {
+        uint8_t back = *(volatile uint8_t *)(STM32F4_OTP_WINDOW + offset + i);
+        if (back != src[i]) return EOS_ERR_FLASH;
+    }
+    return EOS_OK;
+}
+
+/* ---- Monotonic anti-rollback counter ----
+ *
+ * The device floor is the number of burned bits in the security_version
+ * OTP field (STM32F4_OTP_COUNTER_OFFSET, 4 bytes). Read counts the bits;
+ * increment burns the lowest set bit and reads the count back to prove it
+ * moved. Nothing here writes outside the field: the single byte
+ * monotonic_increment programs is inside it, and otp_write refuses any
+ * range that leaves the 512-byte OTP array -- so the recovery secret at
+ * 0x180 is never touched by this counter (#159).
+ *
+ * Host and sim builds keep NOT_SUPPORTED: they have no otp_read, so
+ * eos_rollback_verify() fails closed there, and the counter exists only
+ * on this board until another port implements it. */
+
+static int stm32f4_monotonic_read(uint32_t *value)
+{
+    if (!value) return EOS_ERR_INVALID;
+    uint8_t field[STM32F4_OTP_COUNTER_SIZE];
+    int rc = stm32f4_otp_read(STM32F4_OTP_COUNTER_OFFSET, field, sizeof(field));
+    if (rc != EOS_OK) return rc;
+    *value = stm32f4_otp_counter_count(field, sizeof(field));
+    return EOS_OK;
+}
+
+static int stm32f4_monotonic_increment(void)
+{
+    uint8_t field[STM32F4_OTP_COUNTER_SIZE];
+    int rc = stm32f4_otp_read(STM32F4_OTP_COUNTER_OFFSET, field, sizeof(field));
+    if (rc != EOS_OK) return rc;
+
+    uint32_t byte = 0;
+    uint8_t burned = 0;
+    if (stm32f4_otp_counter_next_burn(field, sizeof(field), &byte, &burned) != 0)
+        return EOS_ERR_FULL; /* All 32 fuses burned: the floor cannot rise. */
+
+    uint32_t before = stm32f4_otp_counter_count(field, sizeof(field));
+
+    rc = stm32f4_otp_write(STM32F4_OTP_COUNTER_OFFSET + byte, &burned, 1);
+    if (rc != EOS_OK) return rc;
+
+    /* A fuse burn can fail without reporting an error: the count must have
+     * advanced by exactly one. */
+    rc = stm32f4_otp_read(STM32F4_OTP_COUNTER_OFFSET, field, sizeof(field));
+    if (rc != EOS_OK) return rc;
+    if (stm32f4_otp_counter_count(field, sizeof(field)) != before + 1)
+        return EOS_ERR_FLASH;
     return EOS_OK;
 }
 
@@ -212,8 +332,8 @@ static bool stm32f4_recovery_pin_asserted(void)
 static void stm32f4_jump(uint32_t vector_addr)
 {
 #if defined(__ARM_ARCH) || defined(__arm__)
-    uint32_t new_msp  = *(volatile uint32_t *)(vector_addr + 0);
-    uint32_t reset_pc = *(volatile uint32_t *)(vector_addr + 4);
+    uint32_t new_msp  = *(volatile uint32_t *)(uintptr_t)(vector_addr + 0);
+    uint32_t reset_pc = *(volatile uint32_t *)(uintptr_t)(vector_addr + 4);
 
     SCB_VTOR = vector_addr;
 
@@ -306,7 +426,7 @@ static void stm32f4_deinit_peripherals(void)
 
     /* Disable all NVIC interrupts */
     for (int i = 0; i < 8; i++) {
-        *(volatile uint32_t *)(NVIC_ICER_BASE + i * 4) = 0xFFFFFFFF;
+        *(volatile uint32_t *)(uintptr_t)(NVIC_ICER_BASE + i * 4) = 0xFFFFFFFF;
     }
 
     /* Disable USART2 */
@@ -352,6 +472,12 @@ static const eos_board_ops_t stm32f4_ops = {
     .disable_interrupts  = stm32f4_disable_interrupts,
     .enable_interrupts   = stm32f4_enable_interrupts,
     .deinit_peripherals  = stm32f4_deinit_peripherals,
+
+    .otp_read            = stm32f4_otp_read,
+    .otp_write           = stm32f4_otp_write,
+
+    .monotonic_read      = stm32f4_monotonic_read,
+    .monotonic_increment = stm32f4_monotonic_increment,
 };
 
 /* ---- Board Entry Points ---- */

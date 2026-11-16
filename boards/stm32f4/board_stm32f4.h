@@ -112,6 +112,81 @@ static inline int stm32f4_flash_sector_range(uint32_t addr, size_t len,
     return 0;
 }
 
+/* ---- STM32F4 OTP (one-time programmable) layout ---- */
+
+/* RM0090 §3.5: the STM32F407 OTP array is 512 bytes at 0x1FFF7800.
+ * Erased bytes read 0xFF; programming can only clear bits (1 -> 0), never
+ * set them. Offsets below are into that array, not flash addresses. */
+#define STM32F4_OTP_BASE            0x1FFF7800
+#define STM32F4_OTP_SIZE            512
+
+/* The anti-rollback counter's own OTP field: docs/key_lifecycle.md §3.2,
+ * the security_version field (OTP base 0x100 + 0x44). It holds a unary
+ * fuse bitmap, not a value: the counter is the number of cleared (0) bits
+ * in these four bytes, so the floor can only rise -- the one encoding OTP
+ * physics allows, since a value write could never raise the counter (it
+ * needs 0 -> 1 transitions). Four bytes hold 32 steps; when all 32 bits
+ * are burned the counter is full and monotonic_increment reports
+ * EOS_ERR_FULL.
+ *
+ * Never the recovery-secret field: 0x180-0x19F holds the recovery shared
+ * secret (core/recovery.c), and a counter write there permanently
+ * corrupted it (#159, fixed by #160, which moved the counter here). */
+#define STM32F4_OTP_COUNTER_OFFSET  0x144
+#define STM32F4_OTP_COUNTER_SIZE    4
+#define STM32F4_OTP_COUNTER_MAX     (STM32F4_OTP_COUNTER_SIZE * 8)
+
+/**
+ * @brief Count the burned bits in a counter field: the counter's value.
+ *
+ * An erased field (all 0xFF) reads 0; a fully burned field reads
+ * STM32F4_OTP_COUNTER_MAX. Pure: operates on the caller's bytes, so the
+ * host unit tests exercise the same counting the board code uses.
+ */
+static inline uint32_t stm32f4_otp_counter_count(const uint8_t *field, size_t len)
+{
+    uint32_t count = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t b = field[i];
+        for (int bit = 0; bit < 8; bit++)
+            if ((b & (uint8_t)(1u << bit)) == 0)
+                count++;
+    }
+    return count;
+}
+
+/**
+ * @brief Find the next bit to burn: the lowest set bit in the field.
+ *
+ * Burn order is lowest bit first, byte by byte, so the field fills
+ * deterministically from an erased array and the value to program is the
+ * field byte with exactly that bit cleared.
+ *
+ * @param field      Counter field bytes.
+ * @param len        Length of @p field in bytes.
+ * @param byte_out   Receives the index of the byte holding the bit.
+ * @param value_out  Receives the byte to program (current byte with the
+ *                   bit cleared); every other bit in it is unchanged.
+ * @return 0 on success; -1 when every bit is already burned (the counter
+ *         is full).
+ */
+static inline int stm32f4_otp_counter_next_burn(const uint8_t *field, size_t len,
+                                                uint32_t *byte_out, uint8_t *value_out)
+{
+    for (size_t i = 0; i < len; i++) {
+        if (field[i] == 0)
+            continue;
+        for (int bit = 0; bit < 8; bit++) {
+            if ((field[i] & (uint8_t)(1u << bit)) != 0) {
+                *byte_out = (uint32_t)i;
+                *value_out = (uint8_t)(field[i] & (uint8_t)~(1u << bit));
+                return 0;
+            }
+        }
+    }
+    return -1;
+}
+
 /* UART for recovery */
 #define STM32F4_UART_INSTANCE       2  /* USART2 on PA2/PA3 */
 
