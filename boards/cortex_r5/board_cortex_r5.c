@@ -59,19 +59,6 @@ static int r5_flash_read(uint32_t addr, void *buf, size_t len)
     return 0;
 }
 
-static int r5_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    /* F021 flash programming sequence — vendor-specific */
-    return 0;
-}
-
-static int r5_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return 0;
-}
-
 /* ================================================================
  * Watchdog — RTI Digital Windowed Watchdog
  * ================================================================ */
@@ -223,8 +210,8 @@ static const eos_board_ops_t cortex_r5_ops = {
 
     /* Function pointers */
     .flash_read          = r5_flash_read,
-    .flash_write         = r5_flash_write,
-    .flash_erase         = r5_flash_erase,
+    .flash_write         = NULL,
+    .flash_erase         = NULL,
     .watchdog_init       = r5_watchdog_init,
     .watchdog_feed       = r5_watchdog_feed,
     .get_reset_reason    = r5_get_reset_reason,

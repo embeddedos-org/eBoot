@@ -30,18 +30,6 @@ static int am64x_flash_read(uint32_t addr, void *buf, size_t len)
     return EOS_OK;
 }
 
-static int am64x_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    return EOS_OK;
-}
-
-static int am64x_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return EOS_OK;
-}
-
 static int am64x_uart_init(uint32_t baud)
 {
     (void)baud;
@@ -120,8 +108,8 @@ static const eos_board_ops_t am64x_ops = {
     .slot_b_addr = AM64X_SLOT_B_ADDR, .slot_b_size = AM64X_SLOT_B_SIZE,
     .recovery_addr = AM64X_RECOVERY_ADDR, .recovery_size = AM64X_RECOVERY_SIZE,
     .bootctl_addr = AM64X_BOOTCTL_ADDR,
-    .flash_read = am64x_flash_read, .flash_write = am64x_flash_write,
-    .flash_erase = am64x_flash_erase,
+    .flash_read = am64x_flash_read, .flash_write = NULL,
+    .flash_erase = NULL,
     .watchdog_init = am64x_watchdog_init, .watchdog_feed = am64x_watchdog_feed,
     .get_reset_reason = am64x_get_reset_reason, .system_reset = am64x_system_reset,
     .recovery_pin_asserted = am64x_recovery_pin_asserted, .jump = am64x_jump,

@@ -38,18 +38,6 @@ static int imx8m_flash_read(uint32_t addr, void *buf, size_t len)
     return EOS_OK;
 }
 
-static int imx8m_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    return EOS_OK;
-}
-
-static int imx8m_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return EOS_OK;
-}
-
 static int imx8m_uart_init(uint32_t baud)
 {
     (void)baud;
@@ -142,8 +130,8 @@ static const eos_board_ops_t imx8m_ops = {
     .slot_b_addr = IMX8M_SLOT_B_ADDR, .slot_b_size = IMX8M_SLOT_B_SIZE,
     .recovery_addr = IMX8M_RECOVERY_ADDR, .recovery_size = IMX8M_RECOVERY_SIZE,
     .bootctl_addr = IMX8M_BOOTCTL_ADDR,
-    .flash_read = imx8m_flash_read, .flash_write = imx8m_flash_write,
-    .flash_erase = imx8m_flash_erase,
+    .flash_read = imx8m_flash_read, .flash_write = NULL,
+    .flash_erase = NULL,
     .watchdog_init = imx8m_watchdog_init, .watchdog_feed = imx8m_watchdog_feed,
     .get_reset_reason = imx8m_get_reset_reason, .system_reset = imx8m_system_reset,
     .recovery_pin_asserted = imx8m_recovery_pin_asserted, .jump = imx8m_jump,

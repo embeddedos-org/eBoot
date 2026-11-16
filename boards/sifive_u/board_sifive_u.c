@@ -26,18 +26,6 @@ static int sifive_flash_read(uint32_t addr, void *buf, size_t len)
     return EOS_OK;
 }
 
-static int sifive_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    return EOS_OK;
-}
-
-static int sifive_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return EOS_OK;
-}
-
 static int sifive_uart_init(uint32_t baud)
 {
     UART_DIV = SIFIVE_CPU_HZ / baud - 1;
@@ -114,8 +102,8 @@ static const eos_board_ops_t sifive_u_ops = {
     .slot_b_addr = SIFIVE_SLOT_B_ADDR, .slot_b_size = SIFIVE_SLOT_B_SIZE,
     .recovery_addr = SIFIVE_RECOVERY_ADDR, .recovery_size = SIFIVE_RECOVERY_SIZE,
     .bootctl_addr = SIFIVE_BOOTCTL_ADDR,
-    .flash_read = sifive_flash_read, .flash_write = sifive_flash_write,
-    .flash_erase = sifive_flash_erase,
+    .flash_read = sifive_flash_read, .flash_write = NULL,
+    .flash_erase = NULL,
     .get_reset_reason = sifive_get_reset_reason, .system_reset = sifive_system_reset,
     .recovery_pin_asserted = sifive_recovery_pin_asserted, .jump = sifive_jump,
     .uart_init = sifive_uart_init, .uart_send = sifive_uart_send, .uart_recv = sifive_uart_recv,

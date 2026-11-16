@@ -17,18 +17,6 @@ static int stm32mp1_flash_read(uint32_t addr, void *buf, size_t len)
     return 0;
 }
 
-static int stm32mp1_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    return 0;
-}
-
-static int stm32mp1_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return 0;
-}
-
 static void stm32mp1_watchdog_init(uint32_t timeout_ms) { (void)timeout_ms; }
 static void stm32mp1_watchdog_feed(void) {}
 
@@ -61,8 +49,8 @@ static const eos_board_ops_t stm32mp1_ops = {
     .slot_b_size         = STM32MP1_SLOT_B_SIZE,
     .bootctl_addr        = STM32MP1_BOOTCTL_ADDR,
     .flash_read          = stm32mp1_flash_read,
-    .flash_write         = stm32mp1_flash_write,
-    .flash_erase         = stm32mp1_flash_erase,
+    .flash_write         = NULL,
+    .flash_erase         = NULL,
     .watchdog_init       = stm32mp1_watchdog_init,
     .watchdog_feed       = stm32mp1_watchdog_feed,
     .get_reset_reason    = stm32mp1_get_reset_reason,

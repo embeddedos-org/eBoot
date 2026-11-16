@@ -18,18 +18,6 @@ static int qemu_flash_read(uint32_t addr, void *buf, size_t len)
     return 0;
 }
 
-static int qemu_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    return 0;
-}
-
-static int qemu_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return 0;
-}
-
 static void qemu_watchdog_init(uint32_t timeout_ms) { (void)timeout_ms; }
 static void qemu_watchdog_feed(void) {}
 
@@ -72,8 +60,8 @@ static const eos_board_ops_t qemu_arm64_ops = {
     .slot_b_size         = QEMU_ARM64_SLOT_B_SIZE,
     .bootctl_addr        = QEMU_ARM64_BOOTCTL_ADDR,
     .flash_read          = qemu_flash_read,
-    .flash_write         = qemu_flash_write,
-    .flash_erase         = qemu_flash_erase,
+    .flash_write         = NULL,
+    .flash_erase         = NULL,
     .watchdog_init       = qemu_watchdog_init,
     .watchdog_feed       = qemu_watchdog_feed,
     .get_reset_reason    = qemu_get_reset_reason,
