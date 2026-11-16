@@ -17,6 +17,7 @@
  */
 
 #include "eos_secure_boot.h"
+#include "eos_rollback.h"
 #include "eos_hal.h"
 #include "eos_image.h"
 #include "eos_crypto_boot.h"
@@ -62,13 +63,22 @@ static int provide_otp_write;
  * policy, not rollback. eos_rollback_verify() fails closed without one; a
  * board with no counter ops is covered by test_rollback.c instead. */
 static uint32_t sim_counter = 0;
+static int sim_monotonic_increment_calls;
+static int sim_monotonic_increment_fails; /* if set, the burn reports failure */
+static int provide_monotonic = 1;
 static int sim_monotonic_read(uint32_t *value)
 {
     if (!value) return EOS_ERR_INVALID;
     *value = sim_counter;
     return EOS_OK;
 }
-static int sim_monotonic_increment(void) { sim_counter++; return EOS_OK; }
+static int sim_monotonic_increment(void)
+{
+    sim_monotonic_increment_calls++;
+    if (sim_monotonic_increment_fails) return EOS_ERR_GENERIC;
+    sim_counter++;
+    return EOS_OK;
+}
 
 static int sim_otp_read(uint32_t offset, void *buf, size_t len)
 {
@@ -145,9 +155,13 @@ static void reset_fixture(void)
      * before step 7 is ever reached. The staged image is slot A. */
     sim_ops.slot_a_addr = FLASH_BASE;
     sim_ops.slot_a_size = FLASH_SIZE;
-    sim_ops.monotonic_read = sim_monotonic_read;
-    sim_ops.monotonic_increment = sim_monotonic_increment;
+    if (provide_monotonic) {
+        sim_ops.monotonic_read = sim_monotonic_read;
+        sim_ops.monotonic_increment = sim_monotonic_increment;
+    }
     sim_counter = 0;
+    sim_monotonic_increment_calls = 0;
+    sim_monotonic_increment_fails = 0;
     if (provide_otp_write) sim_ops.otp_write = sim_otp_write;
     otp_write_rc = EOS_OK;
     otp_write_calls = 0;
@@ -291,38 +305,89 @@ TEST(test_the_ordinary_boot_path_is_unaffected_by_the_step_4_change)
 
 /* ---- Anti-rollback counter placement ----
  *
- * eos_secure_boot_update_rollback() wrote its 4 bytes at OTP 0x180, which is
- * where core/recovery.c reads the recovery shared secret. OTP bits only move
- * one way, so every counter update permanently corrupted the secret and
- * locked authenticated recovery out. It must write only the security_version
- * field: OTP base 0x100 + 0x44 per docs/key_lifecycle.md 3.2. */
-#define OTP_ROLLBACK_OFFSET        0x144
-#define OTP_RECOVERY_SECRET_OFFSET 0x180
-#define OTP_RECOVERY_SECRET_SIZE   32
+ * eos_secure_boot_update_rollback() used to write its 4 bytes at OTP 0x180,
+ * which is where core/recovery.c reads the recovery shared secret (#159);
+ * #160 moved the write to the security_version field at 0x144. That fixed
+ * the address but not the encoding: the field is a unary fuse bitmap owned
+ * by the board's monotonic counter (boards/stm32f4), and OTP bits only
+ * clear, so a 4-byte value write could not raise the counter -- raising it
+ * needs 0 -> 1 transitions -- and would land arbitrary bytes in the bitmap
+ * instead. update_rollback() now advances the floor through the monotonic
+ * counter, one fuse per step, and never writes OTP directly: the field is
+ * the board's to burn, and the recovery secret is never touched. The
+ * field-isolation half of that promise is pinned by
+ * tests/unit/test_stm32f4_otp_counter.c; what is pinned here is the
+ * advance itself. */
 
-TEST(test_update_rollback_writes_only_the_counter_field)
+TEST(test_update_rollback_advances_the_floor_one_fuse_at_a_time)
 {
     provide_otp_write = 1;
+    provide_monotonic = 1;
     reset_fixture();
     memset(sim_otp, 0xA5, sizeof(sim_otp));
 
-    ASSERT(eos_secure_boot_update_rollback(0x01020304U) == EOS_OK);
-    ASSERT(otp_write_calls == 1);
+    ASSERT(eos_secure_boot_update_rollback(5) == EOS_OK);
+    ASSERT(sim_counter == 5);
+    ASSERT(sim_monotonic_increment_calls == 5);
 
-    /* The counter, big-endian, in its own field. */
-    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 0] == 0x01);
-    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 1] == 0x02);
-    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 2] == 0x03);
-    ASSERT(sim_otp[OTP_ROLLBACK_OFFSET + 3] == 0x04);
-
-    /* Nothing else -- the recovery secret above all -- is touched. */
-    for (uint32_t i = 0; i < OTP_SIZE; i++) {
-        if (i >= OTP_ROLLBACK_OFFSET && i < OTP_ROLLBACK_OFFSET + 4)
-            continue;
+    /* No direct OTP write: the counter field is the board's to burn. */
+    ASSERT(otp_write_calls == 0);
+    for (uint32_t i = 0; i < OTP_SIZE; i++)
         ASSERT(sim_otp[i] == 0xA5);
-    }
-    for (uint32_t i = 0; i < OTP_RECOVERY_SECRET_SIZE; i++)
-        ASSERT(sim_otp[OTP_RECOVERY_SECRET_OFFSET + i] == 0xA5);
+}
+
+TEST(test_update_rollback_never_lowers_the_floor)
+{
+    provide_otp_write = 1;
+    provide_monotonic = 1;
+    reset_fixture();
+    sim_counter = 5;
+
+    ASSERT(eos_secure_boot_update_rollback(3) == EOS_OK);
+    ASSERT(sim_counter == 5);
+    ASSERT(sim_monotonic_increment_calls == 0);
+
+    ASSERT(eos_secure_boot_update_rollback(5) == EOS_OK);
+    ASSERT(sim_counter == 5);
+    ASSERT(sim_monotonic_increment_calls == 0);
+}
+
+TEST(test_update_rollback_refuses_a_jump_past_max_step)
+{
+    provide_otp_write = 1;
+    provide_monotonic = 1;
+    reset_fixture();
+
+    ASSERT(eos_secure_boot_update_rollback(EOS_ROLLBACK_MAX_STEP + 1) ==
+           EOS_ERR_INVALID);
+    ASSERT(sim_counter == 0);
+    ASSERT(sim_monotonic_increment_calls == 0);
+
+    ASSERT(eos_secure_boot_update_rollback(EOS_ROLLBACK_MAX_STEP) == EOS_OK);
+    ASSERT(sim_counter == EOS_ROLLBACK_MAX_STEP);
+}
+
+TEST(test_update_rollback_fails_closed_without_a_counter)
+{
+    provide_otp_write = 1;
+    provide_monotonic = 0;
+    reset_fixture();
+
+    ASSERT(eos_secure_boot_update_rollback(5) == EOS_ERR_NOT_SUPPORTED);
+    ASSERT(sim_counter == 0);
+
+    provide_monotonic = 1; /* restore for the suites after this one */
+}
+
+TEST(test_update_rollback_reports_a_failed_burn)
+{
+    provide_otp_write = 1;
+    provide_monotonic = 1;
+    reset_fixture();
+    sim_monotonic_increment_fails = 1;
+
+    ASSERT(eos_secure_boot_update_rollback(3) != EOS_OK);
+    ASSERT(sim_counter == 0);
 }
 
 int main(void)
@@ -336,7 +401,11 @@ int main(void)
     run_test_the_same_image_boots_when_no_debug_lock_is_asked_for();
     run_test_secure_boot_proceeds_when_the_debug_lock_succeeds();
     run_test_the_ordinary_boot_path_is_unaffected_by_the_step_4_change();
-    run_test_update_rollback_writes_only_the_counter_field();
+    run_test_update_rollback_advances_the_floor_one_fuse_at_a_time();
+    run_test_update_rollback_never_lowers_the_floor();
+    run_test_update_rollback_refuses_a_jump_past_max_step();
+    run_test_update_rollback_fails_closed_without_a_counter();
+    run_test_update_rollback_reports_a_failed_burn();
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

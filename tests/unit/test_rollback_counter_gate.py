@@ -4,8 +4,8 @@
 """The configure-time gate on anti-rollback without a monotonic counter.
 
 eos_rollback_verify() fails closed when the board has no monotonic counter
--- which today is every board under boards/, none of which implements
-monotonic_read. The permissive behaviour survives only as the explicit
+-- which today is every board under boards/ except stm32f4, the only port
+that implements monotonic_read. The permissive behaviour survives only as the explicit
 opt-in EBLDR_ALLOW_NO_ROLLBACK_COUNTER, for builds with no counter by
 design (host tests, sim, bring-up). These tests run real CMake configures
 against the repository and pin what the gate does:
