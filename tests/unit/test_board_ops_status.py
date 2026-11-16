@@ -381,3 +381,16 @@ def test_every_port_in_the_tree_is_classified_for_every_operation():
     for board in status["boards"]:
         assert list(board["operations"]) == status["operations"]
         assert set(board["operations"].values()) <= set(bos.KINDS)
+
+
+def test_no_port_reports_a_flash_operation_it_does_not_perform():
+    """A flash stub that returns success tells bootctl and the updater that
+    data was persisted when nothing was written (#179). A port without a
+    driver leaves the entry NULL and the HAL refuses the operation."""
+    status = bos.collect(ROOT)
+    stubbed = sorted(
+        "%s.%s" % (board["board"], name)
+        for board in status["boards"]
+        for name in ("flash_read", "flash_write", "flash_erase")
+        if board["operations"][name] == bos.OK_STUB)
+    assert stubbed == []
