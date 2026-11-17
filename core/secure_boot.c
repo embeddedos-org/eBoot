@@ -10,6 +10,7 @@
  */
 
 #include "eos_secure_boot.h"
+#include "eos_debug_lock.h"
 #include "eos_image.h"
 #include "eos_rollback.h"
 #include "eos_crypto_boot.h"
@@ -25,7 +26,6 @@
  * writes it directly. */
 #define OTP_KEY_HASH_OFFSET     0x100
 #define OTP_KEY_HASH_SIZE       32
-#define OTP_DEBUG_LOCK_OFFSET   0x1F0
 
 /* Global attestation log — persisted in RAM for kernel to read */
 static eos_attest_log_t g_attest_log;
@@ -213,9 +213,15 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
     /*
      * A policy that asked for the debug port to be closed and did not get
      * it is a policy violation, not a detail. The result used to be
-     * discarded, so a board whose OTP write failed -- or one with no
-     * otp_write at all, where the HAL returns EOS_ERR_NOT_SUPPORTED --
-     * booted with SWD/JTAG open while attestation recorded EOS_SBOOT_OK.
+     * discarded, so a board whose lock failed -- or one with no debug-lock
+     * operation at all -- booted with SWD/JTAG open while attestation
+     * recorded EOS_SBOOT_OK.
+     *
+     * eos_secure_boot_lock_debug() locks through the board's debug_lock
+     * op and verifies the lock by read-back, so it returns EOS_OK only
+     * when the port is actually locked. On STM32F4 the programmed RDP
+     * level takes effect at the next system reset (RM0090 §3.9); the
+     * read-back proves the lock is programmed and durable.
      */
     if (cfg->lock_debug) {
         if (eos_secure_boot_lock_debug() != EOS_OK) {
@@ -253,17 +259,41 @@ int eos_secure_boot_verify_key(const uint8_t key_hash[32])
 
 int eos_secure_boot_lock_debug(void)
 {
-    /* Write lock pattern to eFuse debug lock register */
-    uint8_t lock = 0xFF;
-    int rc = eos_hal_otp_write(OTP_DEBUG_LOCK_OFFSET, &lock, 1);
+    /* Debug protection is the board's to perform, through the HAL's
+     * debug_lock op -- on STM32F4 the RDP option bytes (boards/stm32f4),
+     * not a user OTP byte.
+     *
+     * The previous implementation wrote 0xFF to the debug-lock OTP byte
+     * (0x1F0) and reported EOS_OK. On STM32F4 -- the first board with
+     * otp_write (#181) -- an erased byte already reads 0xFF, so the write
+     * was a no-op that reported success while SWD/JTAG stayed open, and
+     * 0xFF is indistinguishable from erased, so no read-back could ever
+     * have checked it (#184). The OTP byte is gone from this function:
+     * nothing here writes OTP at all.
+     *
+     * The lock is verified by read-back through the HAL's debug_status
+     * op: EOS_OK is returned only when the board reports the port
+     * LOCKED (or PERMANENT). A board with no debug_lock op fails with
+     * EOS_ERR_NOT_SUPPORTED -- the honest answer, which step 7 turns
+     * into a refused boot -- and a lock whose status does not confirm
+     * fails with EOS_ERR_GENERIC, so a fuse burn that silently does not
+     * land can never pass as a locked device.
+     *
+     * One hardware fact the caller must know: on STM32F4 the programmed
+     * RDP level takes effect at the next system reset (RM0090 §3.9:
+     * option bytes are reloaded on reset). The read-back here proves the
+     * lock is programmed and durable; it does not reset the chip. */
+    int rc = eos_hal_debug_lock();
     if (rc != EOS_OK)
         return rc;
 
-    /* On Cortex-M: disable DAP access via DHCSR if supported */
-#if defined(__ARM_ARCH)
-    /* Some MCUs support disabling debug via DBGMCU register */
-    /* *((volatile uint32_t *)0xE0042004) = 0; */
-#endif
+    uint32_t status = EOS_DEBUG_STATUS_UNLOCKED;
+    rc = eos_hal_debug_status(&status);
+    if (rc != EOS_OK)
+        return rc;
+    if (status != EOS_DEBUG_STATUS_LOCKED &&
+        status != EOS_DEBUG_STATUS_PERMANENT)
+        return EOS_ERR_GENERIC;
 
     return EOS_OK;
 }
