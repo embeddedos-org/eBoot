@@ -43,26 +43,11 @@ static volatile uint32_t tick_ms = 0;
 
 /* ---- Flash (SPI flash) ---- */
 
-static int esp32_flash_read(uint32_t addr, void *buf, size_t len)
-{
-    /* In real impl: use esp_rom_spiflash_read() */
-    (void)addr; (void)buf; (void)len;
-    return EOS_OK;
-}
-
-static int esp32_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    /* In real impl: use esp_rom_spiflash_write() */
-    (void)addr; (void)buf; (void)len;
-    return EOS_OK;
-}
-
-static int esp32_flash_erase(uint32_t addr, size_t len)
-{
-    /* In real impl: use esp_rom_spiflash_erase_sector() */
-    (void)addr; (void)len;
-    return EOS_OK;
-}
+/* No flash driver yet: the three flash entries of the ops table are NULL, so
+ * eos_hal_flash_read/write/erase() return an error instead of reporting an
+ * operation that did not happen (#179). A driver would use
+ * esp_rom_spiflash_read(), esp_rom_spiflash_write() and
+ * esp_rom_spiflash_erase_sector(). */
 
 /* ---- UART ---- */
 
@@ -187,9 +172,9 @@ static const eos_board_ops_t esp32_ops = {
     .recovery_size       = ESP32_RECOVERY_SIZE,
     .bootctl_addr        = ESP32_BOOTCTL_ADDR,
 
-    .flash_read          = esp32_flash_read,
-    .flash_write         = esp32_flash_write,
-    .flash_erase         = esp32_flash_erase,
+    .flash_read          = NULL,
+    .flash_write         = NULL,
+    .flash_erase         = NULL,
 
     .watchdog_init       = esp32_watchdog_init,
     .watchdog_feed       = esp32_watchdog_feed,

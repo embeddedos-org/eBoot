@@ -101,8 +101,8 @@
       "ops_table": "am64x_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "code",
         "watchdog_feed": "code",
         "get_reset_reason": "const",
@@ -933,8 +933,8 @@
       "ops_table": "cortex_r5_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "code",
         "watchdog_feed": "code",
         "get_reset_reason": "const",
@@ -1060,9 +1060,9 @@
       "file": "boards/esp32/board_esp32.c",
       "ops_table": "esp32_ops",
       "operations": {
-        "flash_read": "ok-stub",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_read": "absent",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "no-op",
         "watchdog_feed": "no-op",
         "get_reset_reason": "code",
@@ -1285,8 +1285,8 @@
       "ops_table": "imx8m_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "code",
         "watchdog_feed": "code",
         "get_reset_reason": "code",
@@ -1957,8 +1957,8 @@
       "ops_table": "qemu_arm64_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "no-op",
         "watchdog_feed": "no-op",
         "get_reset_reason": "const",
@@ -2181,8 +2181,8 @@
       "ops_table": "samd51_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "no-op",
         "watchdog_feed": "no-op",
         "get_reset_reason": "const",
@@ -2277,8 +2277,8 @@
       "ops_table": "sifive_u_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "absent",
         "watchdog_feed": "absent",
         "get_reset_reason": "const",
@@ -2437,8 +2437,8 @@
       "ops_table": "stm32mp1_ops",
       "operations": {
         "flash_read": "code",
-        "flash_write": "ok-stub",
-        "flash_erase": "ok-stub",
+        "flash_write": "absent",
+        "flash_erase": "absent",
         "watchdog_init": "no-op",
         "watchdog_feed": "no-op",
         "get_reset_reason": "const",
@@ -2693,21 +2693,18 @@
     "by_operation": {
       "flash_read": {
         "code": 10,
-        "ok-stub": 1,
         "err-stub": 2,
-        "absent": 70
+        "absent": 71
       },
       "flash_write": {
         "code": 3,
-        "ok-stub": 8,
         "err-stub": 2,
-        "absent": 70
+        "absent": 78
       },
       "flash_erase": {
         "code": 3,
-        "ok-stub": 8,
         "err-stub": 2,
-        "absent": 70
+        "absent": 78
       },
       "watchdog_init": {
         "code": 4,

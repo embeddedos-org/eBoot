@@ -22,18 +22,6 @@ static int samd51_flash_read(uint32_t addr, void *buf, size_t len)
     return EOS_OK;
 }
 
-static int samd51_flash_write(uint32_t addr, const void *buf, size_t len)
-{
-    (void)addr; (void)buf; (void)len;
-    return EOS_OK;
-}
-
-static int samd51_flash_erase(uint32_t addr, size_t len)
-{
-    (void)addr; (void)len;
-    return EOS_OK;
-}
-
 static int samd51_uart_init(uint32_t baud) { (void)baud; return EOS_OK; }
 static int samd51_uart_send(const void *buf, size_t len) { (void)buf; (void)len; return EOS_OK; }
 static int samd51_uart_recv(void *buf, size_t len, uint32_t timeout_ms)
@@ -89,8 +77,8 @@ static const eos_board_ops_t samd51_ops = {
     .slot_b_addr = SAMD51_SLOT_B_ADDR, .slot_b_size = SAMD51_SLOT_B_SIZE,
     .recovery_addr = SAMD51_RECOVERY_ADDR, .recovery_size = SAMD51_RECOVERY_SIZE,
     .bootctl_addr = SAMD51_BOOTCTL_ADDR,
-    .flash_read = samd51_flash_read, .flash_write = samd51_flash_write,
-    .flash_erase = samd51_flash_erase,
+    .flash_read = samd51_flash_read, .flash_write = NULL,
+    .flash_erase = NULL,
     .watchdog_init = samd51_watchdog_init, .watchdog_feed = samd51_watchdog_feed,
     .get_reset_reason = samd51_get_reset_reason, .system_reset = samd51_system_reset,
     .recovery_pin_asserted = samd51_recovery_pin_asserted, .jump = samd51_jump,
