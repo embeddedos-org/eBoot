@@ -42,11 +42,12 @@ set(EBLDR_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Trust anchor for boards without OTP
 # ====================================================================
 # core/keystore.c falls back to a compiled-in public key when the board has
-# no OTP -- which today is every board under boards/, none of which
-# implements otp_read. Without a production key that fallback is the RFC 8032
-# test key, whose secret is published, and an artifact built that way accepts
-# anyone's firmware. So a Release build of a real board refuses to configure
-# until it is given a key, or told in so many words that it is not a release.
+# no OTP -- which today is every board under boards/ except stm32f4, the
+# only port that implements otp_read. Without a production key that
+# fallback is the RFC 8032 test key, whose secret is published, and an
+# artifact built that way accepts anyone's firmware. So a Release build
+# of a real board refuses to configure until it is given a key, or told
+# in so many words that it is not a release.
 include(cmake/ProductionKey.cmake)
 #
 # What counts as a release. The gate used to match the literal string
@@ -85,10 +86,11 @@ endif()
 # Anti-rollback without a monotonic counter
 # ====================================================================
 # eos_rollback_verify() fails closed when the board has no monotonic
-# counter — which today is every board under boards/, none of which
-# implements monotonic_read. The permissive behaviour survives only as an
-# explicit opt-in for builds with no counter by design (host tests, sim,
-# bring-up), and a release-shaped build of a real board cannot select it:
+# counter — which today is every board under boards/ except stm32f4, the
+# only port that implements monotonic_read. The permissive behaviour
+# survives only as an explicit opt-in for builds with no counter by
+# design (host tests, sim, bring-up), and a release-shaped build of a real
+# board cannot select it:
 # such a build would ship a bootloader that boots any signed image,
 # however old. The gate reuses the production-key gate's definition of
 # release-shaped: only Debug is exempt.

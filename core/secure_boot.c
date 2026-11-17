@@ -20,10 +20,11 @@
  * with OTP base 0x100: key slots at 0x100/0x120 and the revoke mask at
  * 0x140 (core/keystore.c), the security_version counter at 0x144. 0x180
  * holds the recovery shared secret (core/recovery.c), so the counter must
- * never be written there. */
+ * never be written there. The counter field itself is owned by the board's
+ * monotonic counter (boards/stm32f4, a unary fuse bitmap); nothing here
+ * writes it directly. */
 #define OTP_KEY_HASH_OFFSET     0x100
 #define OTP_KEY_HASH_SIZE       32
-#define OTP_ROLLBACK_OFFSET     0x144
 #define OTP_DEBUG_LOCK_OFFSET   0x1F0
 
 /* Global attestation log — persisted in RAM for kernel to read */
@@ -269,12 +270,39 @@ int eos_secure_boot_lock_debug(void)
 
 int eos_secure_boot_update_rollback(uint32_t new_version)
 {
-    /* Write new minimum version to OTP anti-rollback counter */
-    uint8_t ver_bytes[4];
-    ver_bytes[0] = (uint8_t)(new_version >> 24);
-    ver_bytes[1] = (uint8_t)(new_version >> 16);
-    ver_bytes[2] = (uint8_t)(new_version >> 8);
-    ver_bytes[3] = (uint8_t)(new_version);
+    /* The counter lives in the board's monotonic counter -- on STM32F4 a
+     * unary fuse bitmap in the security_version OTP field (0x144). It is
+     * advanced one fuse at a time through eos_hal_monotonic_increment(),
+     * never by writing a value: OTP bits only clear, so a 4-byte value
+     * write could not raise the counter (raising it needs 0 -> 1
+     * transitions) and would land arbitrary bytes in the bitmap field
+     * instead. The previous implementation did exactly that.
+     *
+     * The advance is capped at EOS_ROLLBACK_MAX_STEP, the same refusal
+     * eos_rollback_commit() applies: it limits burns per call, so one call
+     * cannot demand an implausible jump. It does not reserve remaining
+     * capacity -- a small advance can still burn the last fuse, after
+     * which the floor can no longer rise. */
+    uint32_t current = 0;
+    int rc = eos_hal_monotonic_read(&current);
+    if (rc != EOS_OK) return rc;
 
-    return eos_hal_otp_write(OTP_ROLLBACK_OFFSET, ver_bytes, 4);
+    /* Never decrement: a lower version is silently ignored, per
+     * docs/key_lifecycle.md §6.3. */
+    if (new_version <= current) return EOS_OK;
+
+    if (new_version - current > EOS_ROLLBACK_MAX_STEP)
+        return EOS_ERR_INVALID;
+
+    for (uint32_t v = current; v < new_version; v++) {
+        rc = eos_hal_monotonic_increment();
+        if (rc != EOS_OK) return rc;
+    }
+
+    /* A fuse burn can fail without reporting an error. */
+    uint32_t after = 0;
+    rc = eos_hal_monotonic_read(&after);
+    if (rc != EOS_OK) return rc;
+    if (after < new_version) return EOS_ERR_GENERIC;
+    return EOS_OK;
 }

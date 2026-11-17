@@ -2388,13 +2388,13 @@
         "disable_interrupts": "code",
         "enable_interrupts": "code",
         "deinit_peripherals": "code",
-        "otp_read": "absent",
-        "otp_write": "absent",
+        "otp_read": "code",
+        "otp_write": "code",
         "rng_get": "absent",
         "debug_lock": "absent",
         "debug_status": "absent",
-        "monotonic_read": "absent",
-        "monotonic_increment": "absent",
+        "monotonic_read": "code",
+        "monotonic_increment": "code",
         "hw_sha256": "absent",
         "hw_aes_decrypt": "absent"
       }
@@ -2771,10 +2771,12 @@
         "absent": 72
       },
       "otp_read": {
-        "absent": 83
+        "code": 1,
+        "absent": 82
       },
       "otp_write": {
-        "absent": 83
+        "code": 1,
+        "absent": 82
       },
       "rng_get": {
         "absent": 83
@@ -2786,10 +2788,12 @@
         "absent": 83
       },
       "monotonic_read": {
-        "absent": 83
+        "code": 1,
+        "absent": 82
       },
       "monotonic_increment": {
-        "absent": 83
+        "code": 1,
+        "absent": 82
       },
       "hw_sha256": {
         "absent": 83

@@ -43,8 +43,11 @@ apply version policy to what was authenticated.
   increments consume storage that cannot be reclaimed.
 - `eos_rollback_verify(image_counter)` runs on every boot;
   returns `EOS_ERR_ANTI_ROLLBACK` below the floor. Boards with no
-  counter return EOS_OK from verify (fail-closed there would be
-  unbootable); `eos_rollback_get_device_counter()` reports
+  counter return `EOS_ERR_NOT_SUPPORTED` from verify (fail-closed; the
+  permissive behaviour survives only as the explicit build-time opt-in
+  `EBLDR_ALLOW_NO_ROLLBACK_COUNTER`, for builds with no counter by
+  design). STM32F4 is the first board with a counter (OTP-backed unary
+  fuse bitmap); `eos_rollback_get_device_counter()` reports
   `EOS_ERR_NOT_SUPPORTED` so provisioning can detect the case.
 - `eos_rollback_stage()` records the booted image's counter;
   `eos_rollback_clear_staged()` discards it;

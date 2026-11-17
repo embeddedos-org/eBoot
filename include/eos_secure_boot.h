@@ -115,9 +115,21 @@ int eos_secure_boot_verify_key(const uint8_t key_hash[32]);
 int eos_secure_boot_lock_debug(void);
 
 /**
- * @brief Update the anti-rollback counter in OTP.
+ * @brief Raise the anti-rollback floor to @p new_version.
+ *
+ * Advances the board's monotonic counter one fuse at a time, so the floor
+ * only ever rises and only through the counter's own encoding (on STM32F4
+ * a unary fuse bitmap in the security_version OTP field). A lower version
+ * is a no-op, never a decrement; an advance larger than
+ * EOS_ROLLBACK_MAX_STEP is refused. The cap limits burns per call; it does
+ * not reserve remaining capacity — a small advance can still burn the last
+ * fuse, after which the floor can no longer rise.
+ *
  * @param new_version  New minimum version to enforce.
- * @return 0 on success, -1 if OTP write fails.
+ * @return EOS_OK on success or when there is nothing to do;
+ *         EOS_ERR_NOT_SUPPORTED if the board has no monotonic counter;
+ *         EOS_ERR_INVALID if the advance exceeds EOS_ROLLBACK_MAX_STEP;
+ *         EOS_ERR_GENERIC if the counter did not read back as expected.
  */
 int eos_secure_boot_update_rollback(uint32_t new_version);
 

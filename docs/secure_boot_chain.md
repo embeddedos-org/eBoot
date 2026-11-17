@@ -246,11 +246,27 @@ Because the counter is backed by one-time-programmable storage,
   without reporting an error, and a counter that silently did not move would
   leave the device believing it is protected when it is not.
 
-Boards whose `eos_board_ops_t` provides no `monotonic_read`/`monotonic_increment`
-report `EOS_ERR_NOT_SUPPORTED`; verification is permissive on those boards, since
-failing closed would make every device without OTP unbootable. Detect this at
-provisioning time with `eos_rollback_get_device_counter()` rather than relying on
-boot-time enforcement.
+STM32F4 is the first board with a counter: `boards/stm32f4` implements
+`monotonic_read`/`monotonic_increment` on the STM32F407 OTP array, as a
+unary fuse bitmap in the `security_version` field (OTP offset `0x144`,
+`docs/key_lifecycle.md` §3.2) — the counter is the number of cleared bits
+in those four bytes, so the floor can only rise, and each increment burns
+exactly one fuse and reads the count back to prove it moved. Four bytes
+hold 32 steps; when all 32 are burned `monotonic_increment` reports
+`EOS_ERR_FULL` and the floor can no longer rise (images at or above the
+floor still verify). The field is the counter's own: it never overlaps the
+recovery secret at `0x180` (#159, #160).
+
+Boards whose `eos_board_ops_t` provides no `monotonic_read`/
+`monotonic_increment` report `EOS_ERR_NOT_SUPPORTED`, and verification
+fails closed on them — `eos_rollback_verify()` refuses rather than
+assuming the image is current. The permissive behaviour survives only as
+the explicit build-time opt-in `EBLDR_ALLOW_NO_ROLLBACK_COUNTER`, for
+builds with no counter by design (host tests, sim, bring-up); a
+release-shaped build of a real board cannot select it. Detect the
+no-counter case at provisioning time with
+`eos_rollback_get_device_counter()` rather than relying on boot-time
+enforcement.
 
 ### 4.2 Counter Storage Options
 

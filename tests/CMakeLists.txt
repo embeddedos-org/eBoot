@@ -276,6 +276,23 @@ target_link_libraries(eboot_test_stm32f4_flash_layout PRIVATE eboot_core)
 add_test(NAME test_stm32f4_flash_layout COMMAND eboot_test_stm32f4_flash_layout)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_flash_layout)
 
+# --- test_stm32f4_otp_counter: OTP-backed monotonic counter on STM32F4 ---
+# board_stm32f4.c is cross-only, but compiled here on host with the OTP
+# window and the flash registers redirected at RAM buffers (see the test
+# file), so the real burn path runs without hardware. The flash ops are
+# not exercised: they address real flash, and the host has none.
+add_executable(eboot_test_stm32f4_otp_counter
+    unit/test_stm32f4_otp_counter.c
+    ../boards/stm32f4/board_stm32f4.c)
+target_compile_definitions(eboot_test_stm32f4_otp_counter PRIVATE
+    EBLDR_TEST_OTP_WINDOW EBLDR_TEST_FLASH_REGS)
+target_include_directories(eboot_test_stm32f4_otp_counter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/stm32f4
+)
+target_link_libraries(eboot_test_stm32f4_otp_counter PRIVATE eboot_core)
+add_test(NAME test_stm32f4_otp_counter COMMAND eboot_test_stm32f4_otp_counter)
+list(APPEND EBLDR_UNIT_TESTS test_stm32f4_otp_counter)
+
 # --- Valgrind test targets ---
 #
 # The list is derived from the suites registered above, not written out again.
