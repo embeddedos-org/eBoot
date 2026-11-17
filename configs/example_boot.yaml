@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT
+# Example boot.yaml in the format of boot.schema.yaml, for the STM32F407
+# (1 MB of flash). The regions are the STM32F4 memory map in
+# boards/stm32f4/board_stm32f4.h, so each one owns whole flash sectors.
+# The boot log (sector 4) and the recovery image (sector 9) are not
+# boot.yaml regions. CONTRIBUTING.md and AGENTS.md use this file for the
+# config-generation check:
+#
+#   python scripts/generate_config.py configs/example_boot.yaml /tmp/generated/
+boot:
+  board: stm32f4
+  arch: arm
+  flash_base: "0x08000000"
+  flash_size: 1048576
+  layout:
+    stage0: { offset: "0x0", size: 16384 }
+    stage1: { offset: "0x4000", size: 49152 }
+    slot_a: { offset: "0x20000", size: 262144 }
+    slot_b: { offset: "0x60000", size: 262144 }
+    bootctl_primary: { offset: "0xC0000", size: 131072 }
+    bootctl_backup: { offset: "0xE0000", size: 131072 }
+  policy:
+    max_boot_attempts: 3
+    watchdog_timeout_ms: 5000
+    require_signature: true
