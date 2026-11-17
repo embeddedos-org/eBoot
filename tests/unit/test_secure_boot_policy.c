@@ -7,16 +7,25 @@
  * @brief The debug-lock policy must be enforced, not merely attempted
  *
  * cfg.lock_debug asks for SWD/JTAG to be closed before the image runs.
- * eos_secure_boot_lock_debug() writes an OTP fuse to do that, and its result
- * used to be discarded -- so a board whose OTP write failed, or one with no
- * otp_write at all, booted with the debug port open while attestation recorded
- * EOS_SBOOT_OK.
+ * eos_secure_boot_lock_debug() locks through the board's HAL debug_lock
+ * op and verifies the lock by read-back through debug_status, so EOS_OK
+ * means the port is actually locked.
+ *
+ * That verification is #184. The function used to write 0xFF to an OTP
+ * byte (0x1F0) and report EOS_OK: on STM32F4 an erased byte already
+ * reads 0xFF, so the write was a no-op that passed step 7 while the
+ * debug port stayed open, and no read-back could ever have checked it
+ * (0xFF is indistinguishable from erased). The OTP write is gone; the
+ * lock is the board's debug_lock op now, and the mock below models OTP
+ * as erased (0xFF) so the next board to wire otp_write cannot repeat
+ * the same silent pass.
  *
  * Kept separate from tests/unit/test_secure_boot.c (added by #72) so the two
  * do not collide.
  */
 
 #include "eos_secure_boot.h"
+#include "eos_debug_lock.h"
 #include "eos_rollback.h"
 #include "eos_hal.h"
 #include "eos_image.h"
@@ -46,11 +55,19 @@ static int tests_passed = 0;
     } \
 } while(0)
 
-/* ---- Simulated board: OTP only, with a scriptable write result ---- */
+/* ---- Simulated board: OTP only, with a scriptable write result ----
+ *
+ * The OTP window starts erased (0xFF), as real OTP does (#184): a test
+ * that writes 0xFF over an erased byte must see a no-op, not a change.
+ * The debug lock is a separate op pair -- debug_lock programs the lock,
+ * debug_status reports what the board now reads back -- so the tests
+ * below drive the lock through those ops, never through OTP. */
 
 #define OTP_SIZE 0x400
 /* Mirrors core/secure_boot.c; the anchor lives at a fixed OTP offset. */
 #define OTP_KEY_HASH_OFFSET 0x100
+/* The OTP byte the old lock_debug wrote (0xFF) and reported as locked. */
+#define OTP_DEBUG_LOCK_OFFSET 0x1F0
 #define FLASH_BASE 0x08000000U
 #define FLASH_SIZE 0x800
 static uint8_t sim_flash[FLASH_SIZE];
@@ -58,6 +75,11 @@ static uint8_t sim_otp[OTP_SIZE];
 static int otp_write_rc;
 static int otp_write_calls;
 static int provide_otp_write;
+static int provide_debug_lock;  /* wires both debug_lock and debug_status */
+static int debug_lock_rc;
+static int debug_lock_calls;
+static uint32_t sim_reported_debug_status; /* what debug_status reports */
+static int sim_debug_status_rc;
 /* Trivial monotonic counter at floor 0, so the anti-rollback step (step 5b
  * of eos_secure_boot) passes and this suite keeps measuring the debug-lock
  * policy, not rollback. eos_rollback_verify() fails closed without one; a
@@ -105,6 +127,20 @@ static int sim_flash_read(uint32_t addr, void *buf, size_t len)
     return EOS_OK;
 }
 
+static int sim_debug_lock(void)
+{
+    debug_lock_calls++;
+    return debug_lock_rc;
+}
+
+static int sim_debug_status(uint32_t *status)
+{
+    if (!status) return EOS_ERR_INVALID;
+    if (sim_debug_status_rc != EOS_OK) return sim_debug_status_rc;
+    *status = sim_reported_debug_status;
+    return EOS_OK;
+}
+
 /* An image that clears steps 1, 2 and 5, so control actually reaches the
  * debug lock in step 7. Unsigned and unencrypted -- cfg turns those steps
  * off -- because what is under test is the policy step, not the crypto. */
@@ -147,7 +183,9 @@ static eos_board_ops_t sim_ops;
 static void reset_fixture(void)
 {
     memset(&sim_ops, 0, sizeof(sim_ops));
-    memset(sim_otp, 0, sizeof(sim_otp));
+    /* Erased OTP reads 0xFF (#184): the fixture models the physics, so
+     * a write of the erased value is observable as a no-op. */
+    memset(sim_otp, 0xFF, sizeof(sim_otp));
     sim_ops.otp_read = sim_otp_read;
     sim_ops.flash_read = sim_flash_read;
     /* Step 5b (anti-rollback, #103) reads the image's TLV counter through the
@@ -163,43 +201,116 @@ static void reset_fixture(void)
     sim_monotonic_increment_calls = 0;
     sim_monotonic_increment_fails = 0;
     if (provide_otp_write) sim_ops.otp_write = sim_otp_write;
+    if (provide_debug_lock) {
+        sim_ops.debug_lock = sim_debug_lock;
+        sim_ops.debug_status = sim_debug_status;
+    }
     otp_write_rc = EOS_OK;
     otp_write_calls = 0;
+    debug_lock_rc = EOS_OK;
+    debug_lock_calls = 0;
+    sim_reported_debug_status = EOS_DEBUG_STATUS_LOCKED;
+    sim_debug_status_rc = EOS_OK;
     eos_hal_init(&sim_ops);
 }
 
-/* A working eFuse: the lock is written and reported. */
-TEST(test_lock_debug_reports_success_when_the_fuse_is_written)
+/* The lock is taken through the board's debug_lock op and confirmed by
+ * read-back: success means the port is locked, and the OTP byte the old
+ * implementation wrote is never touched -- it still reads erased. */
+TEST(test_lock_debug_reports_success_when_the_port_is_locked)
 {
     provide_otp_write = 1;
+    provide_debug_lock = 1;
     reset_fixture();
 
     ASSERT(eos_secure_boot_lock_debug() == EOS_OK);
-    ASSERT(otp_write_calls == 1);
+    ASSERT(debug_lock_calls == 1);
+    ASSERT(otp_write_calls == 0);
+    ASSERT(sim_otp[OTP_DEBUG_LOCK_OFFSET] == 0xFF);
 }
 
-/* An eFuse write that fails leaves the port open. Saying so is the whole
- * point: the caller asked for it to be closed. */
-TEST(test_lock_debug_reports_a_failed_fuse_write)
+/* A lock that reports failure leaves the port open. Saying so is the
+ * whole point: the caller asked for it to be closed. */
+TEST(test_lock_debug_reports_a_failed_lock)
 {
     provide_otp_write = 1;
+    provide_debug_lock = 1;
     reset_fixture();
-    otp_write_rc = EOS_ERR_FLASH;
+    debug_lock_rc = EOS_ERR_FLASH;
 
     ASSERT(eos_secure_boot_lock_debug() != EOS_OK);
-    ASSERT(otp_write_calls == 1);
+    ASSERT(debug_lock_calls == 1);
 }
 
-/* The common case, and the one that used to be silent: a board that provides
- * no otp_write at all. eos_hal_otp_write() returns EOS_ERR_NOT_SUPPORTED, so
- * lock_debug: true was a no-op on every such board. */
-TEST(test_lock_debug_reports_a_board_with_no_otp_write)
+/* The common case, and the one that used to be silent: a board that
+ * provides no debug_lock op at all. eos_hal_debug_lock() returns
+ * EOS_ERR_NOT_SUPPORTED, so lock_debug: true fails closed instead of
+ * passing step 7 with the port open. */
+TEST(test_lock_debug_reports_a_board_with_no_debug_lock)
 {
-    provide_otp_write = 0;
+    provide_otp_write = 1;
+    provide_debug_lock = 0;
     reset_fixture();
 
-    ASSERT(eos_secure_boot_lock_debug() != EOS_OK);
+    ASSERT(eos_secure_boot_lock_debug() == EOS_ERR_NOT_SUPPORTED);
+    ASSERT(debug_lock_calls == 0);
     ASSERT(otp_write_calls == 0);
+}
+
+/* The read-back is the fix: a lock that reports success but whose
+ * status still reads UNLOCKED -- a fuse burn that silently did not
+ * land -- must not return EOS_OK. */
+TEST(test_lock_debug_fails_when_status_does_not_confirm_the_lock)
+{
+    provide_otp_write = 1;
+    provide_debug_lock = 1;
+    reset_fixture();
+    sim_reported_debug_status = EOS_DEBUG_STATUS_UNLOCKED;
+
+    ASSERT(eos_secure_boot_lock_debug() != EOS_OK);
+    ASSERT(debug_lock_calls == 1);
+}
+
+/* A status query that itself fails cannot confirm the lock either. */
+TEST(test_lock_debug_fails_when_the_status_query_fails)
+{
+    provide_otp_write = 1;
+    provide_debug_lock = 1;
+    reset_fixture();
+    sim_debug_status_rc = EOS_ERR_GENERIC;
+
+    ASSERT(eos_secure_boot_lock_debug() != EOS_OK);
+    ASSERT(debug_lock_calls == 1);
+}
+
+/* A permanently locked port (RDP level 2 on STM32F4) is locked. */
+TEST(test_lock_debug_reports_success_when_status_is_permanent)
+{
+    provide_otp_write = 1;
+    provide_debug_lock = 1;
+    reset_fixture();
+    sim_reported_debug_status = EOS_DEBUG_STATUS_PERMANENT;
+
+    ASSERT(eos_secure_boot_lock_debug() == EOS_OK);
+    ASSERT(debug_lock_calls == 1);
+}
+
+/* #184, pinned directly: the old implementation wrote 0xFF to OTP
+ * 0x1F0 and called that a lock. Erased OTP already reads 0xFF, so that
+ * write changed nothing -- and the mock used to hide it by modelling
+ * OTP as zeroed RAM, where 0xFF over 0x00 looked like a real change.
+ * The fixture now models erased-as-0xFF, and the lock must not write
+ * OTP at all: the byte stays erased and no otp_write happens. */
+TEST(test_lock_debug_never_touches_the_otp_lock_byte)
+{
+    provide_otp_write = 1;
+    provide_debug_lock = 1;
+    reset_fixture();
+    ASSERT(sim_otp[OTP_DEBUG_LOCK_OFFSET] == 0xFF);
+
+    ASSERT(eos_secure_boot_lock_debug() == EOS_OK);
+    ASSERT(otp_write_calls == 0);
+    ASSERT(sim_otp[OTP_DEBUG_LOCK_OFFSET] == 0xFF);
 }
 
 /* The three tests above assert what the *helper* reports. This one asserts
@@ -209,9 +320,32 @@ TEST(test_lock_debug_reports_a_board_with_no_otp_write)
  * revert of the step-7 branch would leave every other test passing. */
 TEST(test_secure_boot_refuses_when_the_debug_lock_cannot_be_taken)
 {
-    provide_otp_write = 0;          /* the common case: board has no otp_write */
+    provide_otp_write = 1;          /* OTP present, but no debug_lock op */
+    provide_debug_lock = 0;
     reset_fixture();
     stage_bootable_image();
+
+    eos_secure_boot_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.image_addr        = FLASH_BASE;
+    cfg.require_signature = false;
+    cfg.require_encryption = false;
+    cfg.lock_debug        = true;
+
+    uint32_t entry = 0;
+    ASSERT(eos_secure_boot(&cfg, &entry) == EOS_SBOOT_ERR_POLICY);
+}
+
+/* The read-back refusal, at boot level: the lock reports success but
+ * the status still reads UNLOCKED, so step 7 refuses the boot rather
+ * than recording a locked attestation for an open port. */
+TEST(test_secure_boot_refuses_when_the_lock_status_disagrees)
+{
+    provide_otp_write = 1;
+    provide_debug_lock = 1;
+    reset_fixture();
+    stage_bootable_image();
+    sim_reported_debug_status = EOS_DEBUG_STATUS_UNLOCKED;
 
     eos_secure_boot_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -245,10 +379,12 @@ TEST(test_the_same_image_boots_when_no_debug_lock_is_asked_for)
     ASSERT(entry == 0x20000001U);
 }
 
-/* And with a working fuse, lock_debug: true boots and the fuse is written. */
+/* And with a working lock, lock_debug: true boots and the lock is taken
+ * through the debug_lock op -- never through OTP. */
 TEST(test_secure_boot_proceeds_when_the_debug_lock_succeeds)
 {
     provide_otp_write = 1;
+    provide_debug_lock = 1;
     reset_fixture();
     stage_bootable_image();
 
@@ -261,7 +397,8 @@ TEST(test_secure_boot_proceeds_when_the_debug_lock_succeeds)
 
     uint32_t entry = 0;
     ASSERT(eos_secure_boot(&cfg, &entry) == EOS_SBOOT_OK);
-    ASSERT(otp_write_calls == 1);
+    ASSERT(debug_lock_calls == 1);
+    ASSERT(otp_write_calls == 0);
 }
 
 /* Step 4's two new refusals have NO test here, deliberately, and this note is
@@ -394,10 +531,15 @@ int main(void)
 {
     printf("=== eBootloader: Secure Boot Debug-Lock Policy Tests ===\n\n");
 
-    run_test_lock_debug_reports_success_when_the_fuse_is_written();
-    run_test_lock_debug_reports_a_failed_fuse_write();
-    run_test_lock_debug_reports_a_board_with_no_otp_write();
+    run_test_lock_debug_reports_success_when_the_port_is_locked();
+    run_test_lock_debug_reports_a_failed_lock();
+    run_test_lock_debug_reports_a_board_with_no_debug_lock();
+    run_test_lock_debug_fails_when_status_does_not_confirm_the_lock();
+    run_test_lock_debug_fails_when_the_status_query_fails();
+    run_test_lock_debug_reports_success_when_status_is_permanent();
+    run_test_lock_debug_never_touches_the_otp_lock_byte();
     run_test_secure_boot_refuses_when_the_debug_lock_cannot_be_taken();
+    run_test_secure_boot_refuses_when_the_lock_status_disagrees();
     run_test_the_same_image_boots_when_no_debug_lock_is_asked_for();
     run_test_secure_boot_proceeds_when_the_debug_lock_succeeds();
     run_test_the_ordinary_boot_path_is_unaffected_by_the_step_4_change();

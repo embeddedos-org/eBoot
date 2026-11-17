@@ -293,6 +293,25 @@ target_link_libraries(eboot_test_stm32f4_otp_counter PRIVATE eboot_core)
 add_test(NAME test_stm32f4_otp_counter COMMAND eboot_test_stm32f4_otp_counter)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_otp_counter)
 
+# --- test_stm32f4_debug_lock: RDP option-byte debug lock on STM32F4 ---
+# Same host-redirect harness as the OTP counter test: board_stm32f4.c is
+# compiled on host with the OTP window and the flash registers at RAM
+# buffers, so the real RDP program path (unlock, write OPTCR, launch
+# with OPTSTRT, read the RDP field back) runs without hardware. The
+# lock programs RDP level 1 (0x00) -- never level 2 (0xCC), which is
+# irreversible -- and is idempotent once locked (#184).
+add_executable(eboot_test_stm32f4_debug_lock
+    unit/test_stm32f4_debug_lock.c
+    ../boards/stm32f4/board_stm32f4.c)
+target_compile_definitions(eboot_test_stm32f4_debug_lock PRIVATE
+    EBLDR_TEST_OTP_WINDOW EBLDR_TEST_FLASH_REGS)
+target_include_directories(eboot_test_stm32f4_debug_lock PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/stm32f4
+)
+target_link_libraries(eboot_test_stm32f4_debug_lock PRIVATE eboot_core)
+add_test(NAME test_stm32f4_debug_lock COMMAND eboot_test_stm32f4_debug_lock)
+list(APPEND EBLDR_UNIT_TESTS test_stm32f4_debug_lock)
+
 # --- Valgrind test targets ---
 #
 # The list is derived from the suites registered above, not written out again.
