@@ -312,6 +312,25 @@ target_link_libraries(eboot_test_stm32f4_debug_lock PRIVATE eboot_core)
 add_test(NAME test_stm32f4_debug_lock COMMAND eboot_test_stm32f4_debug_lock)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_debug_lock)
 
+# --- test_stm32f4_keystore_revoke: key revocation through the STM32F4 OTP ops ---
+# Same host-redirect harness as the OTP counter test: board_stm32f4.c is
+# compiled on host with the OTP window and the flash registers at RAM
+# buffers, so eos_keystore_revoke_slot() persists through the real
+# stm32f4_otp_write() -- whose refusal of set-bit writes is the defect
+# (#183). Revocation is clear-to-revoke: a burned bit revokes the slot and
+# the erased byte (0xFF) revokes nothing.
+add_executable(eboot_test_stm32f4_keystore_revoke
+    unit/test_stm32f4_keystore_revoke.c
+    ../boards/stm32f4/board_stm32f4.c)
+target_compile_definitions(eboot_test_stm32f4_keystore_revoke PRIVATE
+    EBLDR_TEST_OTP_WINDOW EBLDR_TEST_FLASH_REGS)
+target_include_directories(eboot_test_stm32f4_keystore_revoke PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/stm32f4
+)
+target_link_libraries(eboot_test_stm32f4_keystore_revoke PRIVATE eboot_core)
+add_test(NAME test_stm32f4_keystore_revoke COMMAND eboot_test_stm32f4_keystore_revoke)
+list(APPEND EBLDR_UNIT_TESTS test_stm32f4_keystore_revoke)
+
 # --- Valgrind test targets ---
 #
 # The list is derived from the suites registered above, not written out again.

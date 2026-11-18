@@ -151,7 +151,15 @@ For devices with one-time-programmable memory:
 |---|---|---|---|
 | `pubkey_slot_0` | OTP base + 0x00 | 32 bytes | Primary public key |
 | `pubkey_slot_1` | OTP base + 0x20 | 32 bytes | Backup public key |
-| `key_revoke_mask` | OTP base + 0x40 | 4 bytes | Bit mask — bit N=1 revokes slot N |
+| `key_revoke_mask` | OTP base + 0x40 | 4 bytes | Bit mask — a cleared (burned) bit N revokes slot N; the erased byte (`0xFF`) revokes nothing |
+
+Revocation is clear-to-revoke (#183): OTP bits only clear, so burning a
+bit is the only way a revocation can persist — the STM32F4 `otp_write`
+refuses any write that asks to set a bit, which is what the old
+set-to-revoke encoding asked it to do. The same old reading made an
+erased revoke byte mean both slots revoked. Provisioning leaves the
+revoke byte erased, which is the unrevoked state; nothing has to be
+written first, and a revoked slot can never be un-revoked.
 | `security_version` | OTP base + 0x44 | 4 bytes | Monotonic counter for anti-rollback |
 
 **Advantages over compiled-in:**
@@ -226,7 +234,7 @@ Phase 1: Prepare          Phase 2: Transition       Phase 3: Revoke
 
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │ Generate new    │      │ Sign firmware   │      │ Revoke old key  │
-│ keypair         │      │ with NEW key    │      │ (set revoke bit)│
+│ keypair         │      │ with NEW key    │      │ (clear the bit)│
 │                 │      │                 │      │                 │
 │ Install new     │      │ Old key still   │      │ Increment       │
 │ pubkey in       │      │ accepted for    │      │ security version│
@@ -257,7 +265,7 @@ Phase 1: Prepare          Phase 2: Transition       Phase 3: Revoke
 **Phase 3 — Revoke (release N+3, after fleet convergence):**
 
 10. Verify ≥99% of fleet has updated bootloader with both key slots
-11. Set `key_revoke_mask` bit 0 to revoke old key (slot 0)
+11. Clear (burn) `key_revoke_mask` bit 0 to revoke old key (slot 0)
 12. Move new key to slot 0; generate next rotation key in slot 1 (optional)
 13. Increment `security_version` monotonic counter
 14. Securely destroy old private key material
