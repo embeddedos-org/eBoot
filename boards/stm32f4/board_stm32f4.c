@@ -11,6 +11,7 @@
  */
 
 #include "board_stm32f4.h"
+#include "eos_debug_lock.h"
 #include <string.h>
 
 /* ---- STM32F4 Register Definitions ---- */
@@ -35,11 +36,33 @@ extern uint32_t eboot_test_flash_regs[];
 #endif
 #define FLASH_ACR       (*(volatile uint32_t *)(FLASH_IF_BASE + 0x00))
 #define FLASH_KEYR      (*(volatile uint32_t *)(FLASH_IF_BASE + 0x04))
+#define FLASH_OPTKEYR   (*(volatile uint32_t *)(FLASH_IF_BASE + 0x08))
 #define FLASH_SR        (*(volatile uint32_t *)(FLASH_IF_BASE + 0x0C))
 #define FLASH_CR        (*(volatile uint32_t *)(FLASH_IF_BASE + 0x10))
+#define FLASH_OPTCR     (*(volatile uint32_t *)(FLASH_IF_BASE + 0x14))
 
 #define FLASH_KEY1      0x45670123
 #define FLASH_KEY2      0xCDEF89AB
+
+/* Option-byte unlock keys (RM0090 §3.9.2). */
+#define FLASH_OPTKEY1   0x08192A3B
+#define FLASH_OPTKEY2   0x4C5D6E7F
+
+/* FLASH_OPTCR layout (RM0090 §3.9.7): OPTLOCK bit 0, OPTSTRT bit 1,
+ * RDP[7:0] bits 15:8. */
+#define FLASH_OPTCR_OPTLOCK     (1 << 0)
+#define FLASH_OPTCR_OPTSTRT     (1 << 1)
+#define FLASH_OPTCR_RDP_SHIFT   8
+#define FLASH_OPTCR_RDP_MASK    (0xFF << FLASH_OPTCR_RDP_SHIFT)
+
+/* RDP levels (RM0090 §3.9.1): 0xAA is level 0 (no protection); 0xCC is
+ * level 2, which is IRREVERSIBLE -- no debug access ever again, and the
+ * level cannot be lowered -- so nothing in this file ever writes it;
+ * any other value is level 1 (debug disabled, recoverable by mass
+ * erase). The lock programs level 1 as 0x00. */
+#define STM32F4_RDP_LEVEL_0     0xAA
+#define STM32F4_RDP_LEVEL_1     0x00
+#define STM32F4_RDP_LEVEL_2     0xCC
 
 /* IWDG */
 #define IWDG_BASE       0x40003000
@@ -277,6 +300,88 @@ static int stm32f4_monotonic_increment(void)
     return EOS_OK;
 }
 
+/* ---- Debug lock (RDP option bytes) ----
+ *
+ * STM32F4 debug protection is the RDP level in the FLASH_OPTCR option
+ * bytes (RM0090 §3.9), not a user OTP byte: secure_boot used to write
+ * 0xFF to OTP 0x1F0, which is a no-op on erased OTP and locks nothing
+ * (#184). Programming the option bytes erases and rewrites the whole
+ * option-byte page, so the lock is idempotent -- an already-locked
+ * device returns EOS_OK without programming anything -- and it
+ * preserves every other option bit, touching only the RDP field.
+ *
+ * The programmed level takes effect at the next system reset (RM0090
+ * §3.9: option bytes are reloaded on reset); the lock is verified here
+ * by reading the programmed RDP field back out of FLASH_OPTCR, which
+ * proves the lock is programmed and durable.
+ *
+ * A failed option unlock cannot be told apart from a successful one by
+ * reading OPTLOCK back in the host unit-test model, where the registers
+ * are RAM and the unlock has no side effect -- so no post-unlock check
+ * is made here. The post-program read-back is the check that catches
+ * it: if the unlock failed, the OPTCR write is ignored and the RDP
+ * field still reads level 0. */
+
+static uint32_t stm32f4_rdp_level(void)
+{
+    return (FLASH_OPTCR >> FLASH_OPTCR_RDP_SHIFT) & 0xFF;
+}
+
+static int stm32f4_debug_status(uint32_t *status)
+{
+    if (!status) return EOS_ERR_INVALID;
+
+    uint32_t rdp = stm32f4_rdp_level();
+    if (rdp == STM32F4_RDP_LEVEL_0)
+        *status = EOS_DEBUG_STATUS_UNLOCKED;
+    else if (rdp == STM32F4_RDP_LEVEL_2)
+        *status = EOS_DEBUG_STATUS_PERMANENT;
+    else
+        *status = EOS_DEBUG_STATUS_LOCKED;
+    return EOS_OK;
+}
+
+static int stm32f4_debug_lock(void)
+{
+    /* Already locked (level 1) or permanent (level 2): nothing to
+     * program. Level 2 is never programmed here -- it is irreversible --
+     * so a device found at level 2 simply reports success. */
+    uint32_t rdp = stm32f4_rdp_level();
+    if (rdp != STM32F4_RDP_LEVEL_0)
+        return EOS_OK;
+
+    /* Unlock the option bytes. */
+    if (FLASH_OPTCR & FLASH_OPTCR_OPTLOCK) {
+        FLASH_OPTKEYR = FLASH_OPTKEY1;
+        FLASH_OPTKEYR = FLASH_OPTKEY2;
+    }
+
+    /* Program RDP level 1, preserving every other option bit. The
+     * launch is a separate step: write the value with OPTSTRT clear,
+     * then set OPTSTRT to start the option-byte program. */
+    uint32_t optcr = FLASH_OPTCR;
+    optcr &= ~FLASH_OPTCR_RDP_MASK;
+    optcr |= (uint32_t)STM32F4_RDP_LEVEL_1 << FLASH_OPTCR_RDP_SHIFT;
+    optcr &= ~(uint32_t)FLASH_OPTCR_OPTSTRT;
+    FLASH_OPTCR = optcr;
+
+    FLASH_OPTCR |= FLASH_OPTCR_OPTSTRT;
+    flash_wait_busy();
+
+    if (FLASH_SR & 0xF0) {
+        FLASH_SR = 0xF0; /* Clear errors */
+        FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
+        return EOS_ERR_FLASH;
+    }
+    FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
+
+    /* A program can fail without reporting an error: the RDP field
+     * must read back as the level programmed. */
+    if (stm32f4_rdp_level() != STM32F4_RDP_LEVEL_1)
+        return EOS_ERR_FLASH;
+    return EOS_OK;
+}
+
 /* ---- Watchdog ---- */
 
 static void stm32f4_watchdog_init(uint32_t timeout_ms)
@@ -475,6 +580,9 @@ static const eos_board_ops_t stm32f4_ops = {
 
     .otp_read            = stm32f4_otp_read,
     .otp_write           = stm32f4_otp_write,
+
+    .debug_lock          = stm32f4_debug_lock,
+    .debug_status        = stm32f4_debug_status,
 
     .monotonic_read      = stm32f4_monotonic_read,
     .monotonic_increment = stm32f4_monotonic_increment,

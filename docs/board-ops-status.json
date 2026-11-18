@@ -2391,8 +2391,8 @@
         "otp_read": "code",
         "otp_write": "code",
         "rng_get": "absent",
-        "debug_lock": "absent",
-        "debug_status": "absent",
+        "debug_lock": "code",
+        "debug_status": "code",
         "monotonic_read": "code",
         "monotonic_increment": "code",
         "hw_sha256": "absent",
@@ -2779,10 +2779,12 @@
         "absent": 83
       },
       "debug_lock": {
-        "absent": 83
+        "code": 1,
+        "absent": 82
       },
       "debug_status": {
-        "absent": 83
+        "code": 1,
+        "absent": 82
       },
       "monotonic_read": {
         "code": 1,

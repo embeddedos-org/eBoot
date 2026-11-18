@@ -104,13 +104,25 @@ const eos_attest_log_t *eos_secure_boot_get_attestation(void);
 int eos_secure_boot_verify_key(const uint8_t key_hash[32]);
 
 /**
- * @brief Lock debug interfaces (SWD/JTAG) permanently.
- * Only effective on real hardware with eFuse support.
+ * @brief Lock debug interfaces (SWD/JTAG) and verify the lock.
  *
- * @return EOS_OK if the lock was written, otherwise the HAL error --
- *         EOS_ERR_NOT_SUPPORTED on a board with no otp_write. Callers that
- *         asked for the debug port to be closed must treat a non-OK result
- *         as a failure to boot: the port is still open.
+ * Locks through the board's HAL debug_lock op -- on STM32F4 the RDP
+ * option bytes (boards/stm32f4) -- and then reads the lock state back
+ * through debug_status. EOS_OK is returned only when the board reports
+ * the port LOCKED or PERMANENT; anything else is an error, so a lock
+ * that silently does not land can never pass as a locked device.
+ *
+ * @return EOS_OK if the debug port is locked, otherwise the HAL error --
+ *         EOS_ERR_NOT_SUPPORTED on a board with no debug_lock op,
+ *         EOS_ERR_GENERIC if the lock reports success but the read-back
+ *         does not confirm it. Callers that asked for the debug port to
+ *         be closed must treat a non-OK result as a failure to boot: the
+ *         port is still open.
+ *
+ * @note On STM32F4 the programmed RDP level takes effect at the next
+ *       system reset (RM0090 §3.9: option bytes are reloaded on reset).
+ *       The read-back proves the lock is programmed and durable; it
+ *       does not reset the chip.
  */
 int eos_secure_boot_lock_debug(void);
 
