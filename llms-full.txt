@@ -1200,6 +1200,7 @@ For devices with one-time-programmable memory:
 | `pubkey_slot_0` | OTP base + 0x00 | 32 bytes | Primary public key |
 | `pubkey_slot_1` | OTP base + 0x20 | 32 bytes | Backup public key |
 | `key_revoke_mask` | OTP base + 0x40 | 4 bytes | Bit mask — a cleared (burned) bit N revokes slot N; the erased byte (`0xFF`) revokes nothing |
+| `security_version` | OTP base + 0x44 | 4 bytes | Monotonic counter for anti-rollback |
 
 Revocation is clear-to-revoke (#183): OTP bits only clear, so burning a
 bit is the only way a revocation can persist — the STM32F4 `otp_write`
@@ -1208,7 +1209,6 @@ set-to-revoke encoding asked it to do. The same old reading made an
 erased revoke byte mean both slots revoked. Provisioning leaves the
 revoke byte erased, which is the unrevoked state; nothing has to be
 written first, and a revoked slot can never be un-revoked.
-| `security_version` | OTP base + 0x44 | 4 bytes | Monotonic counter for anti-rollback |
 
 **Advantages over compiled-in:**
 - Public key cannot be modified by flash reprogramming

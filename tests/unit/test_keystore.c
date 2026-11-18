@@ -249,6 +249,42 @@ TEST(test_erased_revoke_byte_revokes_nothing)
     otp_detach();
 }
 
+/* An erased key slot is not a provisioned key (#183 second look): a
+ * single-key device leaves slot 1 never written, still 0xFF, and that
+ * must not count as a second key -- and revoking slot 0 must then leave
+ * no active key, not promote the erased slot to active. Under the old
+ * init check (valid iff non-zero) slot 1 read as provisioned, key_count
+ * reported 2, and after revoking slot 0 get_active_key() handed back
+ * 0xFF bytes. */
+TEST(test_erased_key_slot_stays_unprovisioned)
+{
+    otp_reset();
+    memset(sim_otp + OTP_KEY1, 0xFF, 32);   /* slot 1 never written */
+
+    eos_keystore_t ks;
+    ASSERT(eos_keystore_init(&ks) == EOS_OK);
+
+    uint32_t count = 0;
+    ASSERT(eos_keystore_key_count(&ks, &count) == EOS_OK);
+    ASSERT(count == 1);   /* slot 0 only */
+
+    /* Slot 0 is active, so the key must be slot 0's. */
+    const uint8_t *key = NULL;
+    size_t key_len = 0;
+    ASSERT(eos_keystore_get_active_key(&ks, &key, &key_len) == EOS_OK);
+    uint8_t expect[32];
+    memset(expect, 0xA1, sizeof(expect));
+    ASSERT(memcmp(key, expect, 32) == 0);
+
+    /* Revoking the only provisioned key leaves no active key. */
+    ASSERT(eos_keystore_revoke_slot(&ks, 0) == EOS_OK);
+    ASSERT(eos_keystore_get_active_key(&ks, &key, &key_len) != EOS_OK);
+    ASSERT(eos_keystore_key_count(&ks, &count) == EOS_OK);
+    ASSERT(count == 0);
+
+    otp_detach();
+}
+
 /* A board that HAS an OTP but fails to read it has an unknown trust anchor.
  * Falling back to the compiled-in key would let a fault on the OTP bus swap
  * which key the device trusts. */
@@ -364,6 +400,7 @@ int main(void)
     run_test_unreadable_revocation_store_does_not_grant_keys();
     run_test_revocation_flags_are_honoured();
     run_test_erased_revoke_byte_revokes_nothing();
+    run_test_erased_key_slot_stays_unprovisioned();
     run_test_failed_otp_read_does_not_fall_back_to_the_compiled_key();
     run_test_revocation_is_persisted_without_clobbering_other_slots();
     run_test_revoke_reports_a_failed_persist();

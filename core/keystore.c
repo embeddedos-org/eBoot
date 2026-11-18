@@ -73,6 +73,18 @@ static int safe_compare(const uint8_t *a, const uint8_t *b, size_t len)
     return (diff == 0) ? 0 : -1;
 }
 
+/* A slot holds a provisioned key only when its bytes are neither all-zero
+ * nor all-0xFF: unprogrammed OTP reads back as either, and both are public.
+ * Same treatment as the recovery secret in core/recovery.c. */
+static bool slot_is_provisioned(const uint8_t *key)
+{
+    uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
+    uint8_t erased[EOS_ED25519_PUB_KEY_SIZE];
+    memset(erased, 0xFF, sizeof(erased));
+    return safe_compare(key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0 &&
+           safe_compare(key, erased, EOS_ED25519_PUB_KEY_SIZE) != 0;
+}
+
 int eos_keystore_init(eos_keystore_t *ks)
 {
     if (!ks) return EOS_ERR_INVALID;
@@ -96,9 +108,17 @@ int eos_keystore_init(eos_keystore_t *ks)
         return EOS_ERR_KEY;
 
     if (rc == EOS_OK) {
-        /* Check if key is non-zero (provisioned) */
-        uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
-        if (safe_compare(ks->slots[0].key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0) {
+        /* A slot counts as provisioned only when it holds a real key.
+         * Unprogrammed OTP reads back as all zeros or all ones, and both
+         * are public values, so neither is a key anyone provisioned. The
+         * old check accepted all-0xFF, so on a single-key device the
+         * never-written slot 1 read as a second provisioned key -- and
+         * once slot 0 was revoked, the erased slot became the active key
+         * and get_active_key() handed back 0xFF bytes instead of
+         * EOS_ERR_KEY. The erased revoke byte used to hide this by
+         * revoking both slots; clear-to-revoke (#183) removed that mask.
+         * Same treatment as the recovery secret in core/recovery.c. */
+        if (slot_is_provisioned(ks->slots[0].key)) {
             ks->slots[0].valid = true;
             ks->source = EOS_KEY_SOURCE_OTP;
         }
@@ -109,8 +129,7 @@ int eos_keystore_init(eos_keystore_t *ks)
                               EOS_ED25519_PUB_KEY_SIZE);
         if (rc != EOS_OK && rc != EOS_ERR_NOT_SUPPORTED)
             return EOS_ERR_KEY;
-        if (rc == EOS_OK &&
-            safe_compare(ks->slots[1].key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0) {
+        if (rc == EOS_OK && slot_is_provisioned(ks->slots[1].key)) {
             ks->slots[1].valid = true;
         }
 
