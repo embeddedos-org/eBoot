@@ -202,6 +202,7 @@ add_library(eboot_core STATIC
     core/rollback.c
     core/keystore.c
     core/debug_lock.c
+    core/bootloader_protect.c
     core/fw_decrypt.c
     core/image_tlv.c
     core/image_slot_bounds.c

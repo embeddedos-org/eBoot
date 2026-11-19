@@ -42,6 +42,7 @@ extern "C" {
 #define EOS_ERR_DECRYPT        -16
 #define EOS_ERR_KEY            -17
 #define EOS_ERR_DEBUG_LOCKED   -18
+#define EOS_ERR_WRITE_PROTECTED -19
 
 /* ---------------- Magic Numbers ---------------- */
 
