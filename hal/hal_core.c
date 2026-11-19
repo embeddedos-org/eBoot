@@ -30,8 +30,9 @@ int eos_hal_flash_read(uint32_t addr, void *buf, size_t len)
 
 /* ---- Bootloader-region allow-list ----
 
- * A board that declares its bootloader region (bootloader_addr/size
- * non-zero) gets every flash write and erase checked against it: any
+ * A board that declares its bootloader region (bootloader_size
+ * non-zero -- the address itself may be 0, flash can live there)
+ * gets every flash write and erase checked against it: any
  * range intersecting the region is refused with EOS_ERR_WRITE_PROTECTED
  * before the board driver is called, so no caller -- the updater, the
  * recovery transport, a future bootloader self-update -- can overwrite
@@ -44,8 +45,18 @@ int eos_hal_flash_read(uint32_t addr, void *buf, size_t len)
  * region cannot smuggle past the test. */
 static bool flash_range_hits_bootloader(uint32_t addr, size_t len)
 {
-    if (!g_ops || g_ops->bootloader_addr == 0 || g_ops->bootloader_size == 0)
+    /* Undeclared is bootloader_size == 0: a region at address 0 is a
+     * real layout, and the old bootloader_addr == 0 test silently
+     * unguarded it -- declared-but-unprotected, fail-open. */
+    if (!g_ops || g_ops->bootloader_size == 0)
         return false;
+    /* A range at least as long as the whole 32-bit address space
+     * covers every address, so it hits any declared region. On a
+     * 64-bit host len can exceed 2^32 and the 64-bit end below
+     * would wrap and under-refuse; on the 32-bit target len can
+     * never reach this. */
+    if ((uint64_t)len >= 0x100000000ull)
+        return true;
     uint64_t start = addr;
     uint64_t end = start + (uint64_t)len;
     uint64_t region_start = g_ops->bootloader_addr;

@@ -42,7 +42,8 @@ typedef struct {
      * flash write/erase allow-list refuses any range intersecting it,
      * and flash_protect_bootloader() programs the hardware write
      * protection for it where the board supports one. A board that
-     * declares no region (both zero) gets no allow-list enforcement:
+     * declares no region (bootloader_size zero) gets no allow-list
+     * enforcement:
      * protection is opt-in per board, and a board that cannot name its
      * bootloader region must not claim to protect it. */
     uint32_t bootloader_addr;

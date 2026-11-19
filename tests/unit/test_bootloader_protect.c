@@ -19,7 +19,13 @@
  *    including ranges that end exactly at the region start or start
  *    exactly at the region end;
  *  - a board that declares no region keeps today's behaviour (the
- *    guard cannot protect a region the board will not name);
+ *    guard cannot protect a region the board will not name); the
+ *    undeclared sentinel is bootloader_size == 0, so a region at
+ *    address 0 -- flash can live there -- is guarded, not ignored;
+ *  - a range at least as long as the whole 32-bit address space is
+ *    refused: it covers every address, so it hits any declared region
+ *    (on a 64-bit host its 64-bit end would otherwise wrap and
+ *    under-refuse);
  *  - the range check is overflow-safe: a range that wraps uint32_t
  *    cannot smuggle its tail into the region;
  *  - reads are unaffected, and a missing board still fails the way
@@ -35,6 +41,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -201,6 +208,24 @@ TEST(test_write_wrapping_uint32_is_refused)
     ASSERT(g_ctx.write_called == 1);
 }
 
+/* A range at least as long as the whole 32-bit address space covers
+ * every address, so it hits any declared region from any start --
+ * including one whose 64-bit end wraps back below the region. Only
+ * expressible where size_t is 64-bit (host test builds are); on the
+ * 32-bit target len can never reach 2^32, so the branch is dead there
+ * by construction. */
+#if SIZE_MAX > 0xFFFFFFFFu
+TEST(test_write_spanning_the_whole_address_space_is_refused)
+{
+    reset_fixture();
+
+    ASSERT(eos_hal_flash_write(SLOT_A_ADDR, g_buf, (size_t)0x100000000ull) == EOS_ERR_WRITE_PROTECTED);
+    ASSERT(eos_hal_flash_erase(SLOT_A_ADDR, (size_t)0x100000000ull) == EOS_ERR_WRITE_PROTECTED);
+    ASSERT(g_ctx.write_called == 0);
+    ASSERT(g_ctx.erase_called == 0);
+}
+#endif
+
 /* ---- Allow-list: writes outside the region pass through ---- */
 
 TEST(test_writes_outside_the_region_pass_through)
@@ -259,6 +284,29 @@ TEST(test_undeclared_region_is_not_guarded)
     ASSERT(eos_hal_flash_erase(BOOTLOADER_ADDR, 0x4000) == EOS_OK);
     ASSERT(g_ctx.write_called == 1);
     ASSERT(g_ctx.erase_called == 1);
+
+    mock_ops.bootloader_addr = BOOTLOADER_ADDR;
+    mock_ops.bootloader_size = BOOTLOADER_SIZE;
+}
+
+TEST(test_region_at_address_zero_is_guarded)
+{
+    reset_fixture();
+    mock_ops.bootloader_addr = 0;
+    mock_ops.bootloader_size = 0x10000;
+    eos_hal_init(&mock_ops);
+
+    /* Flash at address 0 is a real layout, and the old
+     * bootloader_addr == 0 sentinel silently unguarded it. */
+    ASSERT(eos_hal_flash_write(0, g_buf, 16) == EOS_ERR_WRITE_PROTECTED);
+    ASSERT(eos_hal_flash_write(0x8000, g_buf, 16) == EOS_ERR_WRITE_PROTECTED);
+    ASSERT(eos_hal_flash_erase(0, 0x1000) == EOS_ERR_WRITE_PROTECTED);
+    ASSERT(g_ctx.write_called == 0);
+    ASSERT(g_ctx.erase_called == 0);
+
+    /* Outside the zero-based region still passes through. */
+    ASSERT(eos_hal_flash_write(SLOT_A_ADDR, g_buf, 16) == EOS_OK);
+    ASSERT(g_ctx.write_called == 1);
 
     mock_ops.bootloader_addr = BOOTLOADER_ADDR;
     mock_ops.bootloader_size = BOOTLOADER_SIZE;
@@ -343,10 +391,14 @@ int main(void)
     run_test_write_straddling_the_region_is_refused();
     run_test_erase_intersecting_the_region_is_refused();
     run_test_write_wrapping_uint32_is_refused();
+#if SIZE_MAX > 0xFFFFFFFFu
+    run_test_write_spanning_the_whole_address_space_is_refused();
+#endif
     run_test_writes_outside_the_region_pass_through();
     run_test_ranges_touching_the_region_boundary_pass_through();
     run_test_reads_of_the_region_are_unaffected();
     run_test_undeclared_region_is_not_guarded();
+    run_test_region_at_address_zero_is_guarded();
     run_test_missing_board_still_fails_the_old_way();
     run_test_apply_calls_the_board_protect_op();
     run_test_apply_propagates_a_failed_program();
