@@ -600,7 +600,7 @@ Planned for future releases.
 | Recovery authentication | `core/recovery.c` | Planned | 🔲 Not started | Unauthenticated UART commands rejected; challenge-response completes in < 5 seconds; brute-force rate limited |
 | Debug lock at boot | `boards/*/board_init.c` | Platform-specific | 🔲 Not started | JTAG/SWD locked in production builds; debug lock applied before any secret processing; verified by probe test |
 | MPU isolation between stages | `core/mpu_boot.c` | `eos_mpu_boot.h` | 🔲 Not started | Stage-1 cannot write stage-0 region; application cannot write bootloader regions; MPU fault handler logs violation |
-| Flash write protection | HAL | Platform-specific | 🔲 Not started | Bootloader flash sectors marked read-only after stage-0 init; write attempts generate fault |
+| Flash write protection | HAL + `core/bootloader_protect.c` | `eos_bootloader_protect.h`, `eos_hal_flash_protect_bootloader()` | ✅ Implemented (STM32F4 only) | Bootloader region refused by the HAL write/erase allow-list on boards that declare it; STM32F4 programs WRP (nWRP, sectors 0–3) with read-back verification; other boards declare no region and are gated out |
 | Recovery audit logging | `core/recovery.c` | Planned | 🔲 Not started | All recovery commands logged with timestamp; log survives reset; log readable via LOG command |
 
 ### Status Legend
@@ -737,7 +737,7 @@ External boundaries:
 
 | ID | STRIDE | Threat | Likelihood | Impact | Risk | Mitigation | Status |
 |---|---|---|---|---|---|---|---|
-| T-101 | Tampering | Attacker modifies stage-0 binary in flash | Low | Critical | High | ROM hash verification (SoC-dependent); debug lock | Planned |
+| T-101 | Tampering | Attacker modifies stage-0 binary in flash | Low | Critical | High | ROM hash verification (SoC-dependent); debug lock; HAL allow-list + STM32F4 WRP for the bootloader region | Partial |
 | T-102 | Elevation of Privilege | Stage-0 contains vulnerability allowing arbitrary code execution | Low | Critical | High | Minimal code surface (16 KB); no dynamic memory; stack bounds | Mitigated |
 | T-103 | Information Disclosure | Stage-0 leaks key material or secrets via UART during early init | Low | High | Medium | No secrets processed in stage-0; UART output limited to recovery mode | Mitigated |
 
@@ -760,7 +760,7 @@ External boundaries:
 | T-303 | Information Disclosure | Unencrypted firmware reveals intellectual property | Medium | Medium | Medium | AES-256-GCM payload encryption (Phase 3); `EOS_IMG_FLAG_ENCRYPTED` | Planned |
 | T-304 | Denial of Service | Both slots contain invalid images, device is bricked | Low | Critical | Medium | Recovery image in dedicated partition (16 KB); UART recovery protocol | Mitigated |
 | T-305 | Repudiation | No audit trail of which firmware version was booted | Low | Medium | Low | Boot log records slot, version, verification result, reset reason | Mitigated |
-| T-306 | Elevation of Privilege | Application gains ability to overwrite bootloader regions | Low | Critical | Medium | Flash write protection for bootloader regions (platform MPU/flash lock) | Planned |
+| T-306 | Elevation of Privilege | Application gains ability to overwrite bootloader regions | Low | Critical | Medium | HAL flash write/erase allow-list refusing the bootloader region on boards that declare it, plus STM32F4 WRP (nWRP, sectors 0–3) via `eos_bootloader_protect.h`; other boards gated (no primitive) | Partial |
 
 ### TB-4: UART Recovery Interface
 
@@ -777,7 +777,7 @@ External boundaries:
 
 | ID | STRIDE | Threat | Likelihood | Impact | Risk | Mitigation | Status |
 |---|---|---|---|---|---|---|---|
-| T-501 | Tampering | Direct flash modification via physical access or glitch attack | Low | Critical | Medium | SHA-256 + signature verification at boot; flash write protection | Planned |
+| T-501 | Tampering | Direct flash modification via physical access or glitch attack | Low | Critical | Medium | SHA-256 + signature verification at boot; STM32F4 flash write protection (WRP) for the bootloader region | Partial |
 | T-502 | Tampering | Power loss during boot control block write corrupts metadata | Medium | High | High | Anti-tearing dual-write (primary + backup); CRC32 validation on load | Mitigated |
 | T-503 | Information Disclosure | Flash contents readable via chip-off or debug interface | Low | High | Medium | Payload encryption with AES-256-GCM (Phase 3); debug lock | Planned |
 | T-504 | Denial of Service | Flash wear-out from excessive erase/write cycles | Low | High | Low | Wear-leveling for boot control region; write coalescing | Monitored |
@@ -850,6 +850,7 @@ verify-before-boot is the only control the device actually has.
 | Boot log with reset reason | T-305 |
 | Recovery mode with packet validation | T-402 (partial) |
 | Redundant metadata (primary + backup) | T-203, T-304 |
+| Bootloader self-protection (HAL allow-list + STM32F4 WRP) | T-101 (partial), T-306 (partial) |
 
 ### Phase 2 — Planned
 
@@ -869,7 +870,7 @@ verify-before-boot is the only control the device actually has.
 | Recovery authentication (challenge-response) | T-401, T-404, T-405, T-406 | v0.3.0 |
 | Debug lock enforcement at boot | T-601, T-602, T-603 | v0.3.0 |
 | MPU isolation between stages | T-204, T-306 | v0.3.0 |
-| Flash write protection for bootloader | T-101, T-306 | v0.3.0 |
+| Flash write protection for bootloader (partial: HAL allow-list + STM32F4 WRP landed; other boards gated) | T-101, T-306 | v0.3.0 |
 
 ### Watch items — external dependencies
 

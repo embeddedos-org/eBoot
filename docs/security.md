@@ -102,7 +102,7 @@ Planned for future releases.
 | Recovery authentication | `core/recovery.c` | Planned | 🔲 Not started | Unauthenticated UART commands rejected; challenge-response completes in < 5 seconds; brute-force rate limited |
 | Debug lock at boot | `boards/*/board_init.c` | Platform-specific | 🔲 Not started | JTAG/SWD locked in production builds; debug lock applied before any secret processing; verified by probe test |
 | MPU isolation between stages | `core/mpu_boot.c` | `eos_mpu_boot.h` | 🔲 Not started | Stage-1 cannot write stage-0 region; application cannot write bootloader regions; MPU fault handler logs violation |
-| Flash write protection | HAL | Platform-specific | 🔲 Not started | Bootloader flash sectors marked read-only after stage-0 init; write attempts generate fault |
+| Flash write protection | HAL + `core/bootloader_protect.c` | `eos_bootloader_protect.h`, `eos_hal_flash_protect_bootloader()` | ✅ Implemented (STM32F4 only) | Bootloader region refused by the HAL write/erase allow-list on boards that declare it; STM32F4 programs WRP (nWRP, sectors 0–3) with read-back verification; other boards declare no region and are gated out |
 | Recovery audit logging | `core/recovery.c` | Planned | 🔲 Not started | All recovery commands logged with timestamp; log survives reset; log readable via LOG command |
 
 ### Status Legend
