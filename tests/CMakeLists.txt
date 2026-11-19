@@ -293,6 +293,12 @@ target_link_libraries(eboot_test_stm32f4_otp_counter PRIVATE eboot_core)
 add_test(NAME test_stm32f4_otp_counter COMMAND eboot_test_stm32f4_otp_counter)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_otp_counter)
 
+# --- test_bootloader_protect: HAL allow-list + core policy ---
+add_executable(eboot_test_bootloader_protect unit/test_bootloader_protect.c)
+target_link_libraries(eboot_test_bootloader_protect PRIVATE eboot_core)
+add_test(NAME test_bootloader_protect COMMAND eboot_test_bootloader_protect)
+list(APPEND EBLDR_UNIT_TESTS test_bootloader_protect)
+
 # --- test_stm32f4_debug_lock: RDP option-byte debug lock on STM32F4 ---
 # Same host-redirect harness as the OTP counter test: board_stm32f4.c is
 # compiled on host with the OTP window and the flash registers at RAM
@@ -311,6 +317,26 @@ target_include_directories(eboot_test_stm32f4_debug_lock PRIVATE
 target_link_libraries(eboot_test_stm32f4_debug_lock PRIVATE eboot_core)
 add_test(NAME test_stm32f4_debug_lock COMMAND eboot_test_stm32f4_debug_lock)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_debug_lock)
+
+# --- test_stm32f4_bootloader_protect: WRP option-byte bootloader protection on STM32F4 ---
+# Same host-redirect harness as the debug-lock test: board_stm32f4.c is
+# compiled on host with the OTP window and the flash registers at RAM
+# buffers, so the real WRP program path (unlock, write OPTCR, launch
+# with OPTSTRT, read the nWRP field back) runs without hardware. The
+# protect call clears the nWRP bits for sectors 0-3 (stage-0 + stage-1)
+# and no others, preserves the RDP level, and is idempotent once
+# protected (#190).
+add_executable(eboot_test_stm32f4_bootloader_protect
+    unit/test_stm32f4_bootloader_protect.c
+    ../boards/stm32f4/board_stm32f4.c)
+target_compile_definitions(eboot_test_stm32f4_bootloader_protect PRIVATE
+    EBLDR_TEST_OTP_WINDOW EBLDR_TEST_FLASH_REGS)
+target_include_directories(eboot_test_stm32f4_bootloader_protect PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/stm32f4
+)
+target_link_libraries(eboot_test_stm32f4_bootloader_protect PRIVATE eboot_core)
+add_test(NAME test_stm32f4_bootloader_protect COMMAND eboot_test_stm32f4_bootloader_protect)
+list(APPEND EBLDR_UNIT_TESTS test_stm32f4_bootloader_protect)
 
 # --- test_stm32f4_keystore_revoke: key revocation through the STM32F4 OTP ops ---
 # Same host-redirect harness as the OTP counter test: board_stm32f4.c is
