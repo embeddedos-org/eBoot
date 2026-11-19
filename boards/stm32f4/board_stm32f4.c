@@ -73,7 +73,6 @@ extern uint32_t eboot_test_flash_regs[];
  * reversible -- clearing the bits again (or a mass erase) removes it --
  * unlike RDP level 2, so no irreversible state is created here. */
 #define FLASH_OPTCR_NWRP_SHIFT  16
-#define FLASH_OPTCR_NWRP_MASK   (0xFFF << FLASH_OPTCR_NWRP_SHIFT)
 
 /* IWDG */
 #define IWDG_BASE       0x40003000
