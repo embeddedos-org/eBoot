@@ -29,7 +29,10 @@
  * nWRP field unchanged is caught by the read-back in
  * stm32f4_flash_protect_bootloader() itself, and
  * test_bootloader_protect.c pins the core's refusal when the board
- * has no protect op at all.
+ * has no protect op at all. The one lock the RAM model cannot show
+ * either -- RDP level 2 freezing the option bytes -- is handled by
+ * the code failing closed before any program attempt, so the host
+ * tests see the same failure the hardware would.
  */
 
 #include "board_stm32f4.h"
@@ -175,13 +178,34 @@ TEST(test_protect_never_touches_the_rdp_level)
     ASSERT(eos_hal_flash_protect_bootloader() == EOS_OK);
     ASSERT(((optcr() >> 8) & 0xFFu) == 0x00);
     ASSERT(read_status() == EOS_BOOTLOADER_PROTECT_PROTECTED);
+}
 
-    /* RDP level 2 (permanent): same -- WRP never disturbs it, and the
-     * protect call must not fail on a device it cannot debug anyway. */
+/* RDP level 2 permanently locks the option bytes (RM0090 §3.9), so a
+ * device that is not already protected cannot be programmed: the
+ * protect call fails closed, the RDP byte is untouched, and the
+ * region stays unprotected -- it must not report success. */
+TEST(test_protect_fails_closed_at_rdp_level_2)
+{
     reset_fixture();
     set_rdp(0xCC);
+
+    ASSERT(eos_hal_flash_protect_bootloader() == EOS_ERR_FLASH);
+    ASSERT(((optcr() >> 8) & 0xFFu) == 0xCC);
+    ASSERT(read_status() == EOS_BOOTLOADER_PROTECT_UNPROTECTED);
+}
+
+/* The level-2 exception is a device whose WRP is already programmed:
+ * nothing needs programming, so the call succeeds without touching
+ * the option bytes at all. */
+TEST(test_protect_is_idempotent_at_rdp_level_2_when_already_protected)
+{
+    reset_fixture();
+    set_rdp(0xCC);
+    eboot_test_flash_regs[FLASH_OPTCR_IDX] &= ~BOOTLOADER_NWRP_MASK;
+
     ASSERT(eos_hal_flash_protect_bootloader() == EOS_OK);
     ASSERT(((optcr() >> 8) & 0xFFu) == 0xCC);
+    ASSERT((optcr() & BOOTLOADER_NWRP_MASK) == 0);
     ASSERT(read_status() == EOS_BOOTLOADER_PROTECT_PROTECTED);
 }
 
@@ -231,6 +255,8 @@ int main(void)
     run_test_status_reports_partial_protection_as_unprotected();
     run_test_protect_programs_nwrp_for_bootloader_sectors();
     run_test_protect_never_touches_the_rdp_level();
+    run_test_protect_fails_closed_at_rdp_level_2();
+    run_test_protect_is_idempotent_at_rdp_level_2_when_already_protected();
     run_test_protect_is_idempotent_when_already_protected();
     run_test_protect_reports_a_failed_program();
     run_test_hal_refuses_bootloader_writes_on_real_stm32f4_ops();

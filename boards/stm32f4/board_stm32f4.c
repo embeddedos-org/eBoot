@@ -408,6 +408,10 @@ static int stm32f4_debug_lock(void)
  *
  * The call is idempotent: a device whose bootloader sectors are
  * already protected returns EOS_OK without programming anything.
+ * At RDP level 2 the option bytes are permanently locked (RM0090
+ * §3.9), so a device that is not already protected cannot be
+ * programmed: the call fails closed (EOS_ERR_FLASH) instead of
+ * attempting a program the hardware would ignore.
  * WRP takes effect at the next reset (RM0090 §3.9: option bytes are
  * reloaded on reset); the HAL allow-list covers the same region from
  * the first boot, so the window between programming and reset is
@@ -458,6 +462,16 @@ static int stm32f4_flash_protect_bootloader(void)
     /* Already protected: nothing to program. */
     if ((FLASH_OPTCR & mask) == 0)
         return EOS_OK;
+
+    /* RDP level 2 permanently locks the option bytes (RM0090 §3.9:
+     * "user options can no longer be changed"), so no program attempt
+     * can succeed -- the write is ignored and the read-back below
+     * would fail anyway. Fail closed here instead of spending a
+     * futile unlock/program cycle, and so the host test model (where
+     * the registers are plain RAM and the lock has no side effect)
+     * sees the same failure the hardware would. */
+    if (stm32f4_rdp_level() == STM32F4_RDP_LEVEL_2)
+        return EOS_ERR_FLASH;
 
     /* Unlock the option bytes. */
     if (FLASH_OPTCR & FLASH_OPTCR_OPTLOCK) {
