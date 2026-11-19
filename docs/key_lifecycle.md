@@ -429,6 +429,8 @@ value for `EBLDR_PRODUCTION_KEY`.
 └───────────────────────────────────────────────────────┘
 ```
 
+> **Note — bootloader-region protection:** on boards that declare a bootloader region (today: STM32F4, sectors 0–3), the HAL refuses every bootloader-region write with `EOS_ERR_WRITE_PROTECTED`, so step 7 cannot deliver the emergency *bootloader* by OTA. Deliver the emergency bootloader with a debug probe (SWD/JTAG) or a mass erase and re-flash instead; application-slot OTA is unaffected. A privileged in-band entry point for bootloader replacement is a named follow-up — none exists in-tree.
+
 ### 8.3 Key Compromise Indicators
 
 - Firmware images signed with the production key that were not produced by the authorized build pipeline
@@ -438,7 +440,7 @@ value for `EBLDR_PRODUCTION_KEY`.
 
 ### 8.4 Limitations
 
-- **Compiled-in keys:** Devices with compiled-in public keys require a bootloader update to rotate keys. If both key slots are compromised and the device cannot receive OTA updates, physical UART recovery is required.
+- **Compiled-in keys:** Devices with compiled-in public keys require a bootloader update to rotate keys. If both key slots are compromised and the device cannot receive OTA updates, physical UART recovery is required. On boards that declare a bootloader region, the emergency bootloader cannot be delivered by OTA — the HAL refuses bootloader-region writes (`EOS_ERR_WRITE_PROTECTED`); use a debug probe or mass erase (see the §8.2 note).
 - **OTP/eFuse keys:** Once all OTP key slots are revoked, the device cannot verify any firmware. This is a permanent brick condition — plan key slots carefully.
 - **Offline devices:** Devices not connected to the network cannot receive emergency key rotation. They remain vulnerable until physically recovered.
 
