@@ -120,6 +120,7 @@ static void sim_system_reset(void) {}
  * takes its anchor from OTP slot 0 when the board has OTP at all; serve the
  * public half of the key the fixture signature was made under. */
 #define OTP_KEY_OFFSET_SLOT0  0x100u
+#define OTP_REVOKE_OFFSET     0x140u
 
 static int sim_otp_read(uint32_t offset, void *buf, size_t len)
 {
@@ -128,7 +129,12 @@ static int sim_otp_read(uint32_t offset, void *buf, size_t len)
         memcpy(buf, eos_test_sig_pubkey, len);
         return EOS_OK;
     }
-    memset(buf, 0, len);        /* slot 1 unprovisioned, nothing revoked */
+    if (offset == OTP_REVOKE_OFFSET) {
+        /* Clear-to-revoke (#183): the erased byte (0xFF) revokes nothing. */
+        memset(buf, 0xFF, len);
+        return EOS_OK;
+    }
+    memset(buf, 0, len);        /* slot 1 unprovisioned */
     return EOS_OK;
 }
 

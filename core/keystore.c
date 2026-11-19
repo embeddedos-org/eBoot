@@ -73,6 +73,18 @@ static int safe_compare(const uint8_t *a, const uint8_t *b, size_t len)
     return (diff == 0) ? 0 : -1;
 }
 
+/* A slot holds a provisioned key only when its bytes are neither all-zero
+ * nor all-0xFF: unprogrammed OTP reads back as either, and both are public.
+ * Same treatment as the recovery secret in core/recovery.c. */
+static bool slot_is_provisioned(const uint8_t *key)
+{
+    uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
+    uint8_t erased[EOS_ED25519_PUB_KEY_SIZE];
+    memset(erased, 0xFF, sizeof(erased));
+    return safe_compare(key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0 &&
+           safe_compare(key, erased, EOS_ED25519_PUB_KEY_SIZE) != 0;
+}
+
 int eos_keystore_init(eos_keystore_t *ks)
 {
     if (!ks) return EOS_ERR_INVALID;
@@ -96,9 +108,17 @@ int eos_keystore_init(eos_keystore_t *ks)
         return EOS_ERR_KEY;
 
     if (rc == EOS_OK) {
-        /* Check if key is non-zero (provisioned) */
-        uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
-        if (safe_compare(ks->slots[0].key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0) {
+        /* A slot counts as provisioned only when it holds a real key.
+         * Unprogrammed OTP reads back as all zeros or all ones, and both
+         * are public values, so neither is a key anyone provisioned. The
+         * old check accepted all-0xFF, so on a single-key device the
+         * never-written slot 1 read as a second provisioned key -- and
+         * once slot 0 was revoked, the erased slot became the active key
+         * and get_active_key() handed back 0xFF bytes instead of
+         * EOS_ERR_KEY. The erased revoke byte used to hide this by
+         * revoking both slots; clear-to-revoke (#183) removed that mask.
+         * Same treatment as the recovery secret in core/recovery.c. */
+        if (slot_is_provisioned(ks->slots[0].key)) {
             ks->slots[0].valid = true;
             ks->source = EOS_KEY_SOURCE_OTP;
         }
@@ -109,12 +129,19 @@ int eos_keystore_init(eos_keystore_t *ks)
                               EOS_ED25519_PUB_KEY_SIZE);
         if (rc != EOS_OK && rc != EOS_ERR_NOT_SUPPORTED)
             return EOS_ERR_KEY;
-        if (rc == EOS_OK &&
-            safe_compare(ks->slots[1].key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0) {
+        if (rc == EOS_OK && slot_is_provisioned(ks->slots[1].key)) {
             ks->slots[1].valid = true;
         }
 
         /* Revocation status.
+         *
+         * Clear-to-revoke (#183): a burned (0) bit revokes the slot, and
+         * the erased byte (0xFF) revokes nothing. OTP bits only clear, so
+         * this is the only encoding a revocation can persist in -- the old
+         * set-to-revoke reading asked stm32f4_otp_write() to set a bit,
+         * which it refuses, and read an erased byte as both slots revoked.
+         * Provisioning leaves the byte erased, which is the unrevoked
+         * state; nothing has to be written first.
          *
          * If this read fails we cannot show that a key has NOT been revoked.
          * Leaving the flags clear is the wrong default: revocation exists to
@@ -125,8 +152,8 @@ int eos_keystore_init(eos_keystore_t *ks)
          * been retired. */
         uint8_t revoke_flags = 0;
         if (eos_hal_otp_read(OTP_REVOKE_OFFSET, &revoke_flags, 1) == EOS_OK) {
-            if (revoke_flags & 0x01) ks->slots[0].revoked = true;
-            if (revoke_flags & 0x02) ks->slots[1].revoked = true;
+            if (!(revoke_flags & 0x01)) ks->slots[0].revoked = true;
+            if (!(revoke_flags & 0x02)) ks->slots[1].revoked = true;
         } else {
             for (uint32_t i = 0; i < EOS_KEY_SLOTS; i++)
                 ks->slots[i].revoked = true;
@@ -241,18 +268,23 @@ int eos_keystore_revoke_slot(eos_keystore_t *ks, uint32_t slot)
 
     /* Persist the revocation to OTP.
      *
-     * The read must be checked before the OR: on failure revoke_flags stayed 0,
-     * so writing it back cleared every other slot's revocation bit -- revoking
-     * slot 1 un-revoked slot 0. And a write that fails leaves the revocation in
-     * RAM only, so it is gone at the next reset while this function reported
-     * EOS_OK and the caller believed the key was permanently retired. Both are
-     * reported now; the in-RAM revocation stands either way, so this boot
-     * still refuses the key. */
+     * Clear-to-revoke (#183): revoking burns the slot's bit. OTP bits only
+     * clear, so the old read-OR-write asked the OTP to set a bit, which
+     * stm32f4_otp_write() refuses -- the revocation stayed RAM-only while
+     * the caller was told it failed to persist.
+     *
+     * The read must be checked before the AND: on failure revoke_flags
+     * stayed 0, so writing it back would revoke every slot -- revoking
+     * slot 1 would revoke slot 0 too. And a write that fails leaves the
+     * revocation in RAM only, so it is gone at the next reset while this
+     * function reported EOS_OK and the caller believed the key was
+     * permanently retired. Both are reported now; the in-RAM revocation
+     * stands either way, so this boot still refuses the key. */
     int persist_rc = EOS_OK;
     uint8_t revoke_flags = 0;
     int read_rc = eos_hal_otp_read(OTP_REVOKE_OFFSET, &revoke_flags, 1);
     if (read_rc == EOS_OK) {
-        revoke_flags |= (uint8_t)(1U << slot);
+        revoke_flags &= (uint8_t)~(1U << slot);
         persist_rc = eos_hal_otp_write(OTP_REVOKE_OFFSET, &revoke_flags, 1);
     } else if (read_rc == EOS_ERR_NOT_SUPPORTED) {
         /* No OTP on this board: nothing to persist to, and nothing to clobber. */

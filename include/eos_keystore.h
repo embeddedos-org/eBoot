@@ -84,6 +84,9 @@ int eos_keystore_check_security_version(const eos_keystore_t *ks,
  * @param ks   Keystore context.
  * @param slot Slot index to revoke.
  * @return EOS_OK on success.
+ *
+ * The revocation is persisted by clearing the slot's bit in the OTP revoke
+ * byte (clear-to-revoke, #183); the erased byte revokes nothing.
  */
 int eos_keystore_revoke_slot(eos_keystore_t *ks, uint32_t slot);
 

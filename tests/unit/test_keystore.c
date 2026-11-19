@@ -65,6 +65,10 @@ static void otp_reset(void)
     memset(sim_otp, 0, sizeof(sim_otp));
     memset(sim_otp + OTP_KEY0, 0xA1, 32);
     memset(sim_otp + OTP_KEY1, 0xB2, 32);
+    /* Clear-to-revoke (#183): the erased byte (0xFF) is the unrevoked
+     * state. The memset above zeroed the revoke byte, which now reads as
+     * both slots revoked, so provision it explicitly. */
+    sim_otp[OTP_REVOKE] = 0xFF;
     otp_read_rc = EOS_OK;
     otp_revoke_read_rc = EOS_OK;
     otp_write_rc = EOS_OK;
@@ -196,11 +200,12 @@ TEST(test_unreadable_revocation_store_does_not_grant_keys)
     otp_detach();
 }
 
-/* A readable revocation store still works normally: slot 0 revoked, slot 1 not. */
+/* A readable revocation store still works normally: slot 0 revoked, slot 1 not.
+ * Clear-to-revoke (#183): bit 0 cleared (burned) revokes slot 0. */
 TEST(test_revocation_flags_are_honoured)
 {
     otp_reset();
-    sim_otp[OTP_REVOKE] = 0x01;
+    sim_otp[OTP_REVOKE] = 0xFE;
 
     eos_keystore_t ks;
     ASSERT(eos_keystore_init(&ks) == EOS_OK);
@@ -213,6 +218,69 @@ TEST(test_revocation_flags_are_honoured)
     uint8_t expect[32];
     memset(expect, 0xB2, sizeof(expect));
     ASSERT(memcmp(key, expect, 32) == 0);
+
+    otp_detach();
+}
+
+/* An erased revoke byte revokes nothing (#183): a freshly provisioned
+ * device -- revoke byte never written, still 0xFF -- has slot 0 active.
+ * Under the old set-to-revoke reading 0xFF meant both slots revoked. */
+TEST(test_erased_revoke_byte_revokes_nothing)
+{
+    otp_reset();
+    ASSERT(sim_otp[OTP_REVOKE] == 0xFF);
+
+    eos_keystore_t ks;
+    ASSERT(eos_keystore_init(&ks) == EOS_OK);
+
+    const uint8_t *key = NULL;
+    size_t key_len = 0;
+    ASSERT(eos_keystore_get_active_key(&ks, &key, &key_len) == EOS_OK);
+
+    /* Slot 0 is active, so the key must be slot 0's. */
+    uint8_t expect[32];
+    memset(expect, 0xA1, sizeof(expect));
+    ASSERT(memcmp(key, expect, 32) == 0);
+
+    uint32_t count = 0;
+    ASSERT(eos_keystore_key_count(&ks, &count) == EOS_OK);
+    ASSERT(count == 2);
+
+    otp_detach();
+}
+
+/* An erased key slot is not a provisioned key (#183 second look): a
+ * single-key device leaves slot 1 never written, still 0xFF, and that
+ * must not count as a second key -- and revoking slot 0 must then leave
+ * no active key, not promote the erased slot to active. Under the old
+ * init check (valid iff non-zero) slot 1 read as provisioned, key_count
+ * reported 2, and after revoking slot 0 get_active_key() handed back
+ * 0xFF bytes. */
+TEST(test_erased_key_slot_stays_unprovisioned)
+{
+    otp_reset();
+    memset(sim_otp + OTP_KEY1, 0xFF, 32);   /* slot 1 never written */
+
+    eos_keystore_t ks;
+    ASSERT(eos_keystore_init(&ks) == EOS_OK);
+
+    uint32_t count = 0;
+    ASSERT(eos_keystore_key_count(&ks, &count) == EOS_OK);
+    ASSERT(count == 1);   /* slot 0 only */
+
+    /* Slot 0 is active, so the key must be slot 0's. */
+    const uint8_t *key = NULL;
+    size_t key_len = 0;
+    ASSERT(eos_keystore_get_active_key(&ks, &key, &key_len) == EOS_OK);
+    uint8_t expect[32];
+    memset(expect, 0xA1, sizeof(expect));
+    ASSERT(memcmp(key, expect, 32) == 0);
+
+    /* Revoking the only provisioned key leaves no active key. */
+    ASSERT(eos_keystore_revoke_slot(&ks, 0) == EOS_OK);
+    ASSERT(eos_keystore_get_active_key(&ks, &key, &key_len) != EOS_OK);
+    ASSERT(eos_keystore_key_count(&ks, &count) == EOS_OK);
+    ASSERT(count == 0);
 
     otp_detach();
 }
@@ -231,19 +299,21 @@ TEST(test_failed_otp_read_does_not_fall_back_to_the_compiled_key)
     otp_detach();
 }
 
-/* Revoking must not clear another slot's revocation bit, and must report a
- * failure to persist -- an unpersisted revocation is gone at the next reset. */
+/* Revoking must not disturb another slot's revocation bit, and must report a
+ * failure to persist -- an unpersisted revocation is gone at the next reset.
+ * Clear-to-revoke (#183): revoking clears the slot's bit, so slot 0 already
+ * revoked is 0xFE and revoking slot 1 must leave 0xFC. */
 TEST(test_revocation_is_persisted_without_clobbering_other_slots)
 {
     otp_reset();
-    sim_otp[OTP_REVOKE] = 0x01;   /* slot 0 already revoked */
+    sim_otp[OTP_REVOKE] = 0xFE;   /* slot 0 already revoked */
 
     eos_keystore_t ks;
     ASSERT(eos_keystore_init(&ks) == EOS_OK);
     ASSERT(eos_keystore_revoke_slot(&ks, 1) == EOS_OK);
 
     ASSERT(otp_write_calls == 1);
-    ASSERT(sim_otp[OTP_REVOKE] == 0x03);   /* both bits, not just slot 1 */
+    ASSERT(sim_otp[OTP_REVOKE] == 0xFC);   /* both bits cleared, not just slot 1 */
 
     otp_detach();
 }
@@ -329,6 +399,8 @@ int main(void)
     run_test_keystore_security_version();
     run_test_unreadable_revocation_store_does_not_grant_keys();
     run_test_revocation_flags_are_honoured();
+    run_test_erased_revoke_byte_revokes_nothing();
+    run_test_erased_key_slot_stays_unprovisioned();
     run_test_failed_otp_read_does_not_fall_back_to_the_compiled_key();
     run_test_revocation_is_persisted_without_clobbering_other_slots();
     run_test_revoke_reports_a_failed_persist();
