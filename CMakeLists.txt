@@ -59,6 +59,19 @@ include(cmake/ProductionKey.cmake)
 # configure time. So the gate asks "is this Debug?" and refuses everything
 # else, rather than asking "is this spelled Release?".
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _ebldr_build_type)
+# What counts as a debug build for the EBLDR_DEBUG_BUILD guards
+# (stage0/hw_init_minimal.c, core/debug_lock.c,
+# core/bootloader_protect.c): a Debug build of a real board. Scoped to
+# cross-compiled board builds on purpose: the unit tests link eboot_core
+# and pin apply() calling the HAL, so the macro must never leak into a
+# test build -- and test builds are board "none" by construction (tests
+# only build when NOT cross-compiling). Without this, the guards are
+# dead in-tree and a Debug build would program WRP and lock the debug
+# interface, both persistent device state.
+if(_ebldr_build_type STREQUAL "DEBUG" AND NOT EBLDR_BOARD STREQUAL "none"
+   AND CMAKE_CROSSCOMPILING)
+    add_compile_definitions(EBLDR_DEBUG_BUILD)
+endif()
 if(NOT EBLDR_PRODUCTION_KEY STREQUAL "")
     ebldr_write_production_key_source("${EBLDR_PRODUCTION_KEY}"
         "${CMAKE_BINARY_DIR}/generated/production_key.c")
@@ -202,6 +215,7 @@ add_library(eboot_core STATIC
     core/rollback.c
     core/keystore.c
     core/debug_lock.c
+    core/bootloader_protect.c
     core/fw_decrypt.c
     core/image_tlv.c
     core/image_slot_bounds.c

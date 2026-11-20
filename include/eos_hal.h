@@ -37,6 +37,18 @@ typedef struct {
     uint32_t log_addr;
     uint32_t app_vector_offset;
 
+    /* Bootloader-owned flash region [bootloader_addr,
+     * bootloader_addr + bootloader_size): stage-0 + stage-1. The HAL
+     * flash write/erase allow-list refuses any range intersecting it,
+     * and flash_protect_bootloader() programs the hardware write
+     * protection for it where the board supports one. A board that
+     * declares no region (bootloader_size zero) gets no allow-list
+     * enforcement:
+     * protection is opt-in per board, and a board that cannot name its
+     * bootloader region must not claim to protect it. */
+    uint32_t bootloader_addr;
+    uint32_t bootloader_size;
+
     /* Flash operations */
     int (*flash_read)(uint32_t addr, void *buf, size_t len);
     int (*flash_write)(uint32_t addr, const void *buf, size_t len);
@@ -86,6 +98,15 @@ typedef struct {
     /* Monotonic anti-rollback counter */
     int (*monotonic_read)(uint32_t *value);
     int (*monotonic_increment)(void);
+
+    /* Bootloader self-protection: hardware write protection for the
+     * board-declared bootloader region (see eos_bootloader_protect.h).
+     * flash_protect_bootloader() programs the protection for the
+     * region and verifies it by read-back; flash_protect_status()
+     * reports whether the region is protected. NULL means "not
+     * supported by this board". */
+    int (*flash_protect_bootloader)(void);
+    int (*flash_protect_status)(uint32_t *status);
 
     /* HW-accelerated crypto (optional, software fallback used if NULL) */
     int (*hw_sha256)(const void *data, size_t len, void *digest);
@@ -158,6 +179,8 @@ int   eos_hal_debug_lock(void);
 int   eos_hal_debug_status(uint32_t *status);
 int   eos_hal_monotonic_read(uint32_t *value);
 int   eos_hal_monotonic_increment(void);
+int   eos_hal_flash_protect_bootloader(void);
+int   eos_hal_flash_protect_status(uint32_t *status);
 
 /**
  * @brief Get the flash address for a given slot.

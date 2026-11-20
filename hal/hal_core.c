@@ -28,10 +28,55 @@ int eos_hal_flash_read(uint32_t addr, void *buf, size_t len)
     return g_ops->flash_read(addr, buf, len);
 }
 
+/* ---- Bootloader-region allow-list ----
+
+ * A board that declares its bootloader region (bootloader_size
+ * non-zero -- the address itself may be 0, flash can live there)
+ * gets every flash write and erase checked against it: any
+ * range intersecting the region is refused with EOS_ERR_WRITE_PROTECTED
+ * before the board driver is called, so no caller -- the updater, the
+ * recovery transport, a future bootloader self-update -- can overwrite
+ * stage-0 or stage-1 through the HAL. Reads are unaffected. A board
+ * that declares no region keeps today's behaviour: the guard cannot
+ * protect a region the board will not name. The check is overflow-safe:
+ * the end is computed in 64 bits, and a range that wraps uint32_t is
+ * checked twice -- once for its linear part, once for the tail that
+ * re-enters at address 0 -- so a wrapped range whose tail reaches the
+ * region cannot smuggle past the test. */
+static bool flash_range_hits_bootloader(uint32_t addr, size_t len)
+{
+    /* Undeclared is bootloader_size == 0: a region at address 0 is a
+     * real layout, and the old bootloader_addr == 0 test silently
+     * unguarded it -- declared-but-unprotected, fail-open. */
+    if (!g_ops || g_ops->bootloader_size == 0)
+        return false;
+    /* A range at least as long as the whole 32-bit address space
+     * covers every address, so it hits any declared region. On a
+     * 64-bit host len can exceed 2^32 and the 64-bit end below
+     * would wrap and under-refuse; on the 32-bit target len can
+     * never reach this. */
+    if ((uint64_t)len >= 0x100000000ull)
+        return true;
+    uint64_t start = addr;
+    uint64_t end = start + (uint64_t)len;
+    uint64_t region_start = g_ops->bootloader_addr;
+    uint64_t region_end = region_start + (uint64_t)g_ops->bootloader_size;
+    if (start < region_end && end > region_start)
+        return true;
+    /* The range wraps past 2^32: its tail re-enters at address 0, and
+     * that tail can reach the region even though the linear interval
+     * sits entirely above it. */
+    if (end > 0xFFFFFFFFull && end - 0x100000000ull > region_start)
+        return true;
+    return false;
+}
+
 int eos_hal_flash_write(uint32_t addr, const void *buf, size_t len)
 {
     if (!g_ops || !g_ops->flash_write)
         return EOS_ERR_GENERIC;
+    if (flash_range_hits_bootloader(addr, len))
+        return EOS_ERR_WRITE_PROTECTED;
     return g_ops->flash_write(addr, buf, len);
 }
 
@@ -39,6 +84,8 @@ int eos_hal_flash_erase(uint32_t addr, size_t len)
 {
     if (!g_ops || !g_ops->flash_erase)
         return EOS_ERR_GENERIC;
+    if (flash_range_hits_bootloader(addr, len))
+        return EOS_ERR_WRITE_PROTECTED;
     return g_ops->flash_erase(addr, len);
 }
 
@@ -202,4 +249,20 @@ int eos_hal_monotonic_increment(void)
     if (!g_ops || !g_ops->monotonic_increment)
         return EOS_ERR_NOT_SUPPORTED;
     return g_ops->monotonic_increment();
+}
+
+int eos_hal_flash_protect_bootloader(void)
+{
+    if (!g_ops || !g_ops->flash_protect_bootloader)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->flash_protect_bootloader();
+}
+
+int eos_hal_flash_protect_status(uint32_t *status)
+{
+    if (!status)
+        return EOS_ERR_INVALID;
+    if (!g_ops || !g_ops->flash_protect_status)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->flash_protect_status(status);
 }

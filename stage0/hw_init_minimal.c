@@ -12,6 +12,7 @@
  */
 
 #include "eos_hal.h"
+#include "eos_bootloader_protect.h"
 #include <stdint.h>
 
 /* Board-specific init — provided by the board port */
@@ -31,6 +32,26 @@ void ebldr_hw_init_minimal(void)
 #ifndef EBLDR_DEBUG_BUILD
     if (ops->debug_lock) {
         ops->debug_lock();
+    }
+#endif
+
+    /* Program the bootloader region's hardware write protection on
+     * boards that declare one (WRP on STM32F4). A non-EOS_OK result
+     * is fatal: the board would otherwise boot believing itself
+     * protected while the hardware protection is absent (no primitive
+     * for a declared region) or the program failed. Halt instead of
+     * proceeding -- the stage-0 fault handlers halt the same way.
+     * Only boards that declare a region reach this call; a board with
+     * no region keeps today's behaviour. The protection takes effect
+     * at the next reset; the HAL allow-list covers the same region
+     * from the first boot. */
+#ifndef EBLDR_DEBUG_BUILD
+    if (ops->bootloader_size != 0) {
+        if (eos_bootloader_protect_apply() != EOS_OK) {
+            /* Fatal: do not boot unprotected. */
+            while (1) {
+            }
+        }
     }
 #endif
 

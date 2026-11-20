@@ -45,6 +45,12 @@
 #define STM32F4_STAGE1_ADDR         0x08004000
 #define STM32F4_STAGE1_SIZE         (48 * 1024)
 
+/* The bootloader region is stage-0 + stage-1: sectors 0-3, the range
+ * the HAL allow-list refuses writes to and the WRP option bytes
+ * protect (core/bootloader_protect.c, boards/stm32f4 WRP below). */
+#define STM32F4_BOOTLOADER_ADDR     STM32F4_STAGE0_ADDR
+#define STM32F4_BOOTLOADER_SIZE     (STM32F4_STAGE0_SIZE + STM32F4_STAGE1_SIZE)
+
 #define STM32F4_LOG_ADDR            0x08010000
 #define STM32F4_LOG_SIZE            (64 * 1024)
 
