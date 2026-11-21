@@ -24,12 +24,18 @@ Rules that keep the report honest:
 
   - Only fields the table names are checked. A field left out is zero in C and
     means "this port has none", which is not a finding.
-  - A region is checked only when it has a non-zero size, and containment in
-    flash only when flash_size is non-zero. Ports whose storage is not
-    memory-mapped set flash_size to 0 on purpose.
+  - Containment in flash is checked only when flash_size is non-zero. Ports
+    whose storage is not memory-mapped set flash_size to 0 on purpose.
+  - A region the table gives an address but no size field is checked by its
+    start address alone: it must lie inside flash, and two such regions must
+    not start at the same address. A size written as 0 means "none".
   - Values are evaluated as plain integers, not with the target's integer
-    widths. "truncated" is therefore exact for the field, but an expression
-    that overflows inside a 32-bit `int` on the target is not detected.
+    widths, and casts are dropped rather than applied. The comparison with the
+    field width is exact, but an expression that overflows inside a 32-bit
+    `int` on the target is not detected.
+  - Read from each board file: the first ops table, designated initialisers,
+    and object-like macros of the file and of the headers it includes from its
+    own directory. Conditional compilation is not followed.
   - A clean report says the numbers are consistent with each other. It does not
     say they match the hardware, a linker script or a flashed device.
 
@@ -67,22 +73,38 @@ FIELDS = ("flash_base", "flash_size") + tuple(
 
 # (board, kind, subject) -> the issue that tracks it. Remove the entry in the
 # change that fixes the port; --check fails if it is left behind.
+_ISSUES = "https://github.com/embeddedos-org/eBoot/issues/"
 KNOWN = {
-    ("powerpc", "flash-wraps", "flash_size"):
-        "https://github.com/embeddedos-org/eBoot/issues/197",
-    ("samd51", "overlap", "slot_b+recovery"):
-        "https://github.com/embeddedos-org/eBoot/issues/195",
-    ("samd51", "inside", "bootctl_addr"):
-        "https://github.com/embeddedos-org/eBoot/issues/195",
-    ("x86", "flash-wraps", "flash_size"):
-        "https://github.com/embeddedos-org/eBoot/issues/196",
-    ("x86", "outside-flash", "bootctl_addr"):
-        "https://github.com/embeddedos-org/eBoot/issues/196",
+    ("8051", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("8051", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("avr", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("avr", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("cortex_m0", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("cortex_m0", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("cortex_m0plus", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("cortex_m0plus", "overlap", "slot_a+recovery"): _ISSUES + "199",
+    ("pic16", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("pic16", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("pic18", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("pic18", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("pic24", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("pic24", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("powerpc", "flash-wraps", "flash_size"): _ISSUES + "197",
+    ("pru", "outside-flash", "slot_a"): _ISSUES + "199",
+    ("pru", "outside-flash", "slot_b"): _ISSUES + "199",
+    ("samd51", "inside", "bootctl_addr"): _ISSUES + "195",
+    ("samd51", "overlap", "slot_b+recovery"): _ISSUES + "195",
+    ("x86", "flash-wraps", "flash_size"): _ISSUES + "196",
+    ("x86", "outside-flash", "bootctl_addr"): _ISSUES + "196",
+    ("x86", "outside-flash", "recovery"): _ISSUES + "196",
+    ("x86", "outside-flash", "slot_a"): _ISSUES + "196",
+    ("x86", "outside-flash", "slot_b"): _ISSUES + "196",
 }
 
 _DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(\w+)(\(?)[ \t]*(.*)$", re.M)
 _INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+"([^"]+)"', re.M)
-_NUMBER = re.compile(r"\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\b")
+_NUMBER = re.compile(r"\b(0[xX][0-9a-fA-F]+|[0-9]+)[uUlL]*\b")
+_WORD = re.compile(r"\b[A-Za-z_]\w*\b")
 _CAST = re.compile(
     r"\(\s*(?:u?int(?:8|16|32|64|ptr)_t|size_t|(?:unsigned\s+)?(?:long\s+)?"
     r"(?:long|int)|unsigned)\s*\)")
@@ -131,9 +153,13 @@ def _walk(node):
         return node.value
     if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
         left, right = _walk(node.left), _walk(node.right)
-        if isinstance(node.op, ast.FloorDiv) and right == 0:
-            raise ValueError("division by zero")
-        if isinstance(node.op, (ast.LShift, ast.RShift)) and not 0 <= right < 64:
+        if isinstance(node.op, ast.FloorDiv):
+            if right == 0:
+                raise ValueError("division by zero")
+            quotient = abs(left) // abs(right)      # C truncates towards 0
+            return quotient if (left < 0) == (right < 0) else -quotient
+        if isinstance(node.op, (ast.LShift, ast.RShift)) \
+                and not 0 <= right < 64:
             raise ValueError("shift by %d" % right)
         return _BINARY[type(node.op)](left, right)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
@@ -143,22 +169,12 @@ def _walk(node):
     raise ValueError("unsupported expression")
 
 
-def evaluate(expression, defined, _seen=()):
-    """The integer a C constant expression stands for, with macro names
-    resolved from `defined` (the mapping macros() returns). Integer literals, + - * / << >> | &, parentheses
-    and casts to integer types; anything else is a ValueError."""
-    text = _CAST.sub(" ", expression)
-
-    def number(match):
-        digits = match.group(1)
-        if len(digits) > 1 and digits[0] == "0" and digits[1] not in "xX":
-            return str(int(digits, 8))
-        return str(int(digits, 0))
-
+def expand(expression, defined, _seen=()):
+    """`expression` with every macro name replaced by its body, textually and
+    without added parentheses, as the preprocessor does: with A defined as
+    `1 + 1`, `A * 2` is `1 + 1 * 2`."""
     def name(match):
         word = match.group(0)
-        if word.isdigit():
-            return word
         if word in _seen:
             raise ValueError("%s is defined in terms of itself" % word)
         if word not in defined:
@@ -166,19 +182,31 @@ def evaluate(expression, defined, _seen=()):
         if len(defined[word]) > 1:
             raise ValueError("%s has more than one definition: %s"
                              % (word, " | ".join(defined[word])))
-        return "(%d)" % evaluate(defined[word][0], defined, _seen + (word,))
+        return " %s " % expand(defined[word][0], defined, _seen + (word,))
 
-    text = _NUMBER.sub(number, text)
-    text = re.sub(r"\b[A-Za-z_]\w*\b|\b\d+\b", name, text)
-    if not re.fullmatch(r"[\d\s()+\-*/<>|&]+", text):
-        raise ValueError("'%s' is not an integer constant expression"
-                         % expression.strip())
+    return _WORD.sub(name, _CAST.sub(" ", expression))
+
+
+def evaluate(expression, defined):
+    """The integer a C constant expression stands for, with macro names
+    resolved from `defined` (the mapping macros() returns). Integer literals,
+    + - * / << >> | &, parentheses and casts to integer types; anything else is
+    a ValueError. A cast is dropped, not applied."""
+    def number(match):
+        digits = match.group(1)
+        if len(digits) > 1 and digits[0] == "0" and digits[1] not in "xX":
+            return str(int(digits, 8))
+        return str(int(digits, 0))
+
+    refused = ValueError("'%s' is not an integer constant expression"
+                         % " ".join(expression.split()))
     try:
-        tree = ast.parse(text.strip().replace("/", "//"), mode="eval")
-    except SyntaxError:
-        raise ValueError("'%s' is not an integer constant expression"
-                         % expression.strip()) from None
-    return _walk(tree)
+        text = _NUMBER.sub(number, expand(expression, defined))
+        if not re.fullmatch(r"[0-9\s()+\-*/<>|&]+", text):
+            raise refused
+        return _walk(ast.parse(text.strip().replace("/", "//"), mode="eval"))
+    except (SyntaxError, RecursionError, MemoryError):
+        raise refused from None
 
 
 def _intersect(a, b):
@@ -223,6 +251,22 @@ def findings(initialisers, defined):
             out.append(("outside-flash", name,
                         "%s [%#x, +%#x) is not inside flash [%#x, +%#x)"
                         % ((name,) + region + flash)))
+    starts = {}
+    for name, (addr, size) in REGIONS.items():
+        if addr not in value or name in regions or size in value:
+            continue                    # sized, or explicitly size 0
+        starts[name] = value[addr]
+        if flash and not flash[0] <= value[addr] < flash[0] + flash[1]:
+            out.append(("outside-flash", name,
+                        "%s starts at %#x, not inside flash [%#x, +%#x)"
+                        % ((name, value[addr]) + flash)))
+    names = list(starts)
+    for i, first in enumerate(names):
+        for second in names[i + 1:]:
+            if starts[first] == starts[second]:
+                out.append(("overlap", "%s+%s" % (first, second),
+                            "%s and %s both start at %#x"
+                            % (first, second, starts[first])))
     names = list(regions)
     for i, first in enumerate(names):
         for second in names[i + 1:]:
@@ -275,7 +319,11 @@ def main(argv=None, root=ROOT, known=None):
                         help="exit 1 unless the findings are exactly KNOWN")
     args = parser.parse_args(argv)
 
-    found = collect(root)
+    try:
+        found = collect(root)
+    except ValueError as error:
+        print("error: %s" % error)
+        return 2
     new = 0
     for board, kind, subject, detail in found:
         issue = known.get((board, kind, subject))

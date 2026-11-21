@@ -71,11 +71,20 @@ def test_a_repeated_identical_definition_is_one_definition():
     ("BASE + SIZE - 1", 0x08000000 + 4096 - 1),
     ("(BASE | 0x3) & 0xFF", 3),
     ("SIZE / 3", 1365),                          # integer division
+    ("-7 / 2", -3),                              # towards zero, as in C
+    ("7 / -2", -3),
+    ("-7 / -2", 3),
+    ("0x100 >> 4", 0x10),
+    ("0x11 | 0x01", 0x11),
+    ("1 << 63", 1 << 63),
     ("-1", -1),
+    ("+1", 1),
+    ("SUM * 2", 5),                              # 1 + 2 * 2: no parentheses
+    ("(SUM) * 2", 6),
 ])
 def test_constant_expressions(expression, value):
     defined = bmm.macros("#define BASE 0x08000000u\n#define SIZE (4 * KB)\n"
-                         "#define KB 1024\n")
+                         "#define KB 1024\n#define SUM 1 + 2\n")
     assert bmm.evaluate(expression, defined) == value
 
 
@@ -89,6 +98,10 @@ def test_constant_expressions(expression, value):
     ("", "not an integer constant expression"),
     ("1 / 0", "division by zero"),
     ("1 << 64", "shift by 64"),
+    ("1 >> 64", "shift by 64"),
+    ("1 << -1", "shift by -1"),
+    ("\uff11\uff12", "not an integer constant expression"),  # full-width 12
+    ("1+" * 2000 + "1", "not an integer constant expression"),
     ("2 ** 3", "unsupported expression"),
     ("EMPTY", "not an integer constant expression"),
 ])
@@ -97,6 +110,12 @@ def test_what_is_not_a_constant_is_an_error(expression, message):
                          "#define LOOP (LOOP + 1)\n#define EMPTY\n")
     with pytest.raises(ValueError, match=message.replace("|", r"\|")):
         bmm.evaluate(expression, defined)
+
+
+def test_a_macro_chain_too_deep_to_follow_is_refused_not_a_crash():
+    chain = "".join("#define N%d N%d\n" % (i, i + 1) for i in range(3000))
+    with pytest.raises(ValueError, match="not an integer constant"):
+        bmm.evaluate("N0", bmm.macros(chain + "#define N3000 1\n"))
 
 
 def test_a_name_with_two_definitions_is_fine_until_it_is_needed():
@@ -151,7 +170,8 @@ def test_a_value_wider_than_the_field_is_truncated():
 
 
 def test_flash_may_end_exactly_at_4_gib_but_not_past_it():
-    assert kinds({"flash_base": "0xFF000000", "flash_size": "0x01000000"}) == []
+    top = {"flash_base": "0xFF000000", "flash_size": "0x01000000"}
+    assert kinds(top) == []
     assert kinds({"flash_base": "0xFF000000", "flash_size": "0x01000001"}) == [
         ("flash-wraps", "flash_size")]
 
@@ -174,10 +194,37 @@ def test_flash_size_zero_means_not_memory_mapped_and_skips_containment():
         ("overlap", "slot_a+slot_b")]
 
 
-def test_a_region_without_a_size_is_not_a_region():
-    table = changed(slot_b_addr="0x08010000")
-    del table["slot_b_size"]
-    assert bmm.findings(table, {}) == []
+def test_a_region_with_size_zero_is_not_a_region():
+    assert kinds(changed(slot_b_addr="0x08010000", slot_b_size="0")) == []
+    assert kinds(changed(recovery_addr="0x09000000", recovery_size="0")) == []
+
+
+def sizeless(**fields):
+    """GOOD without any region size: the shape of most ports."""
+    table = {k: v for k, v in GOOD.items() if not k.endswith("_size")}
+    table["flash_size"] = GOOD["flash_size"]
+    table.update(fields)
+    return table
+
+
+def test_a_region_without_a_size_field_is_checked_by_its_start():
+    assert kinds(sizeless()) == []
+    assert kinds(sizeless(slot_a_addr="0x080FFFFF")) == []     # last byte
+    assert kinds(sizeless(slot_a_addr="0x08100000")) == [      # end of flash
+        ("outside-flash", "slot_a")]
+    assert kinds(sizeless(slot_b_addr="0x07FFFFFF")) == [
+        ("outside-flash", "slot_b")]
+    assert kinds(sizeless(recovery_addr="0x08010000")) == [
+        ("overlap", "slot_a+recovery")]
+    # not memory-mapped: only the duplicate start is left to check
+    assert kinds(sizeless(flash_size="0", slot_a_addr="0x10000000")) == []
+    assert kinds(sizeless(flash_size="0", slot_b_addr="0x08010000")) == [
+        ("overlap", "slot_a+slot_b")]
+
+
+def test_a_sized_region_is_not_also_checked_as_a_start():
+    out = kinds(changed(slot_a_addr="0x08100000"))
+    assert out == [("outside-flash", "slot_a")]
 
 
 def test_regions_that_share_a_byte_overlap_and_adjacent_ones_do_not():
@@ -245,7 +292,8 @@ def test_collect_names_the_board_of_each_finding(tmp_path):
         ("bad", "outside-flash", "slot_b")]
 
 
-def test_a_tree_without_boards_and_a_board_without_a_table_are_errors(tmp_path):
+def test_a_tree_without_boards_or_a_board_without_a_table_is_an_error(
+        tmp_path):
     with pytest.raises(ValueError, match="no boards"):
         bmm.collect(tmp_path)
     root = make_tree(tmp_path, {"good": FITS})
@@ -253,6 +301,12 @@ def test_a_tree_without_boards_and_a_board_without_a_table_are_errors(tmp_path):
                                                            encoding="utf-8")
     with pytest.raises(ValueError, match="boards/good/board_good.c: no "):
         bmm.collect(root)
+
+
+def test_main_reports_an_unreadable_tree_instead_of_raising(tmp_path, capsys):
+    assert bmm.main(["--check"], root=tmp_path) == 2
+    assert bmm.main([], root=tmp_path) == 2
+    assert capsys.readouterr().out.startswith("error: no boards")
 
 
 def test_check_passes_only_when_findings_are_exactly_the_known_ones(
@@ -296,3 +350,4 @@ def test_every_known_finding_names_its_issue():
     for key, issue in bmm.KNOWN.items():
         assert issue.startswith(
             "https://github.com/embeddedos-org/eBoot/issues/"), key
+        assert issue.rsplit("/", 1)[1].isdigit(), key
