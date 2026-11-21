@@ -42,7 +42,11 @@ static uint32_t stm32mp1_get_tick_ms(void) { return 0; }
 
 static const eos_board_ops_t stm32mp1_ops = {
     .flash_base          = STM32MP1_EMMC_BASE,
-    .flash_size          = STM32MP1_EMMC_SIZE,
+    /* The eMMC is a 4 GiB block device (STM32MP1_EMMC_SIZE), which the
+     * 32-bit field cannot hold: the initialiser used to be that constant and
+     * stored its low 32 bits, 0. It is 0 on purpose now, as on the other
+     * ports whose storage is not memory-mapped (rpi4, x86_64_efi). */
+    .flash_size          = 0,
     .slot_a_addr         = STM32MP1_SLOT_A_ADDR,
     .slot_a_size         = STM32MP1_SLOT_A_SIZE,
     .slot_b_addr         = STM32MP1_SLOT_B_ADDR,

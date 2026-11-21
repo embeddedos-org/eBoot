@@ -19,7 +19,7 @@
 #define STM32MP1_SRAM_BASE          0x10000000
 #define STM32MP1_SRAM_SIZE          (256 * 1024)
 #define STM32MP1_EMMC_BASE          0x00000000
-#define STM32MP1_EMMC_SIZE          (4UL * 1024 * 1024 * 1024)
+#define STM32MP1_EMMC_SIZE          (4ULL * 1024 * 1024 * 1024)
 
 #define STM32MP1_SLOT_A_ADDR        0x00100000
 #define STM32MP1_SLOT_A_SIZE        (64 * 1024 * 1024)
