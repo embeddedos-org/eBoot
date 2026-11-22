@@ -87,33 +87,17 @@ static int reapply_protection(void)
 }
 
 /* Does the installed stage-1 payload already equal the staged payload?
- * A byte comparison against the verified staged image: the staged image
- * is trusted at this point (it just passed §3), so equality proves the
- * copy already happened -- the post-copy reset with an uncleared record
- * (§6), or a COPYING save that never landed. */
-static bool installed_matches_staged(uint32_t staging_addr,
-                                     const eos_image_header_t *hdr)
+ * The staged payload's digest is hdr->hash (verified by the integrity
+ * step), so the installed region matches it exactly when it re-hashes
+ * to hdr->hash -- the same check §10 step 7 prescribes for the written
+ * bytes. No byte-by-byte compare is needed: equality proves the copy
+ * already happened (the post-copy reset with an uncleared record, §6,
+ * or a COPYING save that never landed). */
+static bool installed_matches_staged(const eos_image_header_t *hdr)
 {
     const eos_board_ops_t *ops = eos_hal_get_ops();
-    uint32_t base = stage1_base(ops);
-    uint32_t payload_addr = staging_addr + hdr->hdr_size;
-    uint8_t installed[EBLDR_REPLACE_COPY_CHUNK];
-    uint8_t staged[EBLDR_REPLACE_COPY_CHUNK];
-    uint32_t off = 0;
-
-    while (off < hdr->image_size) {
-        uint32_t chunk = hdr->image_size - off;
-        if (chunk > sizeof(installed))
-            chunk = sizeof(installed);
-        if (eos_hal_flash_read(base + off, installed, chunk) != EOS_OK)
-            return false;
-        if (eos_hal_flash_read(payload_addr + off, staged, chunk) != EOS_OK)
-            return false;
-        if (memcmp(installed, staged, chunk) != 0)
-            return false;
-        off += chunk;
-    }
-    return true;
+    return eos_crypto_verify_image(stage1_base(ops), hdr->image_size,
+                                   hdr->hash) == EOS_OK;
 }
 
 /* The copy itself: mint the token, erase the stage-1 sectors, copy the
@@ -257,9 +241,14 @@ int eblr_bootloader_replace_execute(const eos_bootctl_t *bctl)
 
     /* Cross-check the record against the verified staged image. The
      * record is written by stage-1, so this proves consistency, not
-     * authenticity -- the verification above is what authenticates. */
-    if (memcmp(intent->image_sha256, hdr.hash,
-               sizeof(intent->image_sha256)) != 0 ||
+     * authenticity -- the verification above is what authenticates.
+     * The digest compare is a constant-time loop, not memcmp: memcmp
+     * is otherwise unreferenced in stage-0 (90 bytes of a 16 KiB
+     * budget). */
+    volatile uint8_t diff = 0;
+    for (uint32_t i = 0; i < sizeof(intent->image_sha256); i++)
+        diff |= (uint8_t)(intent->image_sha256[i] ^ hdr.hash[i]);
+    if (diff != 0 ||
         intent->image_counter != counter ||
         intent->image_size != hdr.hdr_size + hdr.image_size + hdr.tlv_len) {
         log_refusal();
@@ -272,7 +261,7 @@ int eblr_bootloader_replace_execute(const eos_bootctl_t *bctl)
     /* The copy already happened (post-copy reset with an uncleared
      * record, or a COPYING save that never landed): re-apply WRP,
      * clear, and boot the new stage-1. */
-    if (installed_matches_staged(staging_addr, &hdr)) {
+    if (installed_matches_staged(&hdr)) {
         rc = reapply_protection();
         if (rc != EOS_OK) {
             log_refusal();

@@ -55,7 +55,8 @@ static uint32_t bootloader_end(const eos_board_ops_t *ops)
 }
 
 /* Do [addr, addr + len) and [start, start + size) intersect?
- * Overflow-safe: the ends are computed in 64 bits. */
+ * Overflow-safe: the ends are computed in 64 bits. Used by the
+ * request side (stage-1), not by the stage-0 verification path. */
 static bool ranges_intersect(uint32_t addr, size_t len,
                              uint32_t start, uint32_t size)
 {
@@ -64,49 +65,6 @@ static bool ranges_intersect(uint32_t addr, size_t len,
     uint64_t a_end = (uint64_t)addr + len;
     uint64_t b_end = (uint64_t)start + size;
     return (uint64_t)addr < b_end && a_end > (uint64_t)start;
-}
-
-/* Remaining bytes from @p image_addr to the end of the flash area that
- * contains it: a slot (staged image) or the stage-1 region (installed
- * image under verification). The image header is stored at the area base
- * on every path that calls this. */
-static int image_room_from(uint32_t image_addr, uint32_t *room_out)
-{
-    static const eos_slot_t slots[] = {
-        EOS_SLOT_A, EOS_SLOT_B, EOS_SLOT_RECOVERY
-    };
-    size_t i;
-
-    if (!room_out)
-        return EOS_ERR_INVALID;
-
-    for (i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
-        uint32_t base = eos_hal_slot_addr(slots[i]);
-        uint32_t size = eos_hal_slot_size(slots[i]);
-
-        if (base == 0 || size == 0)
-            continue;
-        if (image_addr < base)
-            continue;
-        if (image_addr - base >= size)
-            continue;
-
-        *room_out = size - (image_addr - base);
-        return EOS_OK;
-    }
-
-    /* Not in a slot: the stage-1 region itself. */
-    const eos_board_ops_t *ops = eos_hal_get_ops();
-    if (ops && ops->bootloader_size != 0) {
-        uint32_t base = stage1_base(ops);
-        uint32_t end = bootloader_end(ops);
-        if (image_addr >= base && image_addr < end) {
-            *room_out = end - image_addr;
-            return EOS_OK;
-        }
-    }
-
-    return EOS_ERR_INVALID;
 }
 
 /* ---- TLV target check (design note §3 step 2) ---- */
@@ -123,23 +81,16 @@ static int tlv_area_matches_header(const eos_image_header_t *hdr,
                                    uint32_t tlv_addr)
 {
     eos_sha256_ctx_t sha;
-    uint8_t chunk[64];
+    uint8_t area[EOS_TLV_MAX_SIZE];
     uint8_t digest[EOS_SHA256_DIGEST_SIZE];
-    uint32_t remaining = hdr->tlv_len;
-    uint32_t addr = tlv_addr;
 
+    /* One read: the area is at most EOS_TLV_MAX_SIZE (512) bytes, and
+     * stage-0 has a 128 KiB RAM to hold it. A chunked read loop costs
+     * ~25 bytes more of stage-0 .text for no benefit here. */
+    if (eos_hal_flash_read(tlv_addr, area, hdr->tlv_len) != EOS_OK)
+        return EOS_ERR_FLASH;
     eos_sha256_init(&sha);
-
-    while (remaining > 0) {
-        uint32_t n = (remaining > sizeof(chunk)) ? (uint32_t)sizeof(chunk)
-                                                 : remaining;
-        if (eos_hal_flash_read(addr, chunk, n) != EOS_OK)
-            return EOS_ERR_FLASH;
-        eos_sha256_update(&sha, chunk, n);
-        addr += n;
-        remaining -= n;
-    }
-
+    eos_sha256_update(&sha, area, hdr->tlv_len);
     eos_sha256_final(&sha, digest);
 
     volatile uint8_t diff = 0;
@@ -152,13 +103,117 @@ static int tlv_area_matches_header(const eos_image_header_t *hdr,
 /* The EOS_TLV_TARGET value must be "<board_id>:stage-1" for this board.
  * The value length is bounded: a board identity longer than 32 bytes
  * cannot be a board this bootloader knows, and the comparison buffer
- * lives on the stack. */
+ * lives on the stack.
+ *
+ * The rollback counter comes out of the same authenticated scan:
+ * EOS_TLV_MIN_SEC_VER is read here (a missing entry is no claim,
+ * counter 0 -- the same reading core/rollback.c gives it), so the
+ * verification does one TLV pass instead of re-parsing through
+ * eos_rollback_read_image_counter(). That matters for stage-0: the
+ * rollback counter reader is otherwise unreferenced there, and
+ * pulling it in costs 368 bytes of a 16 KiB budget. The scan below
+ * is hand-rolled for the same reason: the shared TLV parser is
+ * otherwise unreferenced in stage-0, and linking it costs another
+ * 314 bytes. */
 #define BTLDR_TARGET_MAX_BOARD_ID  32
 #define BTLDR_TARGET_STAGE_SUFFIX  ":stage-1"
 
+/* The board identity length, scanned here instead of strlen: the
+ * stage-0 link would otherwise pull libc strlen (216 bytes) for one
+ * comparison. Bounded at 33 reads; a longer id is refused below. */
+static size_t board_id_len(const char *board_id)
+{
+    size_t len = 0;
+    while (len <= BTLDR_TARGET_MAX_BOARD_ID && board_id[len] != '\0')
+        len++;
+    return len;
+}
+
+/* Scan the TLV area once for the TARGET entry and the MIN_SEC_VER
+ * counter. This is a minimal, single-purpose scan -- not the shared
+ * eos_tlv_parse -- because stage-0 is a 16 KiB budget and the shared
+ * parser (with find and read_data, 314 bytes together) is otherwise
+ * unreferenced there: the only other TLV user, core/rollback.c,
+ * reaches it through eos_rollback_read_image_counter, which stage-0
+ * does not link. The scan mirrors the parser's validation (magic,
+ * total length, entry bounds, 4-byte alignment, end sentinel), and
+ * stops once both entries are found. It does not mirror the parser's
+ * entry cap: there is no context to fill, and the loop is bounded by
+ * the area length (at most 512 bytes) either way.
+ *
+ * One tightening over the shared parser: the info header's total
+ * length must equal hdr->tlv_len, the authenticated length. The
+ * parser would scan up to the info header's length even past the
+ * hashed region; here the scan never reads past the bytes the area
+ * hash authenticated. */
+static int tlv_scan_target(uint32_t tlv_addr, uint32_t tlv_len,
+                           uint32_t *target_off_out,
+                           uint32_t *target_len_out,
+                           uint32_t *counter_out)
+{
+    eos_tlv_info_t info;
+    int rc = eos_hal_flash_read(tlv_addr, &info, sizeof(info));
+    if (rc != EOS_OK)
+        return EOS_ERR_FLASH;
+    if (info.magic != EOS_TLV_INFO_MAGIC)
+        return EOS_ERR_NOT_FOUND;
+    /* The total length must equal the header's tlv_len, which the
+     * caller already bounded (4..EOS_TLV_MAX_SIZE); the equality
+     * subsumes a separate range check here. */
+    if (info.tlv_total_len != tlv_len)
+        return EOS_ERR_INVALID;
+
+    *target_off_out = 0;
+    *target_len_out = 0;
+    *counter_out = 0;  /* no MIN_SEC_VER entry: no counter claim */
+    bool have_target = false;
+    bool have_counter = false;
+
+    uint32_t offset = sizeof(eos_tlv_info_t);
+    while (offset + sizeof(eos_tlv_entry_hdr_t) <= info.tlv_total_len) {
+        eos_tlv_entry_hdr_t entry_hdr;
+        rc = eos_hal_flash_read(tlv_addr + offset, &entry_hdr,
+                                sizeof(entry_hdr));
+        if (rc != EOS_OK)
+            return EOS_ERR_FLASH;
+        if (entry_hdr.len == 0 && entry_hdr.type == 0)
+            break; /* end sentinel */
+        if (offset + sizeof(eos_tlv_entry_hdr_t) + entry_hdr.len >
+            info.tlv_total_len)
+            break; /* truncated entry */
+
+        if (entry_hdr.type == EOS_TLV_TARGET && !have_target) {
+            *target_off_out = tlv_addr + offset +
+                sizeof(eos_tlv_entry_hdr_t);
+            *target_len_out = entry_hdr.len;
+            have_target = true;
+        } else if (entry_hdr.type == EOS_TLV_MIN_SEC_VER && !have_counter) {
+            /* A present counter entry must be a uint32_t,
+             * little-endian -- the same reading core/rollback.c
+             * gives it. */
+            if (entry_hdr.len != sizeof(uint32_t))
+                return EOS_ERR_INVALID;
+            rc = eos_hal_flash_read(tlv_addr + offset +
+                                        sizeof(eos_tlv_entry_hdr_t),
+                                    counter_out, sizeof(uint32_t));
+            if (rc != EOS_OK)
+                return EOS_ERR_FLASH;
+            have_counter = true;
+        }
+        if (have_target && have_counter)
+            break; /* both entries found */
+        offset += sizeof(eos_tlv_entry_hdr_t) + entry_hdr.len;
+        offset = (offset + 3) & ~3u; /* align to 4-byte boundary */
+    }
+    if (!have_target)
+        return EOS_ERR_INVALID;  /* no target entry: not a replacement image */
+    return EOS_OK;
+}
+
 static int target_matches_board(const eos_image_header_t *hdr,
                                 uint32_t image_addr,
-                                const eos_board_ops_t *ops)
+                                const eos_board_ops_t *ops,
+                                uint32_t *counter_out)
 {
     if (hdr->tlv_len == 0)
         return EOS_ERR_INVALID;
@@ -179,42 +234,45 @@ static int target_matches_board(const eos_image_header_t *hdr,
     if (rc != EOS_OK)
         return rc;
 
-    eos_tlv_ctx_t ctx;
-    rc = eos_tlv_parse(&ctx, tlv_addr);
+    /* One scan finds the target entry and the counter, from the
+     * area the hash just authenticated. */
+    uint32_t target_off = 0;
+    uint32_t target_len = 0;
+    rc = tlv_scan_target(tlv_addr, hdr->tlv_len, &target_off,
+                         &target_len, counter_out);
     if (rc != EOS_OK)
         return rc;
 
-    eos_tlv_parsed_entry_t entry;
-    rc = eos_tlv_find(&ctx, EOS_TLV_TARGET, &entry);
-    if (rc != EOS_OK)
-        return EOS_ERR_INVALID;  /* no target entry: not a replacement image */
-
-    size_t board_len = strlen(ops->board_id);
-    size_t suffix_len = strlen(BTLDR_TARGET_STAGE_SUFFIX);
+    size_t board_len = board_id_len(ops->board_id);
+    size_t suffix_len = sizeof(BTLDR_TARGET_STAGE_SUFFIX) - 1;
     if (board_len == 0 || board_len > BTLDR_TARGET_MAX_BOARD_ID)
         return EOS_ERR_NOT_SUPPORTED;
-    if (entry.len != board_len + suffix_len)
+    if (target_len != board_len + suffix_len)
         return EOS_ERR_INVALID;
-
-    char expected[BTLDR_TARGET_MAX_BOARD_ID +
-                  sizeof(BTLDR_TARGET_STAGE_SUFFIX)];
-    memcpy(expected, ops->board_id, board_len);
-    memcpy(expected + board_len, BTLDR_TARGET_STAGE_SUFFIX, suffix_len);
 
     char value[64];
-    if (entry.len > sizeof(value))
+    if (target_len > sizeof(value))
         return EOS_ERR_INVALID;
-    rc = eos_tlv_read_data(&ctx, &entry, value, sizeof(value));
+    rc = eos_hal_flash_read(target_off, value, target_len);
     if (rc != EOS_OK)
         return rc;
 
     /* Constant-time: the value is attacker-influenced and the device
-     * offers unlimited retries. */
+     * offers unlimited retries. Compared directly against the board
+     * id and the ":stage-1" suffix, byte by byte -- no expected
+     * buffer is built, so no memcpy is needed here (and no fortified
+     * memcpy is risked). */
     volatile uint8_t diff = 0;
-    for (uint32_t i = 0; i < entry.len; i++)
-        diff |= (uint8_t)(value[i] ^ expected[i]);
+    for (uint32_t i = 0; i < target_len; i++) {
+        uint8_t want = (i < board_len)
+            ? (uint8_t)ops->board_id[i]
+            : (uint8_t)BTLDR_TARGET_STAGE_SUFFIX[i - board_len];
+        diff |= (uint8_t)(value[i] ^ want);
+    }
+    if (diff != 0)
+        return EOS_ERR_INVALID;
 
-    return (diff == 0) ? EOS_OK : EOS_ERR_INVALID;
+    return EOS_OK;
 }
 
 /* ---- Shared verification (design note §3) ---- */
@@ -246,26 +304,21 @@ int eos_bootloader_replace_verify_image(uint32_t image_addr,
     if (hdr.entry_addr < base || hdr.entry_addr >= end)
         return EOS_ERR_INVALID;
 
-    /* The whole image must fit the area it was staged in, and must fit
-     * the stage-1 region it will be copied into. Overflow-checked with
-     * the same discipline as rollback.c's slot_remain_from(). */
-    uint32_t room = 0;
-    rc = image_room_from(image_addr, &room);
-    if (rc != EOS_OK)
-        return rc;
-    if (hdr.hdr_size > room)
+    /* The whole image must fit the stage-1 region it will be copied
+     * into. No separate "fits in its staging slot" check: every caller
+     * stages at a slot base, the total here is bounded by the stage-1
+     * region (48 KiB on STM32F4) which is smaller than any slot, and
+     * the integrity + signature steps below authenticate the bytes
+     * read, wherever they sit. tlv_len is bounded first (EOS_TLV_MAX_
+     * SIZE, 512) so the sum cannot overflow 32 bits: hdr_size <= 4096
+     * and image_size <= 16 MiB are enforced by the header parse. */
+    if (hdr.tlv_len > EOS_TLV_MAX_SIZE)
         return EOS_ERR_INVALID;
-    room -= hdr.hdr_size;
-    if (hdr.image_size > room)
-        return EOS_ERR_INVALID;
-    room -= hdr.image_size;
-    if (hdr.tlv_len > room)
-        return EOS_ERR_INVALID;
-    if ((uint64_t)hdr.hdr_size + hdr.image_size + hdr.tlv_len >
-        (uint64_t)(end - base))
+    if (hdr.hdr_size + hdr.image_size + hdr.tlv_len > end - base)
         return EOS_ERR_INVALID;
 
-    rc = target_matches_board(&hdr, image_addr, ops);
+    uint32_t counter = 0;
+    rc = target_matches_board(&hdr, image_addr, ops, &counter);
     if (rc != EOS_OK)
         return rc;
 
@@ -282,13 +335,9 @@ int eos_bootloader_replace_verify_image(uint32_t image_addr,
     if (rc != EOS_OK)
         return rc;
 
-    /* Step 5 -- TLV binding, then anti-rollback. The counter is read
-     * through eos_rollback_read_image_counter(), which re-authenticates
-     * the TLV area against the now-signature-verified header. */
-    uint32_t counter = 0;
-    rc = eos_rollback_read_image_counter(image_addr, &counter);
-    if (rc != EOS_OK)
-        return rc;
+    /* Step 5 -- anti-rollback. The counter came from the target
+     * check's authenticated TLV parse (step 2), after the header's
+     * signature was verified in step 4, so no re-read is needed. */
     rc = eos_rollback_verify(counter);
     if (rc != EOS_OK)
         return rc;
@@ -339,8 +388,14 @@ int eos_bootloader_replace_request(eos_slot_t staging_slot)
     bctl.replace_intent.version = EOS_BTLDR_REPLACE_VERSION;
     bctl.replace_intent.state = EOS_BTLDR_REPLACE_PENDING;
     bctl.replace_intent.staging_slot = (uint32_t)staging_slot;
-    memcpy(bctl.replace_intent.image_sha256, hdr.hash,
-           sizeof(bctl.replace_intent.image_sha256));
+    /* The digest is copied byte by byte, not with memcpy: a memcpy of
+     * a constant 32 bytes into a stack struct is fortified to
+     * __memcpy_chk by some toolchains (Ubuntu's gcc 10.3.1), and
+     * __memcpy_chk pulls __chk_fail -> raise -> signal -> malloc ->
+     * _sbrk into the firmware link, which has no heap (undefined
+     * `end`). A loop keeps the link heap-free. */
+    for (uint32_t i = 0; i < sizeof(bctl.replace_intent.image_sha256); i++)
+        bctl.replace_intent.image_sha256[i] = hdr.hash[i];
     bctl.replace_intent.image_counter = counter;
     bctl.replace_intent.image_size =
         hdr.hdr_size + hdr.image_size + hdr.tlv_len;

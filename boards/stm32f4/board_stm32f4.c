@@ -454,13 +454,21 @@ static int stm32f4_flash_protect_status(uint32_t *status)
     return EOS_OK;
 }
 
-static int stm32f4_flash_protect_bootloader(void)
+/* Program the bootloader sectors' nWRP bits: set != 0 sets them
+ * (lifting WRP), set == 0 clears them (applying WRP), preserving
+ * every other option bit. Protect and unprotect share this one
+ * sequence (unlock, write OPTCR with OPTSTRT clear, set OPTSTRT to
+ * launch, wait, check the error flags, re-lock, read back) and differ
+ * only in the direction and in the early-return / read-back
+ * comparisons -- one copy instead of two near-identical ~45-line
+ * functions, which matters for stage-0's 16 KiB budget. */
+static int stm32f4_program_nwrp(int set)
 {
     uint32_t mask = stm32f4_bootloader_nwrp_mask();
     if (mask == 0) return EOS_ERR_INVALID;
 
-    /* Already protected: nothing to program. */
-    if ((FLASH_OPTCR & mask) == 0)
+    /* Already in the target state: nothing to program. */
+    if (set ? (FLASH_OPTCR & mask) == mask : (FLASH_OPTCR & mask) == 0)
         return EOS_OK;
 
     /* RDP level 2 permanently locks the option bytes (RM0090 §3.9:
@@ -479,29 +487,41 @@ static int stm32f4_flash_protect_bootloader(void)
         FLASH_OPTKEYR = FLASH_OPTKEY2;
     }
 
-    /* Clear the bootloader sectors' nWRP bits, preserving every other
-     * option bit. The launch is a separate step: write the value with
-     * OPTSTRT clear, then set OPTSTRT to start the option-byte program. */
+    /* Program the bootloader sectors' nWRP bits, preserving every
+     * other option bit. The launch is a separate step: write the value
+     * with OPTSTRT clear, then set OPTSTRT to start the option-byte
+     * program. */
     uint32_t optcr = FLASH_OPTCR;
-    optcr &= ~mask;
+    if (set)
+        optcr |= mask;
+    else
+        optcr &= ~mask;
     optcr &= ~(uint32_t)FLASH_OPTCR_OPTSTRT;
     FLASH_OPTCR = optcr;
 
     FLASH_OPTCR |= FLASH_OPTCR_OPTSTRT;
     flash_wait_busy();
 
+    /* Re-lock the option bytes first: clearing the error flags below
+     * writes FLASH_SR, not the option bytes, so it does not need them
+     * unlocked. One lock site instead of one per outcome. */
+    FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
     if (FLASH_SR & 0xF0) {
         FLASH_SR = 0xF0; /* Clear errors */
-        FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
         return EOS_ERR_FLASH;
     }
-    FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
 
     /* A program can fail without reporting an error: every bootloader
-     * sector's nWRP bit must read back clear. */
-    if ((FLASH_OPTCR & mask) != 0)
+     * sector's nWRP bit must read back in the target state. */
+    if (set ? (FLASH_OPTCR & mask) != mask : (FLASH_OPTCR & mask) != 0)
         return EOS_ERR_FLASH;
     return EOS_OK;
+}
+
+static int stm32f4_flash_protect_bootloader(void)
+{
+    /* Clear the bootloader sectors' nWRP bits. */
+    return stm32f4_program_nwrp(0);
 }
 
 /* ---- Bootloader replacement: lift WRP (ADR-022) ----
@@ -524,48 +544,7 @@ static int stm32f4_flash_protect_bootloader(void)
 
 static int stm32f4_flash_unprotect_bootloader(void)
 {
-    uint32_t mask = stm32f4_bootloader_nwrp_mask();
-    if (mask == 0) return EOS_ERR_INVALID;
-
-    /* Already unprotected: nothing to program. */
-    if ((FLASH_OPTCR & mask) == mask)
-        return EOS_OK;
-
-    /* RDP level 2 permanently locks the option bytes (RM0090 §3.9),
-     * so no program attempt can succeed. Fail closed here instead of
-     * spending a futile unlock/program cycle. */
-    if (stm32f4_rdp_level() == STM32F4_RDP_LEVEL_2)
-        return EOS_ERR_FLASH;
-
-    /* Unlock the option bytes. */
-    if (FLASH_OPTCR & FLASH_OPTCR_OPTLOCK) {
-        FLASH_OPTKEYR = FLASH_OPTKEY1;
-        FLASH_OPTKEYR = FLASH_OPTKEY2;
-    }
-
-    /* Set the bootloader sectors' nWRP bits, preserving every other
-     * option bit. The launch is a separate step: write the value with
-     * OPTSTRT clear, then set OPTSTRT to start the option-byte program. */
-    uint32_t optcr = FLASH_OPTCR;
-    optcr |= mask;
-    optcr &= ~(uint32_t)FLASH_OPTCR_OPTSTRT;
-    FLASH_OPTCR = optcr;
-
-    FLASH_OPTCR |= FLASH_OPTCR_OPTSTRT;
-    flash_wait_busy();
-
-    if (FLASH_SR & 0xF0) {
-        FLASH_SR = 0xF0; /* Clear errors */
-        FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
-        return EOS_ERR_FLASH;
-    }
-    FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
-
-    /* A program can fail without reporting an error: every bootloader
-     * sector's nWRP bit must read back set. */
-    if ((FLASH_OPTCR & mask) != mask)
-        return EOS_ERR_FLASH;
-    return EOS_OK;
+    return stm32f4_program_nwrp(1);
 }
 
 /* ---- Watchdog ---- */

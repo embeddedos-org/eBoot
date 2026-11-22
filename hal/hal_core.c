@@ -306,39 +306,50 @@ void eos_hal_bootloader_token_clear(void)
 /* The privileged range: inside the board-declared bootloader region
  * only. A privileged call for any other range is a programming error
  * in the executor, not a write the allow-list would have allowed. */
+/* 32-bit throughout: the range fits the region only if the length
+ * fits the region and the offset from the region start fits what
+ * remains -- both subtractions are overflow-safe because the
+ * preceding comparisons bound their operands. No 64-bit
+ * arithmetic, which matters on a 32-bit MCU in a 16 KiB stage-0. */
 static bool flash_range_inside_bootloader(uint32_t addr, size_t len)
 {
     if (!g_ops || g_ops->bootloader_size == 0)
         return false;
-    if ((uint64_t)len >= 0x100000000ull)
+    if (len > g_ops->bootloader_size)
         return false;
-    uint64_t start = addr;
-    uint64_t end = start + (uint64_t)len;
-    uint64_t region_start = g_ops->bootloader_addr;
-    uint64_t region_end = region_start + (uint64_t)g_ops->bootloader_size;
-    if (end > 0xFFFFFFFFull)
+    if (addr < g_ops->bootloader_addr)
         return false;
-    return start >= region_start && end <= region_end;
+    return addr - g_ops->bootloader_addr <=
+        g_ops->bootloader_size - (uint32_t)len;
+}
+
+/* The shared privileged-entry gate: the token, then the range,
+ * then the board op. Write and erase differ only in which op
+ * runs, so they share this one check instead of duplicating
+ * it. The wrappers keep their own op-null check first,
+ * preserving the original error order. */
+static int privileged_bootloader_op(int is_write, uint32_t addr,
+                                    const void *buf, size_t len)
+{
+    if (g_bootloader_token != EOS_HAL_BTLDR_TOKEN_MAGIC)
+        return EOS_ERR_WRITE_PROTECTED;
+    if (!flash_range_inside_bootloader(addr, len))
+        return EOS_ERR_INVALID;
+    if (is_write)
+        return g_ops->flash_write(addr, buf, len);
+    return g_ops->flash_erase(addr, len);
 }
 
 int eos_hal_flash_write_bootloader(uint32_t addr, const void *buf, size_t len)
 {
     if (!g_ops || !g_ops->flash_write)
         return EOS_ERR_GENERIC;
-    if (g_bootloader_token != EOS_HAL_BTLDR_TOKEN_MAGIC)
-        return EOS_ERR_WRITE_PROTECTED;
-    if (!flash_range_inside_bootloader(addr, len))
-        return EOS_ERR_INVALID;
-    return g_ops->flash_write(addr, buf, len);
+    return privileged_bootloader_op(1, addr, buf, len);
 }
 
 int eos_hal_flash_erase_bootloader(uint32_t addr, size_t len)
 {
     if (!g_ops || !g_ops->flash_erase)
         return EOS_ERR_GENERIC;
-    if (g_bootloader_token != EOS_HAL_BTLDR_TOKEN_MAGIC)
-        return EOS_ERR_WRITE_PROTECTED;
-    if (!flash_range_inside_bootloader(addr, len))
-        return EOS_ERR_INVALID;
-    return g_ops->flash_erase(addr, len);
+    return privileged_bootloader_op(0, addr, NULL, len);
 }

@@ -82,23 +82,13 @@ static void bootctl_migrate_v1(eos_bootctl_t *bctl,
                                const eos_bootctl_v1_t *old)
 {
     memset(bctl, 0, sizeof(*bctl));
-    bctl->magic            = EOS_BOOTCTL_MAGIC;
-    bctl->version          = EOS_BOOTCTL_VERSION;
-    bctl->active_slot      = old->active_slot;
-    bctl->pending_slot     = old->pending_slot;
-    bctl->confirmed_slot   = old->confirmed_slot;
-    bctl->boot_attempts    = old->boot_attempts;
-    bctl->max_attempts     = old->max_attempts;
-    bctl->last_reset_reason = old->last_reset_reason;
-    bctl->flags            = old->flags;
-    bctl->img_a_version    = old->img_a_version;
-    bctl->img_b_version    = old->img_b_version;
-    bctl->img_a_crc        = old->img_a_crc;
-    bctl->img_b_crc        = old->img_b_crc;
-    bctl->log_head         = old->log_head;
-    bctl->boot_count       = old->boot_count;
-    /* replace_intent stays zeroed: no replacement was ever requested
-     * under v1, and a zeroed record is no replacement. */
+    /* The first 15 words (magic through boot_count, offsets 0..59)
+     * sit at identical offsets in v1 and v2, so they copy as one
+     * block instead of fourteen assignments. The version word is then
+     * set to 2; replace_intent stays zeroed, since no replacement was
+     * ever requested under v1, and a zeroed record is no replacement. */
+    memcpy(bctl, old, 15 * sizeof(uint32_t));
+    bctl->version = EOS_BOOTCTL_VERSION;
     bootctl_update_crc(bctl);
 }
 
