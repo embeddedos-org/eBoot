@@ -18,7 +18,8 @@ boards/*/board_*.c and reports:
                   flash_base + flash_size)
     overlap       two of slot A, slot B, recovery and bootloader share bytes
     inside        the boot-control block, its backup or the log starts inside
-                  one of those regions
+                  one of those regions (subject: block@region, one finding
+                  per containing region)
 
 Rules that keep the report honest:
 
@@ -92,7 +93,7 @@ KNOWN = {
     ("powerpc", "flash-wraps", "flash_size"): _ISSUES + "197",
     ("pru", "outside-flash", "slot_a"): _ISSUES + "199",
     ("pru", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("samd51", "inside", "bootctl_addr"): _ISSUES + "195",
+    ("samd51", "inside", "bootctl_addr@slot_b"): _ISSUES + "195",
     ("samd51", "overlap", "slot_b+recovery"): _ISSUES + "195",
     ("x86", "flash-wraps", "flash_size"): _ISSUES + "196",
     ("x86", "outside-flash", "bootctl_addr"): _ISSUES + "196",
@@ -285,7 +286,9 @@ def findings(initialisers, defined):
                         % ((block, at) + flash)))
         for name, region in regions.items():
             if region[0] <= at < region[0] + region[1]:
-                out.append(("inside", block,
+                # The region is part of the subject: one block can lie in
+                # two regions, and one KNOWN entry must not cover both.
+                out.append(("inside", "%s@%s" % (block, name),
                             "%s %#x is inside %s [%#x, +%#x)"
                             % ((block, at, name) + region)))
     return out

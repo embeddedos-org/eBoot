@@ -238,14 +238,26 @@ def test_regions_that_share_a_byte_overlap_and_adjacent_ones_do_not():
 
 def test_a_block_inside_a_region_or_outside_flash_is_reported():
     assert kinds(changed(bootctl_addr="0x080CFFFF")) == [
-        ("inside", "bootctl_addr")]
+        ("inside", "bootctl_addr@slot_b")]
     assert kinds(changed(bootctl_backup_addr="0x08000000")) == [
-        ("inside", "bootctl_backup_addr")]
-    assert kinds(changed(log_addr="0x080EF000")) == [("inside", "log_addr")]
+        ("inside", "bootctl_backup_addr@bootloader")]
+    assert kinds(changed(log_addr="0x080EF000")) == [
+        ("inside", "log_addr@recovery")]
     assert kinds(changed(log_addr="0x080F4000")) == []
     assert kinds(changed(bootctl_addr="0x08100000")) == [
         ("outside-flash", "bootctl_addr")]
     assert kinds(changed(bootctl_addr="0x080FFFFF")) == []
+
+
+def test_a_block_inside_two_regions_is_two_findings_with_two_subjects():
+    # samd51's shape: slot B runs over the recovery image, and the block sits
+    # in both. Each containment has its own subject, so a KNOWN entry for one
+    # cannot hide the other.
+    both = changed(slot_b_size="0x80000", bootctl_addr="0x080D8000")
+    found = kinds(both)
+    assert ("inside", "bootctl_addr@slot_b") in found
+    assert ("inside", "bootctl_addr@recovery") in found
+    assert len(set(found)) == len(found)
 
 
 def test_constants_are_resolved_through_the_board_macros():
@@ -256,7 +268,7 @@ def test_constants_are_resolved_through_the_board_macros():
              "recovery_addr": "0x7C000", "recovery_size": "(8 * 1024)",
              "bootctl_addr": "0x7E000"}
     assert kinds(table, defined) == [("overlap", "slot_b+recovery"),
-                                     ("inside", "bootctl_addr")]
+                                     ("inside", "bootctl_addr@slot_b")]
 
 
 # ---- the tree ------------------------------------------------------------
