@@ -40,8 +40,8 @@ a supported board.
 | `system_reset` | 13 | 0 | 0 | 0 | 0 | 0 | 70 |
 | `recovery_pin_asserted` | 1 | 0 | 0 | 0 | 12 | 0 | 70 |
 | `jump` | 13 | 0 | 0 | 0 | 0 | 0 | 70 |
-| `uart_init` | 8 | 3 | 0 | 0 | 0 | 0 | 72 |
-| `uart_send` | 10 | 1 | 0 | 0 | 0 | 0 | 72 |
+| `uart_init` | 8 | 2 | 0 | 0 | 0 | 0 | 73 |
+| `uart_send` | 10 | 0 | 0 | 0 | 0 | 0 | 73 |
 | `uart_recv` | 10 | 0 | 1 | 0 | 0 | 0 | 72 |
 | `get_tick_ms` | 12 | 0 | 0 | 0 | 1 | 0 | 70 |
 | `disable_interrupts` | 11 | 0 | 0 | 0 | 0 | 0 | 72 |
@@ -63,8 +63,7 @@ a supported board.
 
 | Operation | Ports |
 |---|---|
-| `uart_init` | am64x, esp32, samd51 |
-| `uart_send` | samd51 |
+| `uart_init` | am64x, esp32 |
 
 ## Per board
 
@@ -139,7 +138,7 @@ Columns are the operations in `eos_board_ops_t` order: 1 `flash_read`, 2 `flash_
 | `rpi4` | E | E | E | – | – | K | C | K | C | C | C | C | C | C | C | C | – | – | – | – | – | – | – | – | – | – | – |
 | `rx` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
 | `s390` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
-| `samd51` | C | – | – | 0 | 0 | K | C | K | C | S! | S! | E | C | C | C | 0 | – | – | – | – | – | – | – | – | – | – | – |
+| `samd51` | C | – | – | 0 | 0 | K | C | K | C | – | – | E | C | C | C | 0 | – | – | – | – | – | – | – | – | – | – | – |
 | `sh4` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
 | `sharc` | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
 | `sifive_u` | C | – | – | – | – | K | C | K | C | C | C | C | C | C | C | C | – | – | – | – | – | – | – | – | – | – | – |

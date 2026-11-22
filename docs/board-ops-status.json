@@ -2325,8 +2325,8 @@
         "system_reset": "code",
         "recovery_pin_asserted": "const",
         "jump": "code",
-        "uart_init": "ok-stub",
-        "uart_send": "ok-stub",
+        "uart_init": "absent",
+        "uart_send": "absent",
         "uart_recv": "err-stub",
         "get_tick_ms": "code",
         "disable_interrupts": "code",
@@ -2904,13 +2904,12 @@
       },
       "uart_init": {
         "code": 8,
-        "ok-stub": 3,
-        "absent": 72
+        "ok-stub": 2,
+        "absent": 73
       },
       "uart_send": {
         "code": 10,
-        "ok-stub": 1,
-        "absent": 72
+        "absent": 73
       },
       "uart_recv": {
         "code": 10,
