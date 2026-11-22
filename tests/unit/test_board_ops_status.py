@@ -397,10 +397,10 @@ def test_no_port_reports_a_flash_operation_it_does_not_perform():
 
 
 def test_no_port_reports_a_uart_send_that_discards_its_data():
-    """A uart_send that returns success without writing tells the UART
-    firmware transport its ACK, NAK and status bytes went out (#201). A port
-    without a UART driver leaves the entry NULL and the HAL returns an
-    error."""
+    """A uart_send that returns success without writing tells its caller
+    (the UART firmware transport, the log adapter) that bytes went out
+    (#201). A port without a UART driver leaves the entry NULL and the HAL
+    returns an error."""
     status = bos.collect(ROOT)
     stubbed = sorted(
         board["board"] for board in status["boards"]
