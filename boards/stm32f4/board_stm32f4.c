@@ -504,6 +504,70 @@ static int stm32f4_flash_protect_bootloader(void)
     return EOS_OK;
 }
 
+/* ---- Bootloader replacement: lift WRP (ADR-022) ----
+ *
+ * The reverse of the protection above: set the bootloader sectors'
+ * nWRP bits (sectors 0-3), using the same option-byte program sequence
+ * (unlock, write OPTCR with OPTSTRT clear, set OPTSTRT to launch, wait,
+ * check the error flags, re-lock) and the same post-program read-back.
+ * Only the bootloader sectors' bits are touched, so lifting WRP never
+ * changes the RDP level and never unprotects another sector.
+ *
+ * The call is idempotent: a device whose bootloader sectors are already
+ * unprotected returns EOS_OK without programming anything. At RDP level
+ * 2 the option bytes are permanently locked, so the call fails closed
+ * (EOS_ERR_FLASH). WRP takes effect at the next reset, like the protect
+ * call; the replacement executor reads
+ * bootloader_protect_needs_reset to decide whether the copy needs a
+ * reset first. The only caller is the stage-0 replacement executor,
+ * after the staged stage-1 image has fully verified. */
+
+static int stm32f4_flash_unprotect_bootloader(void)
+{
+    uint32_t mask = stm32f4_bootloader_nwrp_mask();
+    if (mask == 0) return EOS_ERR_INVALID;
+
+    /* Already unprotected: nothing to program. */
+    if ((FLASH_OPTCR & mask) == mask)
+        return EOS_OK;
+
+    /* RDP level 2 permanently locks the option bytes (RM0090 §3.9),
+     * so no program attempt can succeed. Fail closed here instead of
+     * spending a futile unlock/program cycle. */
+    if (stm32f4_rdp_level() == STM32F4_RDP_LEVEL_2)
+        return EOS_ERR_FLASH;
+
+    /* Unlock the option bytes. */
+    if (FLASH_OPTCR & FLASH_OPTCR_OPTLOCK) {
+        FLASH_OPTKEYR = FLASH_OPTKEY1;
+        FLASH_OPTKEYR = FLASH_OPTKEY2;
+    }
+
+    /* Set the bootloader sectors' nWRP bits, preserving every other
+     * option bit. The launch is a separate step: write the value with
+     * OPTSTRT clear, then set OPTSTRT to start the option-byte program. */
+    uint32_t optcr = FLASH_OPTCR;
+    optcr |= mask;
+    optcr &= ~(uint32_t)FLASH_OPTCR_OPTSTRT;
+    FLASH_OPTCR = optcr;
+
+    FLASH_OPTCR |= FLASH_OPTCR_OPTSTRT;
+    flash_wait_busy();
+
+    if (FLASH_SR & 0xF0) {
+        FLASH_SR = 0xF0; /* Clear errors */
+        FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
+        return EOS_ERR_FLASH;
+    }
+    FLASH_OPTCR |= FLASH_OPTCR_OPTLOCK;
+
+    /* A program can fail without reporting an error: every bootloader
+     * sector's nWRP bit must read back set. */
+    if ((FLASH_OPTCR & mask) != mask)
+        return EOS_ERR_FLASH;
+    return EOS_OK;
+}
+
 /* ---- Watchdog ---- */
 
 static void stm32f4_watchdog_init(uint32_t timeout_ms)
@@ -677,6 +741,8 @@ static const eos_board_ops_t stm32f4_ops = {
     .app_vector_offset   = STM32F4_VECTOR_OFFSET,
     .bootloader_addr     = STM32F4_BOOTLOADER_ADDR,
     .bootloader_size     = STM32F4_BOOTLOADER_SIZE,
+    .board_id            = "stm32f4",
+    .bootloader_protect_needs_reset = true,
 
     .flash_read          = stm32f4_flash_read,
     .flash_write         = stm32f4_flash_write,
@@ -713,6 +779,7 @@ static const eos_board_ops_t stm32f4_ops = {
 
     .flash_protect_bootloader = stm32f4_flash_protect_bootloader,
     .flash_protect_status     = stm32f4_flash_protect_status,
+    .flash_unprotect_bootloader = stm32f4_flash_unprotect_bootloader,
 };
 
 /* ---- Board Entry Points ---- */
