@@ -21,6 +21,41 @@
 extern "C" {
 #endif
 
+/* ---------------- Bootloader-replacement intent record ----------------
+ *
+ * A pending stage-1 replacement, requested by stage-1 and executed by
+ * stage-0 on the next boot (docs/design/bootloader-replacement-entry.md,
+ * ADR-022). The record lives in this block so it reuses the dual-copy CRC
+ * anti-tearing mechanism rather than inventing a new persistent store.
+ * The record is written only by stage-1 after the staged image has
+ * verified, and cleared by stage-0 when the transaction completes or is
+ * refused. The image digest / counter / size are a cross-check against
+ * the staged image, not the verification itself: stage-0 re-verifies the
+ * staged image from flash before any copy.
+ *
+ * A zeroed record (magic 0) is no replacement: fresh defaults carry no
+ * intent, and a record whose magic does not match is ignored. */
+
+#define EOS_BTLDR_REPLACE_MAGIC    0x52504C43u  /* "RPLC" */
+#define EOS_BTLDR_REPLACE_VERSION  1u
+
+typedef enum {
+    EOS_BTLDR_REPLACE_IDLE     = 0,  /* no replacement requested */
+    EOS_BTLDR_REPLACE_PENDING  = 1,  /* staged + verified by stage-1, awaiting stage-0 */
+    EOS_BTLDR_REPLACE_COPYING  = 2,  /* WRP lifted, copy started; stage-1 may be partial */
+} eos_bootloader_replace_state_t;
+
+typedef struct {
+    uint32_t magic;              /* EOS_BTLDR_REPLACE_MAGIC */
+    uint16_t version;            /* 1; unknown versions are refused */
+    uint16_t state;              /* eos_bootloader_replace_state_t */
+    uint32_t staging_slot;       /* eos_slot_t — EOS_SLOT_RECOVERY */
+    uint8_t  image_sha256[32];   /* expected digest of the staged image (cross-check) */
+    uint32_t image_counter;      /* expected EOS_TLV_MIN_SEC_VER */
+    uint32_t image_size;         /* expected total bytes (header + payload + TLV) */
+    uint32_t reserved[4];        /* extension space, zero */
+} eos_bootloader_replace_intent_t;
+
 /* ---------------- Boot Control Block ---------------- */
 
 typedef struct {
@@ -39,11 +74,12 @@ typedef struct {
     uint32_t img_b_crc;           /* CRC32 of image in Slot B */
     uint32_t log_head;            /* Index of next log entry to write */
     uint32_t boot_count;          /* Total boot count since factory */
+    eos_bootloader_replace_intent_t replace_intent; /* Pending stage-1 replacement (ADR-022) */
     uint32_t reserved[7];         /* Reserved for future use */
     uint32_t crc32;               /* CRC32 of this structure (excluding this field) */
 } eos_bootctl_t;
 
-#define EOS_BOOTCTL_VERSION  1
+#define EOS_BOOTCTL_VERSION  2  /* v2 adds replace_intent; v1 copies fail CRC and load as defaults */
 
 /* ---------------- Boot Control API ---------------- */
 
