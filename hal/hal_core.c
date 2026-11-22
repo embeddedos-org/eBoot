@@ -266,3 +266,79 @@ int eos_hal_flash_protect_status(uint32_t *status)
         return EOS_ERR_NOT_SUPPORTED;
     return g_ops->flash_protect_status(status);
 }
+
+int eos_hal_flash_unprotect_bootloader(void)
+{
+    if (!g_ops || !g_ops->flash_unprotect_bootloader)
+        return EOS_ERR_NOT_SUPPORTED;
+    return g_ops->flash_unprotect_bootloader();
+}
+
+/* ---- Privileged bootloader-region access (ADR-022) ----
+ *
+ * The one-shot RAM authorization token. Stage-0's replacement
+ * executor mints it only after the staged stage-1 image has fully
+ * verified, and clears it when the authorized copy ends -- success
+ * or failure -- so one mint authorizes exactly one copy, never a
+ * later write. "Cleared on first use" in the design note is read
+ * this way because a copy is many flash writes (erase + chunks): a
+ * token that died on the first write could never complete one.
+ * The token never persists across reset: it lives in .bss and RAM
+ * does not survive one. C cannot enforce caller identity, so the
+ * enforcement is structural -- the mint is declared in the
+ * stage-0-local stage0/bootloader_replace.h, the executor is its
+ * only caller, and the privileged entry points below are the only
+ * way past the allow-list -- not a flag any caller can set. A
+ * nonzero magic (not 0/1) so a zeroed .bss can never authorize. */
+static volatile uint32_t g_bootloader_token = 0;
+#define EOS_HAL_BTLDR_TOKEN_MAGIC  0xB7A9D1E5u
+
+void eos_hal_bootloader_token_mint(void)
+{
+    g_bootloader_token = EOS_HAL_BTLDR_TOKEN_MAGIC;
+}
+
+void eos_hal_bootloader_token_clear(void)
+{
+    g_bootloader_token = 0;
+}
+
+/* The privileged range: inside the board-declared bootloader region
+ * only. A privileged call for any other range is a programming error
+ * in the executor, not a write the allow-list would have allowed. */
+static bool flash_range_inside_bootloader(uint32_t addr, size_t len)
+{
+    if (!g_ops || g_ops->bootloader_size == 0)
+        return false;
+    if ((uint64_t)len >= 0x100000000ull)
+        return false;
+    uint64_t start = addr;
+    uint64_t end = start + (uint64_t)len;
+    uint64_t region_start = g_ops->bootloader_addr;
+    uint64_t region_end = region_start + (uint64_t)g_ops->bootloader_size;
+    if (end > 0xFFFFFFFFull)
+        return false;
+    return start >= region_start && end <= region_end;
+}
+
+int eos_hal_flash_write_bootloader(uint32_t addr, const void *buf, size_t len)
+{
+    if (!g_ops || !g_ops->flash_write)
+        return EOS_ERR_GENERIC;
+    if (g_bootloader_token != EOS_HAL_BTLDR_TOKEN_MAGIC)
+        return EOS_ERR_WRITE_PROTECTED;
+    if (!flash_range_inside_bootloader(addr, len))
+        return EOS_ERR_INVALID;
+    return g_ops->flash_write(addr, buf, len);
+}
+
+int eos_hal_flash_erase_bootloader(uint32_t addr, size_t len)
+{
+    if (!g_ops || !g_ops->flash_erase)
+        return EOS_ERR_GENERIC;
+    if (g_bootloader_token != EOS_HAL_BTLDR_TOKEN_MAGIC)
+        return EOS_ERR_WRITE_PROTECTED;
+    if (!flash_range_inside_bootloader(addr, len))
+        return EOS_ERR_INVALID;
+    return g_ops->flash_erase(addr, len);
+}
