@@ -254,10 +254,9 @@ def test_a_block_inside_two_regions_is_two_findings_with_two_subjects():
     # in both. Each containment has its own subject, so a KNOWN entry for one
     # cannot hide the other.
     both = changed(slot_b_size="0x80000", bootctl_addr="0x080D8000")
-    found = kinds(both)
-    assert ("inside", "bootctl_addr@slot_b") in found
-    assert ("inside", "bootctl_addr@recovery") in found
-    assert len(set(found)) == len(found)
+    assert kinds(both) == [("overlap", "slot_b+recovery"),
+                           ("inside", "bootctl_addr@slot_b"),
+                           ("inside", "bootctl_addr@recovery")]
 
 
 def test_constants_are_resolved_through_the_board_macros():

@@ -216,6 +216,8 @@ def _intersect(a, b):
 
 def findings(initialisers, defined):
     """Findings for one port as (kind, subject, detail), in a fixed order.
+    The subject is a field or region name, `first+second` for an overlap and
+    `block@region` for a block inside a region.
     `initialisers` is the ops table as field -> initialiser text."""
     out, value = [], {}
     for field in FIELDS:
