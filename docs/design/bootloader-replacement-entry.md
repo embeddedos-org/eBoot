@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted — implemented in ADR-022 (PR #193 follow-up, 2026-11-22) |
 | Date | 2026-11-21 |
 | Deciders | eBoot maintainers |
 | Follow-up of | Foundation PR-EBT-3, eBoot #191 (merged 2026-11-20) |
