@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted — implemented in ADR-022 (PR #193 follow-up, 2026-11-22) |
+| Status | Accepted — implemented in ADR-022 (PR #200, merged 2026-11-23; privileged range narrowed to stage-1 in the 2026-11-23 follow-up, §12) |
 | Date | 2026-11-21 |
 | Deciders | eBoot maintainers |
 | Follow-up of | Foundation PR-EBT-3, eBoot #191 (merged 2026-11-20) |
@@ -617,7 +617,40 @@ boards sharing an address map.
    intent) worth the added state machine, or does the signature + counter
    gate already carry the authorization?
 
-## 12. References
+## 12. Amendment — privileged range narrowed to stage-1 (2026-11-23)
+
+As merged in #200, the token-gated privileged HAL entries
+(`eos_hal_flash_write_bootloader()` / `eos_hal_flash_erase_bootloader()`,
+`hal/hal_core.c`) admitted the whole board-declared bootloader region
+(stage-0 + stage-1), while §1 of this note defines "bootloader region" as
+the stage-1 part. The follow-up narrows the gate to
+`[stage1_base, bootloader_end)`, so the implementation now matches §1: a
+privileged write to stage-0 is refused with `EOS_ERR_INVALID`, exactly like
+any other out-of-range privileged call.
+
+The stage-1 base is derived, not declared: `stage1_base = flash_base +
+app_vector_offset` — the same formula the stage-0 executor
+(`stage0/bootloader_replace.c`), the request-side verify
+(`core/bootloader_replace.c` §3 step 2), and the stage-0 jump
+(`stage0/jump_stage1.c`) already use for the stage-1 vector address. No new
+board field was added, so there is no second source of truth that could
+disagree with the jump target.
+
+Fail-closed rule: a board whose derived stage-1 base does not lie strictly
+inside its declared bootloader region declares no usable stage-1 boundary,
+and the privileged entries refuse every range rather than falling back to
+the whole region. That covers `app_vector_offset == 0` (stage-1 at the flash
+base: no stage-0/stage-1 split declared), an offset landing at or below the
+region start, one landing at or past the region end, and an offset that wraps
+`flash_base` past 2^32. STM32F4 is the only board that declares a bootloader
+region; every other board already refused privileged ops for want of one.
+
+The §3 prerequisite is unchanged by this amendment and still open:
+signature-based stage-1 verification in stage-0 is NOT implemented here, and
+fielded hash-pinned stage-0 devices still cannot use in-band replacement.
+That remains the field-deployment gate, tracked as a separate change.
+
+## 13. References
 
 - eBoot #191 — bootloader self-protection (HAL allow-list + STM32F4 WRP);
   `include/eos_bootloader_protect.h`, `core/bootloader_protect.c`,
@@ -641,8 +674,10 @@ boards sharing an address map.
 
 ---
 
-*Design note only — no code lands with this document. Implementation follows
-after review, gated on the signature-based stage-1 verification prerequisite
-in §3.*
+*Implementation landed in PR #200 (merged 2026-11-23); the §3 prerequisite
+— signature-based stage-1 verification in stage-0 — remains open as the
+field-deployment gate, and fielded hash-pinned stage-0 devices cannot use
+in-band replacement until it lands. The privileged range was narrowed to
+stage-1 in the 2026-11-23 follow-up (§12).*
 
 — av_mando
