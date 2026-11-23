@@ -42,9 +42,20 @@ extern "C" {
 #define EOS_TLV_SHA256       0x10
 #define EOS_TLV_ED25519      0x24
 #define EOS_TLV_DEPENDENCY   0x40
+#define EOS_TLV_TARGET       0x41
 #define EOS_TLV_MIN_SEC_VER  0x50
 #define EOS_TLV_NONCE        0x51
 #define EOS_TLV_ENC_AES256   0x60
+
+/* EOS_TLV_TARGET value encoding (ADR-022): the ASCII string
+ * "<board_id>:stage-1" with no NUL terminator, where <board_id> is the
+ * board's eos_board_ops_t.board_id. It is required on
+ * bootloader-replacement images and ignored (not required) on application
+ * images. load_addr alone cannot identify the target: two boards can share
+ * an address map, so the replacement verifier compares this value against
+ * the board it runs on. The value sits inside the TLV area bound by
+ * tlv_hash, which is inside the signed prefix, so it is authenticated
+ * before the replacement path trusts it. */
 
 #define EOS_TLV_MAX_ENTRIES  16
 #define EOS_TLV_MAX_SIZE     512

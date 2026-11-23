@@ -14,6 +14,7 @@
 #include "eos_hal.h"
 #include "eos_bootctl.h"
 #include "eos_crypto_boot.h"
+#include "bootloader_replace.h"
 
 /* Forward declarations */
 extern void ebldr_watchdog_init(void);
@@ -65,6 +66,26 @@ void ebldr_stage0_main(void)
     }
 
     ebldr_watchdog_feed();
+
+    /* Privileged stage-1 replacement (ADR-022): a pending replacement
+     * runs here, before stage-1 is verified or jumped to. */
+    int replace_rc = eblr_bootloader_replace_execute(&bctl);
+    if (replace_rc == EBLR_REPLACE_RESET_PENDING) {
+        /* The transaction advanced and a reset was requested: do not jump. */
+        return;
+    }
+    if (replace_rc == EOS_ERR_NO_IMAGE) {
+        /* Stage-1 may be partial after an interrupted copy: recovery. */
+        eos_recovery_enter(&bctl);
+        return;
+    }
+    if (replace_rc != EBLR_REPLACE_PROCEED) {
+        /* Fatal: WRP lift, copy, or WRP re-apply failed. Halt, as
+         * hw_init_minimal.c halts on a failed protection program: do
+         * not boot a stage-1 this transaction cannot prove is intact. */
+        while (1) {
+        }
+    }
 
     /* Verify stage-1 integrity before jumping (secure boot chain) */
     const eos_board_ops_t *ops = eos_hal_get_ops();

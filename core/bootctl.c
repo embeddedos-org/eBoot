@@ -36,6 +36,74 @@ static void bootctl_update_crc(eos_bootctl_t *bctl)
     bctl->crc32 = crc32_buf(bctl, offsetof(eos_bootctl_t, crc32));
 }
 
+/* ---- Boot control v1 layout (EOS_BOOTCTL_VERSION 1) ----
+ *
+ * v2 inserts eos_bootloader_replace_intent_t (68 bytes) after boot_count,
+ * so a v1 copy fails the v2 CRC: its crc32 field sits where v2 keeps
+ * intent/reserved bytes. Reading it as v2 and dropping the state would
+ * reset the device's boot policy (active slot, confirmed slot, log head)
+ * to defaults on the first boot after the update -- a device running its
+ * B image would reboot into A. Migrate instead: read the v1-sized block,
+ * validate its own CRC, and carry the fields forward. All fields are
+ * uint32_t, so there is no padding to account for. */
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t active_slot;
+    uint32_t pending_slot;
+    uint32_t confirmed_slot;
+    uint32_t boot_attempts;
+    uint32_t max_attempts;
+    uint32_t last_reset_reason;
+    uint32_t flags;
+    uint32_t img_a_version;
+    uint32_t img_b_version;
+    uint32_t img_a_crc;
+    uint32_t img_b_crc;
+    uint32_t log_head;
+    uint32_t boot_count;
+    uint32_t reserved[7];
+    uint32_t crc32;
+} eos_bootctl_v1_t;
+
+static bool bootctl_v1_validate(const eos_bootctl_v1_t *old)
+{
+    if (!old)
+        return false;
+    if (old->magic != EOS_BOOTCTL_MAGIC)
+        return false;
+    if (old->version != 1)
+        return false;
+    uint32_t computed = crc32_buf(old, offsetof(eos_bootctl_v1_t, crc32));
+    return computed == old->crc32;
+}
+
+static void bootctl_migrate_v1(eos_bootctl_t *bctl,
+                               const eos_bootctl_v1_t *old)
+{
+    memset(bctl, 0, sizeof(*bctl));
+    /* The first 15 words (magic through boot_count, offsets 0..59)
+     * sit at identical offsets in v1 and v2, so they copy as one
+     * block instead of fourteen assignments. The version word is then
+     * set to 2; replace_intent stays zeroed, since no replacement was
+     * ever requested under v1, and a zeroed record is no replacement. */
+    memcpy(bctl, old, 15 * sizeof(uint32_t));
+    bctl->version = EOS_BOOTCTL_VERSION;
+    bootctl_update_crc(bctl);
+}
+
+static int bootctl_load_v1(eos_bootctl_t *bctl, uint32_t addr)
+{
+    eos_bootctl_v1_t old;
+    int rc = eos_hal_flash_read(addr, &old, sizeof(old));
+    if (rc != EOS_OK)
+        return rc;
+    if (!bootctl_v1_validate(&old))
+        return EOS_ERR_CRC;
+    bootctl_migrate_v1(bctl, &old);
+    return EOS_OK;
+}
+
 bool eos_bootctl_validate(const eos_bootctl_t *bctl)
 {
     if (!bctl)
@@ -78,6 +146,16 @@ int eos_bootctl_load(eos_bootctl_t *bctl)
     /* Try backup copy */
     rc = eos_hal_flash_read(ops->bootctl_backup_addr, bctl, sizeof(*bctl));
     if (rc == EOS_OK && eos_bootctl_validate(bctl))
+        return EOS_OK;
+
+    /* Both v2 copies are unreadable or corrupt. A v1 copy fails the v2
+     * CRC by layout, not by damage: migrate it instead of dropping the
+     * device's boot state to defaults (see bootctl_v1_validate). */
+    rc = bootctl_load_v1(bctl, ops->bootctl_addr);
+    if (rc == EOS_OK)
+        return EOS_OK;
+    rc = bootctl_load_v1(bctl, ops->bootctl_backup_addr);
+    if (rc == EOS_OK)
         return EOS_OK;
 
     /* Both copies corrupt — initialize defaults */

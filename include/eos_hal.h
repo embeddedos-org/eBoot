@@ -49,6 +49,23 @@ typedef struct {
     uint32_t bootloader_addr;
     uint32_t bootloader_size;
 
+    /* Board identity for the bootloader-replacement target check
+     * (ADR-022): the "<board_id>" half of an image's EOS_TLV_TARGET
+     * value ("<board_id>:stage-1"). NULL means the board declares no
+     * identity, and a replacement image can then never prove it is for
+     * this board, so replacement is refused on that board. Two boards
+     * can share an address map; this string is what distinguishes them.
+     * STM32F4 declares "stm32f4". */
+    const char *board_id;
+
+    /* True when the board's bootloader protection changes (protect and
+     * unprotect) take effect only at the next reset -- STM32F4 option
+     * bytes are reloaded on reset (RM0090 §3.9). The replacement
+     * executor reads this to decide whether lifting protection needs a
+     * reset before the copy, or the copy can proceed in the same boot.
+     * False (the default) means the change is immediate. */
+    bool bootloader_protect_needs_reset;
+
     /* Flash operations */
     int (*flash_read)(uint32_t addr, void *buf, size_t len);
     int (*flash_write)(uint32_t addr, const void *buf, size_t len);
@@ -107,6 +124,16 @@ typedef struct {
      * supported by this board". */
     int (*flash_protect_bootloader)(void);
     int (*flash_protect_status)(uint32_t *status);
+
+    /* Bootloader self-update (ADR-022): lift the hardware write
+     * protection for the board-declared bootloader region (e.g.
+     * re-program WRP option bytes on STM32F4). The only caller is the
+     * stage-0 replacement executor, after the staged image has fully
+     * verified. NULL means "not supported by this board" and the
+     * replacement is refused on that board. Whether the change takes
+     * effect immediately or at the next reset is the board property
+     * bootloader_protect_needs_reset above. */
+    int (*flash_unprotect_bootloader)(void);
 
     /* HW-accelerated crypto (optional, software fallback used if NULL) */
     int (*hw_sha256)(const void *data, size_t len, void *digest);
@@ -181,6 +208,24 @@ int   eos_hal_monotonic_read(uint32_t *value);
 int   eos_hal_monotonic_increment(void);
 int   eos_hal_flash_protect_bootloader(void);
 int   eos_hal_flash_protect_status(uint32_t *status);
+int   eos_hal_flash_unprotect_bootloader(void);
+
+/* Privileged bootloader-region flash access (ADR-022). These are the
+ * single exemption from the HAL allow-list: they write/erase inside
+ * the board-declared bootloader region, which eos_hal_flash_write()
+ * and eos_hal_flash_erase() refuse unconditionally. Both calls are
+ * gated on a one-shot RAM authorization token minted by stage-0's
+ * replacement executor only after the staged image has fully
+ * verified (see eos_hal_bootloader_token_mint(), declared in
+ * stage0/bootloader_replace.h -- deliberately not here). Without a
+ * minted token they refuse with EOS_ERR_WRITE_PROTECTED, exactly
+ * like the allow-list, so an unprivileged caller gets the same
+ * refusal from either path. A range outside the bootloader region
+ * is refused with EOS_ERR_INVALID: the privileged path writes the
+ * bootloader region and nothing else. The token never persists
+ * across reset (RAM does not survive one). */
+int   eos_hal_flash_write_bootloader(uint32_t addr, const void *buf, size_t len);
+int   eos_hal_flash_erase_bootloader(uint32_t addr, size_t len);
 
 /**
  * @brief Get the flash address for a given slot.

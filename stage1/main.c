@@ -14,6 +14,7 @@
 #include "eos_image.h"
 #include "eos_hal.h"
 #include "eos_mpu_boot.h"
+#include "eos_bootloader_replace.h"
 
 /* Forward declarations */
 extern void eos_boot_log_init(uint32_t head);
@@ -70,6 +71,14 @@ int eboot_main(void)
 
     if (rc == EOS_OK && target != EOS_SLOT_NONE) {
         eos_boot_log_append(EOS_LOG_SLOT_SELECTED, target, 0);
+
+        /* The boot decision is complete: this stage-1 image has
+         * proven itself. Commit its security counter (ADR-022 §4),
+         * so the device floor rises to the epoch of the stage-1
+         * that just booted. Idempotent and ignored on failure:
+         * the slot is selected and that must stick, mirroring
+         * eos_bootctl_confirm(). */
+        (void)eos_bootloader_replace_commit_counter();
 
         /* Jump to the selected application */
         rc = eboot_jump_to_app(&bctl, target);
