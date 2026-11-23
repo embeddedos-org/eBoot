@@ -18,8 +18,9 @@ boards/*/board_*.c and reports:
                   flash_base + flash_size)
     overlap       two of slot A, slot B, recovery and bootloader share bytes
     inside        the boot-control block, its backup or the log starts inside
-                  one of those regions (subject: block@region, one finding
-                  per containing region)
+                  one of those regions, or a region that has an address but no
+                  size field starts inside a sized one (subject: block@region
+                  or region@region, one finding per containing region)
 
 Rules that keep the report honest:
 
@@ -28,8 +29,9 @@ Rules that keep the report honest:
   - Containment in flash is checked only when flash_size is non-zero. Ports
     whose storage is not memory-mapped set flash_size to 0 on purpose.
   - A region the table gives an address but no size field is checked by its
-    start address alone: it must lie inside flash, and two such regions must
-    not start at the same address. A size written as 0 means "none".
+    start address alone: it must lie inside flash and outside every sized
+    region, and two such regions must not start at the same address. A size
+    written as 0 means "none".
   - Values are evaluated as plain integers, not with the target's integer
     widths, and casts are dropped rather than applied. The comparison with the
     field width is exact, but an expression that overflows inside a 32-bit
@@ -217,7 +219,8 @@ def _intersect(a, b):
 def findings(initialisers, defined):
     """Findings for one port as (kind, subject, detail), in a fixed order.
     The subject is a field or region name, `first+second` for an overlap and
-    `block@region` for a block inside a region.
+    `block@region` for a block inside a region, and `region@region` for a
+    region without a size field that starts inside a sized one.
     `initialisers` is the ops table as field -> initialiser text."""
     out, value = [], {}
     for field in FIELDS:
@@ -278,6 +281,12 @@ def findings(initialisers, defined):
                             "%s [%#x, +%#x) and %s [%#x, +%#x) share bytes"
                             % ((first,) + regions[first]
                                + (second,) + regions[second])))
+    for start, at in starts.items():
+        for name, region in regions.items():
+            if region[0] <= at < region[0] + region[1]:
+                out.append(("inside", "%s@%s" % (start, name),
+                            "%s starts at %#x, inside %s [%#x, +%#x)"
+                            % ((start, at, name) + region)))
     for block in BLOCKS:
         if block not in value:
             continue

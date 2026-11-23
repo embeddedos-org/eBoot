@@ -222,6 +222,20 @@ def test_a_region_without_a_size_field_is_checked_by_its_start():
         ("overlap", "slot_a+slot_b")]
 
 
+def test_a_start_without_a_size_inside_a_sized_region_is_reported():
+    # A table that sizes slot A and gives recovery an address only.
+    def mixed(recovery_addr):
+        table = sizeless(slot_a_size=GOOD["slot_a_size"])
+        table["recovery_addr"] = recovery_addr
+        return table
+    assert kinds(mixed("0x0800FFFF")) == []                    # byte before
+    assert kinds(mixed("0x08010000")) == [("inside", "recovery@slot_a")]
+    assert kinds(mixed("0x0806FFFF")) == [("inside", "recovery@slot_a")]
+    assert kinds(mixed("0x08070000")) == [                     # slot B's start
+        ("overlap", "slot_b+recovery")]
+    assert kinds(mixed("0x08070001")) == []                    # past the end
+
+
 def test_a_sized_region_is_not_also_checked_as_a_start():
     out = kinds(changed(slot_a_addr="0x08100000"))
     assert out == [("outside-flash", "slot_a")]
