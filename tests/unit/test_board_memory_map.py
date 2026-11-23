@@ -55,6 +55,15 @@ def test_macros_are_read_with_continuations_and_without_function_likes():
                        "LONG": ("(1 + 2)",), "EMPTY": ("",)}
 
 
+def test_a_continuation_inside_a_token_joins_the_token():
+    # The preprocessor deletes backslash-newline; a space there would turn
+    # one number into two.
+    defined = bmm.macros("#define SPLIT 0x10\\\n00\n"
+                         "#define CRLF 0x20\\\r\n00\n")
+    assert defined == {"SPLIT": ("0x1000",), "CRLF": ("0x2000",)}
+    assert bmm.evaluate("SPLIT", defined) == 0x1000
+
+
 def test_a_repeated_identical_definition_is_one_definition():
     assert bmm.macros("#define A 4\n#define A   4\n") == {"A": ("4",)}
 

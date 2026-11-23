@@ -125,7 +125,10 @@ def macros(text):
     followed, so a name defined differently under #if has several bodies;
     evaluate() refuses such a name rather than pick one."""
     found = {}
-    for match in _DEFINE.finditer(text.replace("\\\n", " ")):
+    # A backslash-newline is deleted, as the C preprocessor does: it can
+    # split a token ("0x10\<newline>00" is 0x1000), so no space goes in.
+    spliced = text.replace("\\\r\n", "").replace("\\\n", "")
+    for match in _DEFINE.finditer(spliced):
         name, paren, body = match.group(1), match.group(2), match.group(3)
         if paren:                       # function-like: #define F(x) ...
             continue
