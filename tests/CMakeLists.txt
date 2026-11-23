@@ -249,6 +249,7 @@ list(APPEND EBLDR_UNIT_TESTS test_keystore_production)
 add_executable(eboot_test_stage0_boot_log
     unit/test_stage0_boot_log.c
     ../stage0/jump_stage1.c
+    ../stage0/bootloader_replace.c
     ../stage0/recovery_entry.c
     ../stage0/watchdog.c)
 target_link_libraries(eboot_test_stage0_boot_log PRIVATE eboot_core)
@@ -299,6 +300,28 @@ target_link_libraries(eboot_test_bootloader_protect PRIVATE eboot_core)
 add_test(NAME test_bootloader_protect COMMAND eboot_test_bootloader_protect)
 list(APPEND EBLDR_UNIT_TESTS test_bootloader_protect)
 
+# --- test_bootloader_replace: privileged in-band stage-1 replacement ---
+# The request side verifies the staged image (structure, target, SHA-256
+# integrity, Ed25519 signature, anti-rollback counter) and writes the
+# PENDING intent record; the stage-0 executor re-verifies, lifts WRP,
+# copies the staged payload through the token-gated privileged HAL
+# entries, verifies the written bytes, re-applies WRP, and clears the
+# record. Same host harness as test_stage0_boot_log (jump/recovery are
+# simulated by the board ops), with a mock STM32F4 board so the committed
+# signed fixtures verify against the keystore's development anchor.
+add_executable(eboot_test_bootloader_replace
+    unit/test_bootloader_replace.c
+    ../stage0/bootloader_replace.c
+    ../stage0/jump_stage1.c
+    ../stage0/recovery_entry.c
+    ../stage0/watchdog.c)
+target_include_directories(eboot_test_bootloader_replace PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stage0
+)
+target_link_libraries(eboot_test_bootloader_replace PRIVATE eboot_core)
+add_test(NAME test_bootloader_replace COMMAND eboot_test_bootloader_replace)
+list(APPEND EBLDR_UNIT_TESTS test_bootloader_replace)
+
 # --- test_stm32f4_debug_lock: RDP option-byte debug lock on STM32F4 ---
 # Same host-redirect harness as the OTP counter test: board_stm32f4.c is
 # compiled on host with the OTP window and the flash registers at RAM
@@ -337,6 +360,26 @@ target_include_directories(eboot_test_stm32f4_bootloader_protect PRIVATE
 target_link_libraries(eboot_test_stm32f4_bootloader_protect PRIVATE eboot_core)
 add_test(NAME test_stm32f4_bootloader_protect COMMAND eboot_test_stm32f4_bootloader_protect)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_bootloader_protect)
+
+# --- test_stm32f4_bootloader_replace: WRP unprotect + ops wiring on STM32F4 ---
+# Same host-redirect harness as the protect test: board_stm32f4.c is
+# compiled on host with the OTP window and the flash registers at RAM
+# buffers, so the real WRP unprotect path (unlock, write OPTCR, launch
+# with OPTSTRT, read the nWRP field back) runs without hardware. The
+# unprotect call sets the nWRP bits for sectors 0-3 and no others,
+# preserves the RDP level, is idempotent, and fails closed at RDP
+# level 2 (ADR-022).
+add_executable(eboot_test_stm32f4_bootloader_replace
+    unit/test_stm32f4_bootloader_replace.c
+    ../boards/stm32f4/board_stm32f4.c)
+target_compile_definitions(eboot_test_stm32f4_bootloader_replace PRIVATE
+    EBLDR_TEST_OTP_WINDOW EBLDR_TEST_FLASH_REGS)
+target_include_directories(eboot_test_stm32f4_bootloader_replace PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/stm32f4
+)
+target_link_libraries(eboot_test_stm32f4_bootloader_replace PRIVATE eboot_core)
+add_test(NAME test_stm32f4_bootloader_replace COMMAND eboot_test_stm32f4_bootloader_replace)
+list(APPEND EBLDR_UNIT_TESTS test_stm32f4_bootloader_replace)
 
 # --- test_stm32f4_keystore_revoke: key revocation through the STM32F4 OTP ops ---
 # Same host-redirect harness as the OTP counter test: board_stm32f4.c is

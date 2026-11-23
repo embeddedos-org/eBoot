@@ -216,6 +216,7 @@ add_library(eboot_core STATIC
     core/keystore.c
     core/debug_lock.c
     core/bootloader_protect.c
+    core/bootloader_replace.c
     core/fw_decrypt.c
     core/image_tlv.c
     core/image_slot_bounds.c
@@ -489,6 +490,7 @@ if(NOT EBLDR_BOARD STREQUAL "none")
                 stage0/watchdog.c
                 stage0/recovery_entry.c
                 stage0/jump_stage1.c
+                stage0/bootloader_replace.c
                 $<$<BOOL:${EBLDR_VERIFY_STAGE1}>:${_STAGE1_HASH_C}>
             )
             target_include_directories(ebldr_stage0 PRIVATE

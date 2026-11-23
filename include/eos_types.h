@@ -163,6 +163,7 @@ typedef struct {
 #define EBLDR_FAIL_STAGE1_HASH  0xBAD1  /* stage-1 hash does not match the build-time value */
 #define EBLDR_FAIL_STAGE1_READ  0xBAD2  /* the flash read of stage-1 failed */
 #define EBLDR_FAIL_STAGE1_NO_IMAGE 0xBAD3 /* the build embedded no stage-1 image to verify against */
+#define EBLDR_FAIL_BTLDR_REPLACE 0xBAD4 /* a stage-1 replacement was refused or failed (ADR-022) */
 
 /* ---------------- RTOS Boot Types (Phase 2) ---------------- */
 
