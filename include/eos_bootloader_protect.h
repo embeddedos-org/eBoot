@@ -34,10 +34,14 @@
  *   NEVER      — never protect (development only)
  *
  * The protection takes effect at the next reset on parts whose option
- * bytes are reloaded on reset (STM32F4: RM0090 §3.9). There is no
- * bootloader self-update path in the tree today, so the allow-list
- * refuses the region unconditionally: a future self-update must go
- * through an explicit privileged entry point, not around this guard.
+ * bytes are reloaded on reset (STM32F4: RM0090 §3.9). The one path
+ * through the allow-list is the privileged in-band replacement entry
+ * point (docs/design/bootloader-replacement-entry.md, ADR-022):
+ * eos_bootloader_replace_request() stages a verified image, the
+ * stage-0 executor copies it through the token-gated
+ * eos_hal_flash_write_bootloader()/eos_hal_flash_erase_bootloader()
+ * entries, and re-applies the protection before the new stage-1
+ * boots. Nothing else writes the region.
  */
 
 #ifndef EOS_BOOTLOADER_PROTECT_H
