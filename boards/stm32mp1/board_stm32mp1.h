@@ -20,6 +20,9 @@
 #define STM32MP1_SRAM_SIZE          (256 * 1024)
 #define STM32MP1_EMMC_BASE          0x00000000
 #define STM32MP1_EMMC_SIZE          (4ULL * 1024 * 1024 * 1024)
+/* The ops table's flash_size is a uint32_t and cannot hold the 4 GiB above.
+ * 0 there means "storage is not memory-mapped" (see include/eos_hal.h). */
+#define STM32MP1_FLASH_SIZE         0x00000000
 
 #define STM32MP1_SLOT_A_ADDR        0x00100000
 #define STM32MP1_SLOT_A_SIZE        (64 * 1024 * 1024)

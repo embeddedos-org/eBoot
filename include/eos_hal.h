@@ -25,6 +25,9 @@ extern "C" {
 typedef struct {
     /* Memory map */
     uint32_t flash_base;
+    /* 0 means the port's storage is not memory-mapped (a block device behind
+     * flash_read/flash_write): there is then no [flash_base, flash_base +
+     * flash_size) range to hold the regions below to. */
     uint32_t flash_size;
     uint32_t slot_a_addr;
     uint32_t slot_a_size;

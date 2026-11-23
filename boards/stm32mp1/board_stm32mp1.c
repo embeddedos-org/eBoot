@@ -46,11 +46,13 @@ static const eos_board_ops_t stm32mp1_ops = {
      * 32-bit field cannot hold: the initialiser used to be that constant and
      * stored its low 32 bits, 0. It is 0 on purpose now, as on the other
      * ports whose storage is not memory-mapped (rpi4, x86_64_efi). */
-    .flash_size          = 0,
+    .flash_size          = STM32MP1_FLASH_SIZE,
     .slot_a_addr         = STM32MP1_SLOT_A_ADDR,
     .slot_a_size         = STM32MP1_SLOT_A_SIZE,
     .slot_b_addr         = STM32MP1_SLOT_B_ADDR,
     .slot_b_size         = STM32MP1_SLOT_B_SIZE,
+    .recovery_addr       = STM32MP1_RECOVERY_ADDR,
+    .recovery_size       = STM32MP1_RECOVERY_SIZE,
     .bootctl_addr        = STM32MP1_BOOTCTL_ADDR,
     .flash_read          = stm32mp1_flash_read,
     .flash_write         = NULL,
