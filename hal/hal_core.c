@@ -303,24 +303,55 @@ void eos_hal_bootloader_token_clear(void)
     g_bootloader_token = 0;
 }
 
-/* The privileged range: inside the board-declared bootloader region
- * only. A privileged call for any other range is a programming error
- * in the executor, not a write the allow-list would have allowed. */
-/* 32-bit throughout: the range fits the region only if the length
- * fits the region and the offset from the region start fits what
- * remains -- both subtractions are overflow-safe because the
+/* The privileged range: the stage-1 part of the board-declared
+ * bootloader region only, [stage1_base, bootloader_end). Stage-0 is
+ * never writable through the privileged entries: it is the immutable
+ * root of trust (ADR-022 section 1), and a privileged write there has
+ * no fallback if power fails mid-copy. As merged in #200 the gate
+ * admitted the whole bootloader region (stage-0 + stage-1); this
+ * narrows it to what the design note defines "bootloader region" as.
+ *
+ * Where stage-1 starts is derived, not declared: stage1_base is
+ * flash_base + app_vector_offset -- the same formula the stage-0
+ * executor (stage0/bootloader_replace.c), the request-side verify
+ * (core/bootloader_replace.c), and the stage-0 jump
+ * (stage0/jump_stage1.c) already use for the stage-1 vector address.
+ * There is no separate board-declared stage-1 field, so there is no
+ * second source of truth to disagree with the jump target.
+ *
+ * Fail closed: a board whose derived stage-1 base does not lie
+ * strictly inside its declared bootloader region declares no usable
+ * stage-1 boundary, and the privileged entries refuse every range
+ * rather than falling back to the whole region. That covers
+ * app_vector_offset == 0 (stage-1 at the flash base: no stage-0 /
+ * stage-1 split declared), an offset that lands at or below the
+ * region start, one that lands at or past the region end, and an
+ * offset that wraps flash_base past 2^32. */
+/* 32-bit throughout: the range fits the stage-1 region only if the
+ * length fits the region and the offset from the region start fits
+ * what remains -- both subtractions are overflow-safe because the
  * preceding comparisons bound their operands. No 64-bit
  * arithmetic, which matters on a 32-bit MCU in a 16 KiB stage-0. */
-static bool flash_range_inside_bootloader(uint32_t addr, size_t len)
+static bool flash_range_inside_stage1(uint32_t addr, size_t len)
 {
+    uint32_t stage1_base;
+    uint32_t stage1_size;
     if (!g_ops || g_ops->bootloader_size == 0)
         return false;
-    if (len > g_ops->bootloader_size)
+    if (g_ops->app_vector_offset > UINT32_MAX - g_ops->flash_base)
         return false;
-    if (addr < g_ops->bootloader_addr)
+    stage1_base = g_ops->flash_base + g_ops->app_vector_offset;
+    if (stage1_base <= g_ops->bootloader_addr)
         return false;
-    return addr - g_ops->bootloader_addr <=
-        g_ops->bootloader_size - (uint32_t)len;
+    if (stage1_base - g_ops->bootloader_addr >= g_ops->bootloader_size)
+        return false;
+    stage1_size = g_ops->bootloader_size -
+        (stage1_base - g_ops->bootloader_addr);
+    if (len > stage1_size)
+        return false;
+    if (addr < stage1_base)
+        return false;
+    return addr - stage1_base <= stage1_size - (uint32_t)len;
 }
 
 /* The shared privileged-entry gate: the token, then the range,
@@ -333,7 +364,7 @@ static int privileged_bootloader_op(int is_write, uint32_t addr,
 {
     if (g_bootloader_token != EOS_HAL_BTLDR_TOKEN_MAGIC)
         return EOS_ERR_WRITE_PROTECTED;
-    if (!flash_range_inside_bootloader(addr, len))
+    if (!flash_range_inside_stage1(addr, len))
         return EOS_ERR_INVALID;
     if (is_write)
         return g_ops->flash_write(addr, buf, len);
