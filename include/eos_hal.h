@@ -212,7 +212,8 @@ int   eos_hal_flash_unprotect_bootloader(void);
 
 /* Privileged bootloader-region flash access (ADR-022). These are the
  * single exemption from the HAL allow-list: they write/erase inside
- * the board-declared bootloader region, which eos_hal_flash_write()
+ * the stage-1 part of the board-declared bootloader region
+ * ([stage1_base, bootloader_end)), which eos_hal_flash_write()
  * and eos_hal_flash_erase() refuse unconditionally. Both calls are
  * gated on a one-shot RAM authorization token minted by stage-0's
  * replacement executor only after the staged image has fully
@@ -220,10 +221,14 @@ int   eos_hal_flash_unprotect_bootloader(void);
  * stage0/bootloader_replace.h -- deliberately not here). Without a
  * minted token they refuse with EOS_ERR_WRITE_PROTECTED, exactly
  * like the allow-list, so an unprivileged caller gets the same
- * refusal from either path. A range outside the bootloader region
+ * refusal from either path. A range outside the stage-1 region
  * is refused with EOS_ERR_INVALID: the privileged path writes the
- * bootloader region and nothing else. The token never persists
- * across reset (RAM does not survive one). */
+ * stage-1 region and nothing else -- never stage-0. The stage-1
+ * base is derived as flash_base + app_vector_offset (the stage-1
+ * vector address); a board whose derived base does not lie strictly
+ * inside its declared bootloader region has no usable stage-1
+ * boundary and the privileged entries refuse every range. The
+ * token never persists across reset (RAM does not survive one). */
 int   eos_hal_flash_write_bootloader(uint32_t addr, const void *buf, size_t len);
 int   eos_hal_flash_erase_bootloader(uint32_t addr, size_t len);
 

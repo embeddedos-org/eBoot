@@ -65,6 +65,18 @@ places where the implementation had to read the note.
   only `eos_hal_flash_write_bootloader()`; the copy also needs an erase of
   the stage-1 region, and the erase goes through the same token gate
   (`eos_hal_flash_erase_bootloader()`), scoped to the same region.
+- **Privileged range narrowed to stage-1 (2026-11-23 follow-up).** As merged
+  in #200 the token gate admitted the whole board-declared bootloader region
+  (stage-0 + stage-1), while the note §1 defines "bootloader region" as the
+  stage-1 part. The gate now admits only `[stage1_base, bootloader_end)`,
+  where `stage1_base` is `flash_base + app_vector_offset` — the same
+  derivation the executor, the request-side verify, and the stage-0 jump
+  already use, so no new board field and no second source of truth. A board
+  whose derived base does not lie strictly inside its declared region has no
+  usable stage-1 boundary and the privileged entries refuse every range
+  (fail closed, no fallback to the whole region). STM32F4 is the only board
+  that declares a region; every other board already refused privileged ops
+  for want of one.
 - **Commit counter source.** The installed stage-1 carries no header and
   the intent record is cleared before the new stage-1 boots, so neither
   survives to the commit call. The new stage-1's counter is read from the
@@ -127,7 +139,7 @@ places where the implementation had to read the note.
   path, and it is structural: one call site (the stage-0 executor), one
   token, one region. Review must hold that shape — a second privileged
   call site, a token that survives a reset, or a privileged write outside
-  the bootloader region would re-open the guard this change exists to
+  the stage-1 region would re-open the guard this change exists to
   keep closed.
 - Stage-0 stays the executor, not a public API: there is no callable
   entry point from unprivileged code. The only caller-visible surface is

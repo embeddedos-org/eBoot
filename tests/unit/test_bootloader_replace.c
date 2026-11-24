@@ -639,19 +639,32 @@ TEST(test_privileged_write_without_a_token_is_refused)
     ASSERT(eos_hal_flash_write(STAGE1_ADDR, buf, 16) == EOS_ERR_WRITE_PROTECTED);
 }
 
-TEST(test_privileged_write_with_a_token_is_scoped_to_the_region)
+TEST(test_privileged_write_with_a_token_is_scoped_to_stage1)
 {
     uint8_t buf[16] = {0};
     eos_hal_bootloader_token_mint();
 
-    /* Inside the bootloader region: the write and erase go through. */
+    /* Inside the stage-1 region: the write and erase go through. */
     ASSERT(eos_hal_flash_write_bootloader(STAGE1_ADDR, buf, 16) == EOS_OK);
     ASSERT(eos_hal_flash_erase_bootloader(STAGE1_ADDR, 0x4000) == EOS_OK);
     ASSERT(g_ctx.stage1_write_called == 1);
     ASSERT(g_ctx.stage1_erase_called == 1);
 
-    /* Outside it: refused, even with a token. The privileged path
-     * writes the bootloader region and nothing else. */
+    /* The last bytes of stage-1 are still stage-1: a range ending
+     * exactly at the stage-1 end goes through. */
+    ASSERT(eos_hal_flash_write_bootloader(STAGE1_ADDR + STAGE1_SIZE - 16, buf, 16) == EOS_OK);
+
+    /* Stage-0 is never writable through the privileged entries, even
+     * with a token: the stage-0 range, the stage-0 erase, and a range
+     * straddling the stage-0/stage-1 boundary are all refused. */
+    ASSERT(eos_hal_flash_write_bootloader(BOOTLOADER_ADDR, buf, 16) == EOS_ERR_INVALID);
+    ASSERT(eos_hal_flash_erase_bootloader(BOOTLOADER_ADDR, 0x4000) == EOS_ERR_INVALID);
+    ASSERT(eos_hal_flash_write_bootloader(BOOTLOADER_ADDR, buf, 0x4000 + 16) == EOS_ERR_INVALID);
+    ASSERT(g_ctx.stage1_write_called == 2);
+    ASSERT(g_ctx.stage1_erase_called == 1);
+
+    /* Outside the bootloader region: refused, even with a token. The
+     * privileged path writes the stage-1 region and nothing else. */
     ASSERT(eos_hal_flash_write_bootloader(SLOT_A_ADDR, buf, 16) == EOS_ERR_INVALID);
     ASSERT(eos_hal_flash_erase_bootloader(SLOT_A_ADDR, 0x4000) == EOS_ERR_INVALID);
     ASSERT(eos_hal_flash_write_bootloader(BOOTLOADER_ADDR - 16, buf, 32) == EOS_ERR_INVALID);
@@ -659,6 +672,38 @@ TEST(test_privileged_write_with_a_token_is_scoped_to_the_region)
 
     eos_hal_bootloader_token_clear();
     ASSERT(eos_hal_flash_write_bootloader(STAGE1_ADDR, buf, 16) == EOS_ERR_WRITE_PROTECTED);
+}
+
+TEST(test_privileged_write_refuses_a_board_with_no_stage1_boundary)
+{
+    uint8_t buf[16] = {0};
+
+    /* app_vector_offset == 0 puts the derived stage-1 base at the flash
+     * base: no stage-0/stage-1 split is declared, so the privileged
+     * entries refuse every range instead of falling back to the whole
+     * bootloader region. */
+    mock_ops.app_vector_offset = 0;
+    eos_hal_init(&mock_ops);
+    eos_hal_bootloader_token_mint();
+    ASSERT(eos_hal_flash_write_bootloader(STAGE1_ADDR, buf, 16) == EOS_ERR_INVALID);
+    ASSERT(eos_hal_flash_erase_bootloader(STAGE1_ADDR, 0x4000) == EOS_ERR_INVALID);
+    ASSERT(g_ctx.stage1_write_called == 0);
+    ASSERT(g_ctx.stage1_erase_called == 0);
+    eos_hal_bootloader_token_clear();
+
+    /* An offset that lands outside the declared region is the same
+     * refusal: an unusable boundary is not a licence to write the
+     * whole region. */
+    mock_ops.app_vector_offset = 0x100000;
+    eos_hal_init(&mock_ops);
+    eos_hal_bootloader_token_mint();
+    ASSERT(eos_hal_flash_write_bootloader(STAGE1_ADDR, buf, 16) == EOS_ERR_INVALID);
+    eos_hal_bootloader_token_clear();
+
+    /* Restore the mock board for the tests that follow: setup() does
+     * not reset app_vector_offset. */
+    mock_ops.app_vector_offset = 0x4000;
+    eos_hal_init(&mock_ops);
 }
 
 /* ================================================================
@@ -1141,7 +1186,8 @@ int main(void)
     run_test_request_refuses_without_a_bootloader_region();
     run_test_request_refuses_an_empty_staging_slot();
     run_test_privileged_write_without_a_token_is_refused();
-    run_test_privileged_write_with_a_token_is_scoped_to_the_region();
+    run_test_privileged_write_with_a_token_is_scoped_to_stage1();
+    run_test_privileged_write_refuses_a_board_with_no_stage1_boundary();
     run_test_executor_copies_in_one_boot_when_protection_is_immediate();
     run_test_executor_skips_the_copy_when_already_installed();
     run_test_executor_refuses_a_corrupt_staged_image_and_boots_old_stage1();
