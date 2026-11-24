@@ -505,12 +505,12 @@ static int recovery_handle_boot_log(uint32_t start_index, uint16_t requested_cou
 
 int eos_recovery_enter(eos_bootctl_t *bctl)
 {
-    /* Recovery is a UART protocol. Whether there is a UART to run it on is
-     * decided here and at the first receive below, and recorded in the
-     * entry's detail, so a boot log can tell "waiting for a client" from
-     * "cannot be reached". */
+    /* Recovery is a UART protocol. A port whose uart_init is missing or
+     * fails has no transport; the entry's detail records it, so a boot log
+     * can tell "waiting for a client" from "cannot be reached". The rule
+     * is this one test and no more: stage-0 links this function and has
+     * bytes, not kilobytes, to spare on STM32F4. */
     int have_transport = (eos_hal_uart_init(RCVR_BAUD_RATE) == EOS_OK);
-    int first_recv = 1;
 
     eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE,
                         have_transport ? 0 : EOS_RECOVERY_NO_TRANSPORT);
@@ -552,22 +552,9 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
         rcvr_packet_t pkt;
         int rc = eos_hal_uart_recv(&pkt, sizeof(pkt), RCVR_TIMEOUT_MS);
 
-        /* A receive that fails at once, before any timeout has been waited
-         * out, is a port with no receive path (eos_hal_uart_recv() returns
-         * EOS_ERR_GENERIC when the ops table has none). Only the first call
-         * is read this way: a later framing or overrun error on a working
-         * UART must not end the session. */
-        if (first_recv) {
-            first_recv = 0;
-            if (have_transport && rc != EOS_OK && rc != EOS_ERR_TIMEOUT) {
-                have_transport = 0;
-                eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE,
-                                    EOS_RECOVERY_NO_TRANSPORT);
-                bctl->log_head = eos_boot_log_get_head();
-                eos_bootctl_save(bctl);
-            }
-        }
-
+        /* Without a transport nothing is handled, whatever a receive stub
+         * hands back. With one, any receive error is a wait like a timeout:
+         * a framing or overrun error does not end the session. */
         if (rc != EOS_OK || !have_transport)
             continue;
 

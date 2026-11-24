@@ -755,27 +755,6 @@ TEST(test_recovery_does_not_feed_the_watchdog_when_uart_init_fails)
     ASSERT(no_transport_entries() == 1);
 }
 
-/* A port with uart_init and no receive path. eos_hal_uart_recv() answers
- * EOS_ERR_GENERIC for a table without uart_recv -- checked here first, because
- * the loop cannot be left on such a table and the scripted receive below
- * stands in for it. One feed happens before the first receive is tried; none
- * after it. */
-TEST(test_recovery_stops_feeding_when_the_first_receive_is_not_a_timeout)
-{
-    eos_board_ops_t no_recv = sim_ops;
-    no_recv.uart_recv = NULL;
-    eos_hal_init(&no_recv);
-    uint8_t byte;
-    ASSERT(eos_hal_uart_recv(&byte, 1, 1) == EOS_ERR_GENERIC);
-
-    static const int errors[] = {
-        EOS_ERR_GENERIC, EOS_ERR_GENERIC, EOS_ERR_GENERIC,
-        EOS_ERR_GENERIC, EOS_ERR_GENERIC,
-    };
-    ASSERT(feeds_during_recovery(sim_ops, errors, 5) == 1);
-    ASSERT(no_transport_entries() == 1);
-}
-
 /* Without a transport no command is handled, even if the receive stub hands
  * something back: a port whose UART was never initialised has no business
  * answering on it. Two PINGs arrive; nothing is sent. */
@@ -793,26 +772,12 @@ TEST(test_recovery_handles_no_command_without_a_transport)
     ASSERT(out_len > 0);
 }
 
-/* The entry written when the first receive shows there is no transport is
- * appended after the control block was saved on entry, so the log head has to
- * be saved again or the next boot overwrites the entry. */
-TEST(test_recovery_persists_the_no_transport_entry)
-{
-    static const int errors[] = { EOS_ERR_GENERIC, EOS_ERR_GENERIC };
-    feeds_during_recovery(sim_ops, errors, 2);
-    ASSERT(no_transport_entries() == 1);
-
-    eos_bootctl_t saved;
-    ASSERT(eos_bootctl_load(&saved) == EOS_OK);
-    ASSERT(saved.log_head == eos_boot_log_get_head());
-}
-
-/* An error after the UART has shown it can wait (framing, overrun) is not
+/* A receive error on a port whose UART initialised (framing, overrun) is not
  * "no transport": the session goes on and the watchdog is still fed. */
 TEST(test_recovery_keeps_the_session_after_a_later_receive_error)
 {
     static const int mixed[] = {
-        EOS_ERR_TIMEOUT, EOS_ERR_GENERIC, EOS_ERR_GENERIC, EOS_ERR_TIMEOUT,
+        EOS_ERR_GENERIC, EOS_ERR_TIMEOUT, EOS_ERR_GENERIC, EOS_ERR_TIMEOUT,
     };
     ASSERT(feeds_during_recovery(sim_ops, mixed, 4) == 5);
     ASSERT(no_transport_entries() == 0);
@@ -834,9 +799,7 @@ int main(void)
     run_test_plain_recovery_entry_erases_nothing();
     run_test_recovery_feeds_the_watchdog_while_it_waits_for_a_client();
     run_test_recovery_does_not_feed_the_watchdog_when_uart_init_fails();
-    run_test_recovery_stops_feeding_when_the_first_receive_is_not_a_timeout();
     run_test_recovery_handles_no_command_without_a_transport();
-    run_test_recovery_persists_the_no_transport_entry();
     run_test_recovery_keeps_the_session_after_a_later_receive_error();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
