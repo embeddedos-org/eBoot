@@ -168,7 +168,9 @@ typedef struct {
 /* `detail` value of an EOS_LOG_RECOVERY_ENTER entry written when recovery was
  * entered on a port with no usable UART: eos_hal_uart_init() failed, or the
  * first eos_hal_uart_recv() failed with something other than a timeout. Such
- * a session cannot be reached and does not feed the watchdog. 0 otherwise. */
+ * a session cannot be reached and does not feed the watchdog. An entry with
+ * detail 0 does not say the opposite: callers log RECOVERY_ENTER themselves,
+ * and a session can write one with 0 before its first receive fails. */
 #define EOS_RECOVERY_NO_TRANSPORT 0x4E4F5458  /* "NOTX" */
 
 /* ---------------- RTOS Boot Types (Phase 2) ---------------- */

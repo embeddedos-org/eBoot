@@ -677,6 +677,10 @@ static int scripted_result_recv(void *buf, size_t len, uint32_t timeout_ms)
     (void)buf; (void)len; (void)timeout_ms;
     if (recv_calls >= recv_results_len)
         longjmp(exit_jmp, 1);
+    /* A successful receive delivers a PING, so a loop that goes on to handle
+     * it answers on the simulated UART. */
+    memset(buf, 0, len);
+    ((uint8_t *)buf)[0] = 0x01; /* RCVR_CMD_PING */
     return recv_results[recv_calls++];
 }
 
@@ -772,6 +776,37 @@ TEST(test_recovery_stops_feeding_when_the_first_receive_is_not_a_timeout)
     ASSERT(no_transport_entries() == 1);
 }
 
+/* Without a transport no command is handled, even if the receive stub hands
+ * something back: a port whose UART was never initialised has no business
+ * answering on it. Two PINGs arrive; nothing is sent. */
+TEST(test_recovery_handles_no_command_without_a_transport)
+{
+    static const int packets[] = { EOS_OK, EOS_OK };
+    eos_board_ops_t no_init = sim_ops;
+    no_init.uart_init = NULL;
+    ASSERT(feeds_during_recovery(no_init, packets, 2) == 0);
+    ASSERT(out_len == 0);
+
+    /* The control: the same two PINGs on a port with a UART are answered. */
+    setup();
+    ASSERT(feeds_during_recovery(sim_ops, packets, 2) == 3);
+    ASSERT(out_len > 0);
+}
+
+/* The entry written when the first receive shows there is no transport is
+ * appended after the control block was saved on entry, so the log head has to
+ * be saved again or the next boot overwrites the entry. */
+TEST(test_recovery_persists_the_no_transport_entry)
+{
+    static const int errors[] = { EOS_ERR_GENERIC, EOS_ERR_GENERIC };
+    feeds_during_recovery(sim_ops, errors, 2);
+    ASSERT(no_transport_entries() == 1);
+
+    eos_bootctl_t saved;
+    ASSERT(eos_bootctl_load(&saved) == EOS_OK);
+    ASSERT(saved.log_head == eos_boot_log_get_head());
+}
+
 /* An error after the UART has shown it can wait (framing, overrun) is not
  * "no transport": the session goes on and the watchdog is still fed. */
 TEST(test_recovery_keeps_the_session_after_a_later_receive_error)
@@ -800,6 +835,8 @@ int main(void)
     run_test_recovery_feeds_the_watchdog_while_it_waits_for_a_client();
     run_test_recovery_does_not_feed_the_watchdog_when_uart_init_fails();
     run_test_recovery_stops_feeding_when_the_first_receive_is_not_a_timeout();
+    run_test_recovery_handles_no_command_without_a_transport();
+    run_test_recovery_persists_the_no_transport_entry();
     run_test_recovery_keeps_the_session_after_a_later_receive_error();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
