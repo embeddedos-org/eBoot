@@ -67,6 +67,15 @@ which HAL operations it has code for, which are stubs and which are absent. It
 is generated from the board sources by `tools/board_ops_status.py`, and the
 test suite fails when it is out of date.
 
+The memory map each port declares is checked too. `python3
+tools/board_memory_map.py` evaluates the flash, slot, recovery, bootloader and
+boot-control constants of every port and reports values that do not fit their
+32-bit field, flash that runs past 4 GiB, regions outside flash, regions that
+overlap, and a boot-control block inside a slot. Eleven ports have such a
+finding today; each is listed, with its issue, in the tool's `KNOWN` table, and
+the test suite fails on any finding that is not listed there. A clean report
+means the numbers agree with each other, not that they match a board.
+
 ### Security options
 
 | Option | Default | Meaning |
