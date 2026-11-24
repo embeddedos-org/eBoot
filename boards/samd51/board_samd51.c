@@ -22,8 +22,8 @@ static int samd51_flash_read(uint32_t addr, void *buf, size_t len)
     return EOS_OK;
 }
 
-static int samd51_uart_init(uint32_t baud) { (void)baud; return EOS_OK; }
-static int samd51_uart_send(const void *buf, size_t len) { (void)buf; (void)len; return EOS_OK; }
+/* No SERCOM driver: uart_init and uart_send are left out of the table so the
+ * HAL reports an error instead of telling the caller bytes were sent (#201). */
 static int samd51_uart_recv(void *buf, size_t len, uint32_t timeout_ms)
 {
     (void)buf; (void)len; (void)timeout_ms;
@@ -82,7 +82,7 @@ static const eos_board_ops_t samd51_ops = {
     .watchdog_init = samd51_watchdog_init, .watchdog_feed = samd51_watchdog_feed,
     .get_reset_reason = samd51_get_reset_reason, .system_reset = samd51_system_reset,
     .recovery_pin_asserted = samd51_recovery_pin_asserted, .jump = samd51_jump,
-    .uart_init = samd51_uart_init, .uart_send = samd51_uart_send, .uart_recv = samd51_uart_recv,
+    .uart_recv = samd51_uart_recv,
     .get_tick_ms = samd51_get_tick_ms,
     .disable_interrupts = samd51_disable_interrupts, .enable_interrupts = samd51_enable_interrupts,
     .deinit_peripherals = samd51_deinit_peripherals,
