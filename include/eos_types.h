@@ -170,7 +170,7 @@ typedef struct {
  * failing). Such a session cannot be reached, handles no command and does
  * not feed the watchdog. Callers log RECOVERY_ENTER themselves with detail
  * 0, so only this value carries information. */
-#define EOS_RECOVERY_NO_TRANSPORT 0x4E4F5458  /* "NOTX" */
+#define EOS_RECOVERY_NO_TRANSPORT 1U  /* small on purpose: stage-0 has no room for a literal */
 
 /* ---------------- RTOS Boot Types (Phase 2) ---------------- */
 

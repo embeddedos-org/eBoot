@@ -510,10 +510,10 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
      * can tell "waiting for a client" from "cannot be reached". The rule
      * is this one test and no more: stage-0 links this function and has
      * bytes, not kilobytes, to spare on STM32F4. */
-    int have_transport = (eos_hal_uart_init(RCVR_BAUD_RATE) == EOS_OK);
+    uint32_t no_transport = (eos_hal_uart_init(RCVR_BAUD_RATE) != EOS_OK);
 
-    eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE,
-                        have_transport ? 0 : EOS_RECOVERY_NO_TRANSPORT);
+    /* detail: 0, or EOS_RECOVERY_NO_TRANSPORT (which is 1). */
+    eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE, no_transport);
 
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
     /* Persist the log head with the flag, so the entries the caller and
@@ -546,7 +546,7 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
          * Without a transport nothing can ever be received, so feeding it
          * would hold the device in this loop for good; left unfed, a board
          * that has a watchdog resets and tries to boot again. */
-        if (have_transport)
+        if (!no_transport)
             eos_hal_watchdog_feed();
 
         rcvr_packet_t pkt;
@@ -555,7 +555,7 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
         /* Without a transport nothing is handled, whatever a receive stub
          * hands back. With one, any receive error is a wait like a timeout:
          * a framing or overrun error does not end the session. */
-        if (rc != EOS_OK || !have_transport)
+        if (rc != EOS_OK || no_transport)
             continue;
 
         /* Check authentication for destructive commands */
