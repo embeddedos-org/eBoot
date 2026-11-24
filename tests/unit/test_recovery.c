@@ -661,6 +661,128 @@ TEST(test_plain_recovery_entry_erases_nothing)
     ASSERT(sim_flash[SIM_SLOT_B_ADDR] == 0x5A);
 }
 
+/* ---- A recovery session on a port that has no UART (#205) ---- */
+
+static int wdt_feeds;
+static void counting_watchdog_feed(void) { wdt_feeds++; }
+
+/* A receive that returns one scripted result per call and stops the loop when
+ * the script runs out. */
+static const int *recv_results;
+static size_t recv_results_len;
+static size_t recv_calls;
+
+static int scripted_result_recv(void *buf, size_t len, uint32_t timeout_ms)
+{
+    (void)buf; (void)len; (void)timeout_ms;
+    if (recv_calls >= recv_results_len)
+        longjmp(exit_jmp, 1);
+    return recv_results[recv_calls++];
+}
+
+/* Enter recovery on `ops` with the receive results in `results`; return how
+ * often the watchdog was fed before the script ran out. */
+static int feeds_during_recovery(eos_board_ops_t board, const int *results, size_t n)
+{
+    /* The HAL keeps the pointer it is given, and the caller reads the boot
+     * log through it after this returns: the table must outlive the call. */
+    static eos_board_ops_t ops;
+    ops = board;
+    ops.watchdog_feed = counting_watchdog_feed;
+    ops.uart_recv = scripted_result_recv;
+    eos_hal_init(&ops);
+    eos_boot_log_init(0);
+
+    wdt_feeds = 0;
+    recv_results = results;
+    recv_results_len = n;
+    recv_calls = 0;
+
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+    return wdt_feeds;
+}
+
+/* Number of boot-log entries that say recovery was entered without a
+ * transport. */
+static int no_transport_entries(void)
+{
+    int n = 0;
+    for (uint32_t i = 0; i < EOS_BOOT_LOG_MAX; i++) {
+        eos_boot_log_entry_t e;
+        if (eos_boot_log_read(i, &e) != EOS_OK)
+            continue;
+        if (e.event == EOS_LOG_RECOVERY_ENTER &&
+            e.detail == EOS_RECOVERY_NO_TRANSPORT)
+            n++;
+    }
+    return n;
+}
+
+/* The control: a port with a UART and no client yet. Every pass waits out a
+ * timeout and feeds the watchdog, as before, and the log says nothing about
+ * a missing transport. Five timeouts, then the sixth pass feeds and the
+ * script ends. */
+TEST(test_recovery_feeds_the_watchdog_while_it_waits_for_a_client)
+{
+    static const int waits[] = {
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+    };
+    ASSERT(feeds_during_recovery(sim_ops, waits, 5) == 6);
+    ASSERT(no_transport_entries() == 0);
+}
+
+/* A port whose ops table has no uart_init (samd51 after #201 is one: its
+ * uart_recv is a stub that returns a timeout at once). The loop used to feed
+ * the watchdog on every pass of a wait nothing could end. */
+TEST(test_recovery_does_not_feed_the_watchdog_when_uart_init_fails)
+{
+    static const int waits[] = {
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+    };
+    eos_board_ops_t no_init = sim_ops;
+    no_init.uart_init = NULL;
+    ASSERT(feeds_during_recovery(no_init, waits, 5) == 0);
+    ASSERT(no_transport_entries() == 1);
+}
+
+/* A port with uart_init and no receive path. eos_hal_uart_recv() answers
+ * EOS_ERR_GENERIC for a table without uart_recv -- checked here first, because
+ * the loop cannot be left on such a table and the scripted receive below
+ * stands in for it. One feed happens before the first receive is tried; none
+ * after it. */
+TEST(test_recovery_stops_feeding_when_the_first_receive_is_not_a_timeout)
+{
+    eos_board_ops_t no_recv = sim_ops;
+    no_recv.uart_recv = NULL;
+    eos_hal_init(&no_recv);
+    uint8_t byte;
+    ASSERT(eos_hal_uart_recv(&byte, 1, 1) == EOS_ERR_GENERIC);
+
+    static const int errors[] = {
+        EOS_ERR_GENERIC, EOS_ERR_GENERIC, EOS_ERR_GENERIC,
+        EOS_ERR_GENERIC, EOS_ERR_GENERIC,
+    };
+    ASSERT(feeds_during_recovery(sim_ops, errors, 5) == 1);
+    ASSERT(no_transport_entries() == 1);
+}
+
+/* An error after the UART has shown it can wait (framing, overrun) is not
+ * "no transport": the session goes on and the watchdog is still fed. */
+TEST(test_recovery_keeps_the_session_after_a_later_receive_error)
+{
+    static const int mixed[] = {
+        EOS_ERR_TIMEOUT, EOS_ERR_GENERIC, EOS_ERR_GENERIC, EOS_ERR_TIMEOUT,
+    };
+    ASSERT(feeds_during_recovery(sim_ops, mixed, 4) == 5);
+    ASSERT(no_transport_entries() == 0);
+}
+
 int main(void)
 {
     printf("=== test_recovery ===\n");
@@ -675,6 +797,10 @@ int main(void)
     run_test_info_reports_a_board_without_an_entropy_source();
     run_test_requested_factory_reset_is_carried_out_on_entry();
     run_test_plain_recovery_entry_erases_nothing();
+    run_test_recovery_feeds_the_watchdog_while_it_waits_for_a_client();
+    run_test_recovery_does_not_feed_the_watchdog_when_uart_init_fails();
+    run_test_recovery_stops_feeding_when_the_first_receive_is_not_a_timeout();
+    run_test_recovery_keeps_the_session_after_a_later_receive_error();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

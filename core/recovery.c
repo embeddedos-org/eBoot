@@ -505,8 +505,15 @@ static int recovery_handle_boot_log(uint32_t start_index, uint16_t requested_cou
 
 int eos_recovery_enter(eos_bootctl_t *bctl)
 {
-    eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE, 0);
-    eos_hal_uart_init(RCVR_BAUD_RATE);
+    /* Recovery is a UART protocol. Whether there is a UART to run it on is
+     * decided here and at the first receive below, and recorded in the
+     * entry's detail, so a boot log can tell "waiting for a client" from
+     * "cannot be reached". */
+    int have_transport = (eos_hal_uart_init(RCVR_BAUD_RATE) == EOS_OK);
+    int first_recv = 1;
+
+    eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE,
+                        have_transport ? 0 : EOS_RECOVERY_NO_TRANSPORT);
 
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
     /* Persist the log head with the flag, so the entries the caller and
@@ -535,11 +542,33 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
     auth_fail_count = 0;
 
     while (1) {
-        eos_hal_watchdog_feed();
+        /* The watchdog is fed only while a client could still arrive.
+         * Without a transport nothing can ever be received, so feeding it
+         * would hold the device in this loop for good; left unfed, a board
+         * that has a watchdog resets and tries to boot again. */
+        if (have_transport)
+            eos_hal_watchdog_feed();
 
         rcvr_packet_t pkt;
         int rc = eos_hal_uart_recv(&pkt, sizeof(pkt), RCVR_TIMEOUT_MS);
-        if (rc != EOS_OK)
+
+        /* A receive that fails at once, before any timeout has been waited
+         * out, is a port with no receive path (eos_hal_uart_recv() returns
+         * EOS_ERR_GENERIC when the ops table has none). Only the first call
+         * is read this way: a later framing or overrun error on a working
+         * UART must not end the session. */
+        if (first_recv) {
+            first_recv = 0;
+            if (have_transport && rc != EOS_OK && rc != EOS_ERR_TIMEOUT) {
+                have_transport = 0;
+                eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE,
+                                    EOS_RECOVERY_NO_TRANSPORT);
+                bctl->log_head = eos_boot_log_get_head();
+                eos_bootctl_save(bctl);
+            }
+        }
+
+        if (rc != EOS_OK || !have_transport)
             continue;
 
         /* Check authentication for destructive commands */
