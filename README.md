@@ -71,10 +71,13 @@ The memory map each port declares is checked too. `python3
 tools/board_memory_map.py` evaluates the flash, slot, recovery, bootloader and
 boot-control constants of every port and reports values that do not fit their
 32-bit field, flash that runs past 4 GiB, regions outside flash, regions that
-overlap, and a boot-control block inside a slot. Eleven ports have such a
-finding today; each is listed, with its issue, in the tool's `KNOWN` table, and
-the test suite fails on any finding that is not listed there. A clean report
-means the numbers agree with each other, not that they match a board.
+overlap, a boot-control block inside a slot, and two of the boot-control
+block, its backup and the log at one address. **All 83 ports are clean**: the
+twelve that were not were fixed by #195, #196, #197 and #199, and the tool's
+`KNOWN` table is empty. The test suite fails on any finding that is not listed
+there, and on a listed one that no longer occurs, so the table can neither
+hide a new defect nor go stale. A clean report means the numbers agree with
+each other, not that they match a board.
 
 ### Security options
 
