@@ -768,7 +768,7 @@ External boundaries:
 |---|---|---|---|---|---|---|---|
 | T-401 | Spoofing | Unauthorized party connects to UART and replaces firmware | Medium | Critical | High | Recovery authentication — challenge-response or shared secret (Phase 3) | Planned |
 | T-402 | Tampering | Malformed UART packets corrupt flash or boot state | Medium | High | High | Packet validation; length bounds checking; CRC on write data | Partial |
-| T-403 | Denial of Service | Flood UART with garbage to prevent legitimate recovery | Low | Medium | Low | Command timeout; watchdog feed during recovery; rate limiting | Partial |
+| T-403 | Denial of Service | Flood UART with garbage to prevent legitimate recovery | Low | Medium | Low | Command timeout; watchdog feed during recovery while a UART transport is present (not fed, and no command handled, when `uart_init` is missing or fails); rate limiting | Partial |
 | T-404 | Information Disclosure | INFO discloses flash geometry and, since #139, a capability byte (`caps`: has RNG, has OTP); LOG discloses boot history | Low | Medium | Low | LOG restricted to authenticated sessions (Phase 3). INFO is deliberately unauthenticated per ADR-021: everything it discloses an attacker learns by trying, and the integrator needs it before AUTH to diagnose a board with no entropy source | Partial (INFO decided; LOG planned) |
 | T-405 | Repudiation | Recovery operations not logged | Medium | Medium | Medium | Boot log records recovery entry, commands executed, exit reason | Planned |
 | T-406 | Elevation of Privilege | FACTORY command erases all data without authorization | Medium | Critical | High | Require authentication before FACTORY; confirmation sequence | Planned |
