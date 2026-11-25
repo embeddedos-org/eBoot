@@ -272,6 +272,28 @@ def test_a_block_inside_a_region_or_outside_flash_is_reported():
     assert kinds(changed(bootctl_addr="0x080FFFFF")) == []
 
 
+def test_two_blocks_at_one_address_are_reported():
+    """The boot-control block, its backup and the log are three separate
+    copies. Two of them at one address is one copy wearing two names: a
+    bootctl save would erase the backup it is the fallback for, which is the
+    failure the backup exists to survive."""
+    assert kinds(changed(bootctl_backup_addr="0x080F0000")) == [
+        ("overlap", "bootctl_addr+bootctl_backup_addr")]
+    assert kinds(changed(log_addr="0x080F0000")) == [
+        ("overlap", "bootctl_addr+log_addr")]
+    assert kinds(changed(log_addr="0x080F8000")) == [
+        ("overlap", "bootctl_backup_addr+log_addr")]
+    # A third block at an address of its own is no finding.
+    assert kinds(changed(log_addr="0x080F4000")) == []
+    # All three at one address is three findings, one per pair, so no single
+    # KNOWN entry can hide the other two.
+    assert kinds(changed(bootctl_backup_addr="0x080F0000",
+                         log_addr="0x080F0000")) == [
+        ("overlap", "bootctl_addr+bootctl_backup_addr"),
+        ("overlap", "bootctl_addr+log_addr"),
+        ("overlap", "bootctl_backup_addr+log_addr")]
+
+
 def test_a_block_inside_two_regions_is_two_findings_with_two_subjects():
     # samd51's shape: slot B runs over the recovery image, and the block sits
     # in both. Each containment has its own subject, so a KNOWN entry for one
