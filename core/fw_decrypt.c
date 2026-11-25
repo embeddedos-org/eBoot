@@ -90,7 +90,7 @@ int eos_fw_decrypt_init(eos_fw_decrypt_ctx_t *ctx, const uint8_t *iv)
     }
 
     /* Check key is not all zeros (not provisioned) */
-    uint8_t zero[EOS_AES_KEY_SIZE] = {0};
+    const uint8_t zero[EOS_AES_KEY_SIZE] = {0};
     volatile uint8_t diff = 0;
     for (size_t i = 0; i < EOS_AES_KEY_SIZE; i++) {
         diff |= ctx->key[i] ^ zero[i];

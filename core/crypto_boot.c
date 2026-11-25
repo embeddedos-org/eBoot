@@ -51,7 +51,6 @@ static void sha256_transform(eos_sha256_ctx_t *ctx)
 {
     uint32_t w[64];
     uint32_t a, b, c, d, e, f, g, h;
-    uint32_t t1, t2;
 
     for (int i = 0; i < 16; i++) {
         w[i] = ((uint32_t)ctx->buffer[i * 4 + 0] << 24) |
@@ -68,8 +67,8 @@ static void sha256_transform(eos_sha256_ctx_t *ctx)
     e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
 
     for (int i = 0; i < 64; i++) {
-        t1 = h + EP1(e) + CH(e, f, g) + K[i] + w[i];
-        t2 = EP0(a) + MAJ(a, b, c);
+        uint32_t t1 = h + EP1(e) + CH(e, f, g) + K[i] + w[i];
+        uint32_t t2 = EP0(a) + MAJ(a, b, c);
         h = g; g = f; f = e; e = d + t1;
         d = c; c = b; b = a; a = t1 + t2;
     }

@@ -66,6 +66,48 @@ typedef struct {
     uint32_t crc32;
 } eos_bootctl_v1_t;
 
+/* bootctl_migrate_v1() carries the first fifteen words forward with one
+ * memcpy, so no line of C names last_reset_reason, img_a_version,
+ * img_b_version, img_a_crc, img_b_crc or reserved. The claim that memcpy
+ * rests on -- v1 and v2 agreeing field by field over that prefix -- was
+ * written in a comment and checked by nobody. These assertions check it, and
+ * in doing so name every field, which is also what cppcheck's
+ * unusedStructMember was pointing at. They cost no bytes. */
+#define EBLDR_BOOTCTL_V1_SAME_OFFSET(field) \
+    _Static_assert(offsetof(eos_bootctl_v1_t, field) \
+                   == offsetof(eos_bootctl_t, field), \
+                   "v1 and v2 disagree on the offset of " #field \
+                   "; bootctl_migrate_v1()'s memcpy would move it")
+EBLDR_BOOTCTL_V1_SAME_OFFSET(magic);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(version);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(active_slot);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(pending_slot);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(confirmed_slot);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(boot_attempts);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(max_attempts);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(last_reset_reason);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(flags);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(img_a_version);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(img_b_version);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(img_a_crc);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(img_b_crc);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(log_head);
+EBLDR_BOOTCTL_V1_SAME_OFFSET(boot_count);
+#undef EBLDR_BOOTCTL_V1_SAME_OFFSET
+
+/* boot_count is the fifteenth word, so the prefix the memcpy copies ends
+ * exactly at its end: 15 * 4 == 60 bytes. */
+_Static_assert(offsetof(eos_bootctl_v1_t, boot_count) + sizeof(uint32_t)
+               == 15 * sizeof(uint32_t),
+               "bootctl_migrate_v1() copies 15 words; boot_count no longer "
+               "ends the prefix");
+_Static_assert(offsetof(eos_bootctl_v1_t, reserved)
+               == offsetof(eos_bootctl_v1_t, boot_count) + sizeof(uint32_t),
+               "a field was added to eos_bootctl_v1_t after boot_count; the "
+               "on-flash v1 layout is fixed and cannot grow");
+_Static_assert(sizeof(eos_bootctl_v1_t) == 23 * sizeof(uint32_t),
+               "eos_bootctl_v1_t is an on-flash layout; its size is fixed");
+
 static bool bootctl_v1_validate(const eos_bootctl_v1_t *old)
 {
     if (!old)

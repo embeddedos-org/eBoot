@@ -21,10 +21,12 @@ int eos_debug_lock_apply(void)
 {
     eos_debug_lock_policy_t policy = (eos_debug_lock_policy_t)EBLDR_DEBUG_LOCK_POLICY;
 
+    /* cppcheck-suppress knownConditionTrueFalse  // policy is EBLDR_DEBUG_LOCK_POLICY, a build-time choice; the branch is dead only for the default this build selected */
     if (policy == EOS_DEBUG_LOCK_NEVER) {
         return EOS_OK;
     }
 
+    /* cppcheck-suppress knownConditionTrueFalse  // same: a different -DEBLDR_DEBUG_LOCK_POLICY takes the other branch */
     if (policy == EOS_DEBUG_LOCK_PRODUCTION) {
         /* Only lock if not in debug build */
 #ifdef EBLDR_DEBUG_BUILD
@@ -44,7 +46,7 @@ int eos_debug_lock_verify(uint32_t *status)
     if (rc == EOS_ERR_NOT_SUPPORTED) {
         /* If HAL doesn't support status query, check via CoreSight */
 #if defined(__ARM_ARCH) && (__ARM_ARCH <= 7) && !defined(__aarch64__)
-        volatile uint32_t *dhcsr = (volatile uint32_t *)0xE000EDF0;
+        volatile uint32_t *const dhcsr = (volatile uint32_t *)0xE000EDF0;
         if (*dhcsr & (1U << 0)) { /* C_DEBUGEN */
             *status = EOS_DEBUG_STATUS_UNLOCKED;
         } else {
@@ -63,7 +65,7 @@ int eos_debug_lock_verify(uint32_t *status)
 bool eos_debug_is_attached(void)
 {
 #if defined(__ARM_ARCH) && (__ARM_ARCH <= 7) && !defined(__aarch64__)
-    volatile uint32_t *dhcsr = (volatile uint32_t *)0xE000EDF0;
+    volatile uint32_t *const dhcsr = (volatile uint32_t *)0xE000EDF0;
     return (*dhcsr & (1U << 0)) != 0;
 #elif defined(__ARM_ARCH_7R__)
     uint32_t dscr;

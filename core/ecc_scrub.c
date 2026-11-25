@@ -28,7 +28,8 @@ int eos_ecc_scrub(eos_ecc_ctx_t *ctx)
 {
     if (!ctx || !ctx->enabled) return -1;
 
-    volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)ctx->base_addr;
+    const volatile uint32_t *const p =
+        (const volatile uint32_t *)(uintptr_t)ctx->base_addr;
     uint32_t words = ctx->size_bytes / 4;
 
     for (uint32_t i = 0; i < words; i++) {
@@ -41,7 +42,7 @@ int eos_ecc_scrub(eos_ecc_ctx_t *ctx)
     return 0;
 }
 
-int eos_ecc_check_region(eos_ecc_ctx_t *ctx, uint32_t addr, uint32_t len)
+int eos_ecc_check_region(const eos_ecc_ctx_t *ctx, uint32_t addr, uint32_t len)
 {
     if (!ctx) return -1;
     if (addr < ctx->base_addr) return -1;
@@ -49,7 +50,7 @@ int eos_ecc_check_region(eos_ecc_ctx_t *ctx, uint32_t addr, uint32_t len)
     uint32_t offset = addr - ctx->base_addr;
     if (offset > ctx->size_bytes || len > ctx->size_bytes - offset) return -1;
 
-    volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)addr;
+    const volatile uint32_t *const p = (const volatile uint32_t *)(uintptr_t)addr;
     uint32_t words = len / 4;
 
     for (uint32_t i = 0; i < words; i++) {

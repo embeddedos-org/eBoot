@@ -78,7 +78,7 @@ static int safe_compare(const uint8_t *a, const uint8_t *b, size_t len)
  * Same treatment as the recovery secret in core/recovery.c. */
 static bool slot_is_provisioned(const uint8_t *key)
 {
-    uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
+    const uint8_t zero[EOS_ED25519_PUB_KEY_SIZE] = {0};
     uint8_t erased[EOS_ED25519_PUB_KEY_SIZE];
     memset(erased, 0xFF, sizeof(erased));
     return safe_compare(key, zero, EOS_ED25519_PUB_KEY_SIZE) != 0 &&

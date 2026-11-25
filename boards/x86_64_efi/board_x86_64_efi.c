@@ -44,7 +44,10 @@ static inline void outb(uint16_t port, uint8_t val)
 
 static inline uint8_t inb(uint16_t port)
 {
-    uint8_t val;
+    /* Initialised, not just declared: without __GNUC__ the asm below is
+     * preprocessed out and the function returned an indeterminate value.
+     * 0 is the same "nothing there" answer the non-x86 stub below gives. */
+    uint8_t val = 0;
 #if defined(__GNUC__)
     __asm volatile ("inb %1, %0" : "=a"(val) : "Nd"(port));
 #endif
