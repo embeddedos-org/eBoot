@@ -32,6 +32,11 @@ Usage (from the Cross-compile STM32F4 job in .github/workflows/build.yml):
 Exit status: 0 when the image fits with at least --min-free bytes
 spare, 1 when it fits the region but is under the minimum (or does not
 fit at all), 2 on a usage or tool error.
+
+Scope: the gate covers the headroom zone -- an image that fits the
+region but leaves too little spare. An image that overflows the region
+fails at link time, before any ELF exists to measure, so that case
+still reports the linker error; the gate cannot diagnose it.
 """
 
 import argparse
@@ -40,6 +45,7 @@ import sys
 
 DEFAULT_BUDGET = 16384
 DEFAULT_MIN_FREE = 16
+TIMEOUT_SECONDS = 60
 
 
 def parse_size_output(text):
@@ -85,10 +91,14 @@ def top_symbols(elf, nm, count):
     try:
         result = subprocess.run(
             [nm, "--print-size", "--size-sort", "--radix=d", elf],
-            capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
+            capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print("::warning::symbol listing failed (%s): %s"
+              % (nm, error), file=sys.stderr)
         return []
     if result.returncode != 0:
+        print("::warning::symbol listing failed (%s exited %d)"
+              % (nm, result.returncode), file=sys.stderr)
         return []
     symbols = []
     for line in result.stdout.splitlines():
@@ -116,13 +126,24 @@ def main(argv=None):
                         help="largest symbols to list, 0 to skip "
                         "(default: %(default)s)")
     args = parser.parse_args(argv)
+    if args.min_free < 0:
+        parser.error("--min-free must not be negative")
+    if args.budget <= 0:
+        parser.error("--budget must be positive")
 
+    # List form, no shell: argv[0] is the tool to exec, never a shell
+    # string, so the tool and file names cannot inject a command.
     try:
         result = subprocess.run([args.size, args.elf],
-                                capture_output=True, text=True, timeout=60)
+                                capture_output=True, text=True,
+                                timeout=TIMEOUT_SECONDS)
     except OSError as error:
         print("::error::cannot run %s: %s" % (args.size, error),
               file=sys.stderr)
+        return 2
+    except subprocess.TimeoutExpired:
+        print("::error::%s timed out after %d seconds for %s"
+              % (args.size, TIMEOUT_SECONDS, args.elf), file=sys.stderr)
         return 2
     if result.returncode != 0:
         print("::error::%s failed for %s: %s"

@@ -111,6 +111,38 @@ def test_main_missing_elf_is_a_tool_error(tmp_path):
     assert "::error::" in result.stderr
 
 
+def test_main_rejects_negative_min_free(tmp_path):
+    (tmp_path / "ebldr_stage0.elf").write_bytes(b"\x7fELF")
+    result = _run_gate(tmp_path, tmp_path / "ebldr_stage0.elf", -1)
+    assert result.returncode == 2
+    assert "--min-free must not be negative" in result.stderr
+
+
+def test_main_reports_size_timeout(tmp_path, capsys, monkeypatch):
+    (tmp_path / "ebldr_stage0.elf").write_bytes(b"\x7fELF")
+    slow = tmp_path / "slow-size.sh"
+    slow.write_text("#!/bin/sh\nsleep 2\n", encoding="utf-8")
+    slow.chmod(0o755)
+    monkeypatch.setattr(gate, "TIMEOUT_SECONDS", 0.1)
+    rc = gate.main(["--elf", str(tmp_path / "ebldr_stage0.elf"),
+                    "--size", str(slow), "--top", "0"])
+    assert rc == 2
+    assert "timed out" in capsys.readouterr().err
+
+
+def test_main_warns_when_symbol_listing_fails(tmp_path):
+    (tmp_path / "ebldr_stage0.elf").write_bytes(b"\x7fELF")
+    result = subprocess.run(
+        [sys.executable, str(TOOLS_DIR / "check_stage0_size.py"),
+         "--elf", str(tmp_path / "ebldr_stage0.elf"),
+         "--size", str(_fake_size(tmp_path)), "--nm", "false",
+         "--min-free", "16"],
+        capture_output=True, text=True,
+        env={"FAKE_SIZE_OUTPUT": SIZE_OUTPUT, "PATH": "/usr/bin:/bin"})
+    assert result.returncode == 0
+    assert "symbol listing failed" in result.stderr
+
+
 def test_budget_matches_the_linker_script():
     """The gate's budget is the region length, not a second copy."""
     script = REPO_ROOT / "boards" / "stm32f4" / "stm32f4_stage0.ld"

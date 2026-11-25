@@ -514,7 +514,7 @@ if(NOT EBLDR_BOARD STREQUAL "none")
                 -fno-tree-loop-distribute-patterns)
 
             set_target_properties(ebldr_stage0 PROPERTIES
-                LINK_FLAGS "-T${_LD_STAGE0} -nostartfiles -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/ebldr_stage0.map"
+                LINK_FLAGS "-T${_LD_STAGE0} -nostartfiles -Wl,-Map=\"${CMAKE_CURRENT_BINARY_DIR}/ebldr_stage0.map\""
                 SUFFIX ".elf"
             )
             add_custom_command(TARGET ebldr_stage0 POST_BUILD
