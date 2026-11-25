@@ -19,10 +19,24 @@
 #define SAMD51_RAM_BASE             0x20000000
 #define SAMD51_RAM_SIZE             (192 * 1024)
 
+/* 208 KiB slots, not 224 (#195). At 224 KiB slot B ran 0x48000-0x80000, to
+ * the end of flash, so its last 16 KiB were also the recovery image and the
+ * boot-control block: an image larger than 208 KiB in slot B would have
+ * overwritten both, and a boot-control save would have written into slot B.
+ * Every address is unchanged; the slots stop short of the recovery image
+ * instead. Both slots stay the same size, so an image that fits one fits the
+ * other. 0x44000-0x48000 is left unused rather than move slot B's address.
+ *
+ *   slot A    0x10000 - 0x44000   208 KiB
+ *   (unused)  0x44000 - 0x48000    16 KiB
+ *   slot B    0x48000 - 0x7C000   208 KiB
+ *   recovery  0x7C000 - 0x7E000     8 KiB
+ *   bootctl   0x7E000                 (last page)
+ */
 #define SAMD51_SLOT_A_ADDR          0x00010000
-#define SAMD51_SLOT_A_SIZE          (224 * 1024)
+#define SAMD51_SLOT_A_SIZE          (208 * 1024)
 #define SAMD51_SLOT_B_ADDR          0x00048000
-#define SAMD51_SLOT_B_SIZE          (224 * 1024)
+#define SAMD51_SLOT_B_SIZE          (208 * 1024)
 #define SAMD51_RECOVERY_ADDR        0x0007C000
 #define SAMD51_RECOVERY_SIZE        (8 * 1024)
 #define SAMD51_BOOTCTL_ADDR         0x0007E000

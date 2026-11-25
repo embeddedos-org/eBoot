@@ -16,7 +16,9 @@ boards/*/board_*.c and reports:
     flash-wraps   flash_base + flash_size runs past the 4 GiB address space
     outside-flash a region or block that is not inside [flash_base,
                   flash_base + flash_size)
-    overlap       two of slot A, slot B, recovery and bootloader share bytes
+    overlap       two of slot A, slot B, recovery and bootloader share bytes,
+                  or the boot-control block, its backup and the log are not
+                  all at distinct addresses
     inside        the boot-control block, its backup or the log starts inside
                   one of those regions, or a region that has an address but no
                   size field starts inside a sized one (subject: block@region
@@ -76,33 +78,14 @@ FIELDS = ("flash_base", "flash_size") + tuple(
 
 # (board, kind, subject) -> the issue that tracks it. Remove the entry in the
 # change that fixes the port; --check fails if it is left behind.
+#
+# Empty, and meant to stay that way. The twelve ports this table was created
+# for were fixed by #195, #196, #197 and #199; all 83 ports are now coherent
+# and `--check` passes on zero findings. A new entry here is a defect someone
+# chose to leave in the tree, so it needs an issue that says why it cannot be
+# fixed now -- not a place to park a finding.
 _ISSUES = "https://github.com/embeddedos-org/eBoot/issues/"
-KNOWN = {
-    ("8051", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("8051", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("avr", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("avr", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("cortex_m0", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("cortex_m0", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("cortex_m0plus", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("cortex_m0plus", "overlap", "slot_a+recovery"): _ISSUES + "199",
-    ("pic16", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("pic16", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("pic18", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("pic18", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("pic24", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("pic24", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("powerpc", "flash-wraps", "flash_size"): _ISSUES + "197",
-    ("pru", "outside-flash", "slot_a"): _ISSUES + "199",
-    ("pru", "outside-flash", "slot_b"): _ISSUES + "199",
-    ("samd51", "inside", "bootctl_addr@slot_b"): _ISSUES + "195",
-    ("samd51", "overlap", "slot_b+recovery"): _ISSUES + "195",
-    ("x86", "flash-wraps", "flash_size"): _ISSUES + "196",
-    ("x86", "outside-flash", "bootctl_addr"): _ISSUES + "196",
-    ("x86", "outside-flash", "recovery"): _ISSUES + "196",
-    ("x86", "outside-flash", "slot_a"): _ISSUES + "196",
-    ("x86", "outside-flash", "slot_b"): _ISSUES + "196",
-}
+KNOWN = {}
 
 _DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(\w+)(\(?)[ \t]*(.*)$", re.M)
 _INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+"([^"]+)"', re.M)
@@ -290,9 +273,15 @@ def findings(initialisers, defined):
                 out.append(("inside", "%s@%s" % (start, name),
                             "%s starts at %#x, inside %s [%#x, +%#x)"
                             % ((start, at, name) + region)))
-    for block in BLOCKS:
-        if block not in value:
-            continue
+    present = [block for block in BLOCKS if block in value]
+    for i, first in enumerate(present):
+        for second in present[i + 1:]:
+            if value[first] == value[second]:
+                out.append(("overlap", "%s+%s" % (first, second),
+                            "%s and %s are both at %#x, so one is not a "
+                            "separate copy of the other"
+                            % (first, second, value[first])))
+    for block in present:
         at = value[block]
         if flash and not flash[0] <= at < flash[0] + flash[1]:
             out.append(("outside-flash", block,

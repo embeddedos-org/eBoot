@@ -10,23 +10,23 @@
 #include "eos_hal.h"
 #include "eos_types.h"
 #include "eos_device_table.h"
-
-#define POWERPC_FLASH_BASE  0xFF000000
-#define POWERPC_FLASH_SIZE  (32 * 1024 * 1024)
-#define POWERPC_RAM_BASE    0x00000000
-#define POWERPC_RAM_SIZE    (256 * 1024 * 1024)
-#define POWERPC_SLOT_A      0xFF100000
-#define POWERPC_SLOT_B      0xFF700000
-#define POWERPC_RECOVERY    0xFFD00000
-#define POWERPC_BOOTCTL     0xFFFFF000
+/* The map lives in the header only. This file used to carry a second copy of
+ * it, under shorter names and without the size constants, and the two had
+ * drifted: #197 is the flash size, but the duplication is how it got there. */
+#include "board_powerpc.h"
 
 static const eos_board_ops_t powerpc_ops = {
     .flash_base       = POWERPC_FLASH_BASE,
     .flash_size       = POWERPC_FLASH_SIZE,
-    .slot_a_addr      = POWERPC_SLOT_A,
-    .slot_b_addr      = POWERPC_SLOT_B,
-    .recovery_addr    = POWERPC_RECOVERY,
-    .bootctl_addr     = POWERPC_BOOTCTL,
+    .slot_a_addr      = POWERPC_SLOT_A_ADDR,
+    .slot_a_size      = POWERPC_SLOT_A_SIZE,
+    .slot_b_addr      = POWERPC_SLOT_B_ADDR,
+    .slot_b_size      = POWERPC_SLOT_B_SIZE,
+    .recovery_addr    = POWERPC_RECOVERY_ADDR,
+    .recovery_size    = POWERPC_RECOVERY_SIZE,
+    .bootctl_addr     = POWERPC_BOOTCTL_ADDR,
+    .bootctl_backup_addr = POWERPC_BOOTCTL_BACKUP_ADDR,
+    .log_addr         = POWERPC_LOG_ADDR,
     .app_vector_offset = 0x00,
     .flash_read       = NULL,
     .flash_write      = NULL,
