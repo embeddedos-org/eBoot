@@ -14,15 +14,34 @@
 #include "eos_hal.h"
 #include "eos_types.h"
 #include "eos_device_table.h"
+/* The map lives in the header only. This file used to carry a second copy of
+ * it, under shorter names and without the size constants, and the two had
+ * drifted: the header's base was already 0xFFF00000 too (#196), but a map
+ * declared twice is how a port ends up with one copy nobody checks. */
+#include "board_x86.h"
 
-#define X86_FLASH_BASE    0xFFF00000
-#define X86_FLASH_SIZE    (16 * 1024 * 1024)
-#define X86_RAM_BASE      0x00100000
-#define X86_RAM_SIZE      (64 * 1024 * 1024)
-#define X86_SLOT_A        0xFF040000
-#define X86_SLOT_B        0xFF640000
-#define X86_RECOVERY      0xFFC40000
-#define X86_BOOTCTL       0xFFEFF000
+/* Is [addr, addr+len) inside the declared flash?
+ *
+ * Written as a subtraction rather than `addr + len > X86_FLASH_BASE +
+ * X86_FLASH_SIZE`, which is the form the three callers used and which cannot
+ * work: base + size is 0xFF000000 + 0x1000000 == 0x100000000, and computed in
+ * the 32 bits of the operand types that is 0, so the upper bound was zero and
+ * every address in the device failed it. `addr + len` wraps on a 32-bit
+ * target for the same reason. Neither subtraction below can overflow: offset
+ * is less than X86_FLASH_SIZE before it is used, so X86_FLASH_SIZE - offset is
+ * the bytes that remain, and len is compared against that.
+ *
+ * len == 0 at an address inside flash is accepted, as before. An address one
+ * past the end is now refused even with len == 0, where it used to pass. */
+static bool x86_flash_in_range(uint32_t addr, size_t len)
+{
+    if (addr < X86_FLASH_BASE)
+        return false;
+    uint32_t offset = addr - X86_FLASH_BASE;
+    if (offset >= X86_FLASH_SIZE)
+        return false;
+    return len <= (size_t)(X86_FLASH_SIZE - offset);
+}
 
 /* x86 port I/O helpers */
 static inline void outb(uint16_t port, uint8_t val)
@@ -50,8 +69,7 @@ static inline uint8_t inb(uint16_t port)
 
 static int x86_flash_read(uint32_t addr, void *buf, size_t len)
 {
-    if (!buf || addr < X86_FLASH_BASE ||
-        (addr + len) > (X86_FLASH_BASE + X86_FLASH_SIZE)) {
+    if (!buf || !x86_flash_in_range(addr, len)) {
         return EOS_ERR_INVALID;
     }
     const volatile uint8_t *src = (const volatile uint8_t *)(uintptr_t)addr;
@@ -64,8 +82,7 @@ static int x86_flash_read(uint32_t addr, void *buf, size_t len)
 
 static int x86_flash_write(uint32_t addr, const void *buf, size_t len)
 {
-    if (!buf || addr < X86_FLASH_BASE ||
-        (addr + len) > (X86_FLASH_BASE + X86_FLASH_SIZE)) {
+    if (!buf || !x86_flash_in_range(addr, len)) {
         return EOS_ERR_INVALID;
     }
     volatile uint8_t *dst = (volatile uint8_t *)(uintptr_t)addr;
@@ -84,8 +101,7 @@ static int x86_flash_write(uint32_t addr, const void *buf, size_t len)
 
 static int x86_flash_erase(uint32_t addr, size_t len)
 {
-    if (addr < X86_FLASH_BASE ||
-        (addr + len) > (X86_FLASH_BASE + X86_FLASH_SIZE)) {
+    if (!x86_flash_in_range(addr, len)) {
         return EOS_ERR_INVALID;
     }
     /* Sector erase: NOR flash CFI sector-erase command sequence */
@@ -251,10 +267,15 @@ void board_x86_early_init(void)
 static const eos_board_ops_t x86_ops = {
     .flash_base       = X86_FLASH_BASE,
     .flash_size       = X86_FLASH_SIZE,
-    .slot_a_addr      = X86_SLOT_A,
-    .slot_b_addr      = X86_SLOT_B,
-    .recovery_addr    = X86_RECOVERY,
-    .bootctl_addr     = X86_BOOTCTL,
+    .slot_a_addr      = X86_SLOT_A_ADDR,
+    .slot_a_size      = X86_SLOT_A_SIZE,
+    .slot_b_addr      = X86_SLOT_B_ADDR,
+    .slot_b_size      = X86_SLOT_B_SIZE,
+    .recovery_addr    = X86_RECOVERY_ADDR,
+    .recovery_size    = X86_RECOVERY_SIZE,
+    .bootctl_addr     = X86_BOOTCTL_ADDR,
+    .bootctl_backup_addr = X86_BOOTCTL_BACKUP_ADDR,
+    .log_addr         = X86_LOG_ADDR,
     .app_vector_offset = 0x00,
     .flash_read       = x86_flash_read,
     .flash_write      = x86_flash_write,

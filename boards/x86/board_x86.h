@@ -12,8 +12,29 @@
 
 #include "eos_hal.h"
 
-#define X86_FLASH_BASE            0xFFF00000
-#define X86_FLASH_SIZE            (16 * 1024 * 1024)
+/* 0xFF000000, not 0xFFF00000 (#196). At 0xFFF00000 only 1 MiB of the declared
+ * 16 MiB fits below 4 GiB -- 0xFFF00000 + 16 MiB is 0x10FF00000 -- and every
+ * region named below sat *under* the declared base, so the driver's bounds
+ * check refused every read, write and erase of every region the bootloader
+ * manages. Each of those regions, and both boot-control copies, lies inside
+ * a 16 MiB device at the top of the address space, which is what this base
+ * now says:
+ *
+ *   (bootloader)  0xFF000000 - 0xFF040000    256 KiB
+ *   slot A        0xFF040000 - 0xFF640000      6 MiB
+ *   slot B        0xFF640000 - 0xFFC40000      6 MiB
+ *   recovery      0xFFC40000 - 0xFFDC0000   1536 KiB
+ *   log           0xFFEFD000                   (page)
+ *   bootctl bkp   0xFFEFE000                   (page)
+ *   bootctl       0xFFEFF000                   (page)
+ *
+ * Behaviour change: the JEDEC unlock addresses the driver derives from the
+ * base move with it, from 0xFFF05555/0xFFF02AAA to 0xFF005555/0xFF002AAA.
+ * That is the correct pair for a device at this base; the old pair addressed
+ * a device that was not there. No x86 board has been run on hardware as far
+ * as this repository shows. */
+#define X86_FLASH_BASE            0xFF000000u
+#define X86_FLASH_SIZE            (16u * 1024u * 1024u)
 #define X86_RAM_BASE              0x00100000
 #define X86_RAM_SIZE              (64 * 1024 * 1024)
 

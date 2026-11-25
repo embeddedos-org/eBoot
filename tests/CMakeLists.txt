@@ -294,6 +294,22 @@ target_link_libraries(eboot_test_stm32f4_otp_counter PRIVATE eboot_core)
 add_test(NAME test_stm32f4_otp_counter COMMAND eboot_test_stm32f4_otp_counter)
 list(APPEND EBLDR_UNIT_TESTS test_stm32f4_otp_counter)
 
+# --- test_x86_flash_range: the x86 flash bounds check and its memory map ---
+# The test #includes boards/x86/board_x86.c: x86_flash_in_range() is
+# file-static, and the accept side of the predicate -- where #196 lived -- is
+# not reachable through the ops table, because an accepted address makes the
+# driver dereference memory-mapped NOR flash the host does not have. The board
+# file is not listed as a source here for the same reason: including it gives
+# one translation unit, where compiling it as a second would duplicate
+# board_x86_get_ops().
+add_executable(eboot_test_x86_flash_range unit/test_x86_flash_range.c)
+target_include_directories(eboot_test_x86_flash_range PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/x86
+)
+target_link_libraries(eboot_test_x86_flash_range PRIVATE eboot_core)
+add_test(NAME test_x86_flash_range COMMAND eboot_test_x86_flash_range)
+list(APPEND EBLDR_UNIT_TESTS test_x86_flash_range)
+
 # --- test_bootloader_protect: HAL allow-list + core policy ---
 add_executable(eboot_test_bootloader_protect unit/test_bootloader_protect.c)
 target_link_libraries(eboot_test_bootloader_protect PRIVATE eboot_core)
