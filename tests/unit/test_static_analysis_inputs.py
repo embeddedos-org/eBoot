@@ -20,6 +20,7 @@ toolchain and no cppcheck: it reads the workflows and the filesystem.
 
 import re
 import shlex
+import subprocess
 
 import pytest
 import yaml
@@ -144,6 +145,39 @@ def test_every_path_given_to_cppcheck_exists():
     )
 
 
+#: Top-level directories that hold `.c` files but are not the product source.
+#: A name belongs here only with a reason about that directory.
+NOT_PRODUCT_SOURCE = {
+    "tests": "the suites themselves; analysing them would report on the "
+             "checker rather than the checked",
+    "build_sim": "a committed CMake output tree, not source",
+    "poc": "proof-of-concept scratch code that ships in no image",
+    "promo": "animation sources for the promo video",
+    "docs": "documentation, including code quoted in prose",
+}
+
+
+def _tracked_c_source_dirs():
+    """Top-level directories holding git-tracked `.c` files.
+
+    Tracked files specifically. CI runs the Python tests after the build, so
+    the tree on a runner also holds `build/` with generated sources in it --
+    `tests/generated/test_production_key.c` among them. Walking the filesystem
+    made this test's answer depend on whether a build had happened yet, which
+    is how it passed locally and failed on CI.
+    """
+    out = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "-z", "*.c"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    dirs = set()
+    for rel in filter(None, out.split("\0")):
+        head = rel.split("/")[0]
+        if "/" in rel and head not in NOT_PRODUCT_SOURCE:
+            dirs.add(head)
+    return dirs
+
+
 def test_cppcheck_covers_every_directory_holding_c_sources():
     """Analysing one source root and calling it static analysis overstates it.
 
@@ -151,14 +185,8 @@ def test_cppcheck_covers_every_directory_holding_c_sources():
     and `stage1/` are the trusted startup path. A path list that quietly drops
     one of them narrows the check without changing its name.
     """
-    with_c = {
-        child.name for child in REPO.iterdir()
-        if child.is_dir()
-        and not child.name.startswith(".")
-        and child.name not in {"tests", "build_sim", "poc", "promo", "docs"}
-        and any(child.rglob("*.c"))
-    }
-    assert with_c, "no directory under the repository root holds C sources"
+    with_c = _tracked_c_source_dirs()
+    assert with_c, "no tracked C sources outside the excluded directories"
 
     covered = set()
     for _workflow, _job_id, _step_name, run in _steps_running_cppcheck():
