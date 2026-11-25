@@ -182,12 +182,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install tools
         run: sudo apt-get install -y cppcheck clang-tidy
+      # The path list used to be `src/`, a directory this repository does not
+      # have -- eBoot's C sources live in core/, hal/, stage0/, stage1/ and
+      # boards/. cppcheck answered "could not find or open any of the paths
+      # given", exited 1, and `continue-on-error` swallowed it, so the job was
+      # green and cppcheck.log held that one line instead of a report. Zero
+      # files were analysed from 2026-05-27 (1bc7641) until this change.
+      #
+      # `continue-on-error: true` stays for now: with the real paths cppcheck
+      # reports 9 errors on master, so removing it here would turn the default
+      # branch red in the same commit that makes the step work. Clearing those
+      # and then making this step gating is a separate change.
       - name: cppcheck
         run: |
           cppcheck --enable=all --error-exitcode=1 \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
-            -I include/ src/ 2>&1 | tee cppcheck.log
+            -I include/ core/ hal/ stage0/ stage1/ boards/ 2>&1 | tee cppcheck.log
         continue-on-error: true
       - name: Upload analysis report
         uses: actions/upload-artifact@v4
