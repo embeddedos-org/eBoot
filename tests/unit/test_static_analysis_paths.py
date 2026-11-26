@@ -173,24 +173,38 @@ def test_every_path_handed_to_cppcheck_exists(workflow, job):
                 "nothing." % (name, job_name, candidate))
 
 
-def test_no_directory_of_c_sources_is_left_out_of_static_analysis():
-    """The union of what the cppcheck steps analyse must cover every top-level
-    directory holding .c files, except those NOT_ANALYSED explains."""
-    with_sources = {source.parts[0] for source in _tracked_c_sources()
-                    if len(source.parts) > 1}
-    assert with_sources, "git lists no .c files; the call above is wrong"
+def test_no_c_source_is_left_out_of_static_analysis():
+    """Every tracked .c file must be named by a cppcheck input, or by an
+    ancestor directory of one, unless NOT_ANALYSED explains its top-level
+    directory.
 
-    analysed = set()
+    Comparing only the top-level component of each input would accept an
+    input of `core/crypto_boot.c` as covering the whole of `core/`: the
+    path-existence test passes, this test passes, and every other `core/`
+    source has silently stopped being analysed. Coverage is therefore
+    decided per file, against the input paths as given.
+    """
+    sources = [source for source in _tracked_c_sources()
+               if len(source.parts) > 1]
+    assert sources, "git lists no .c files; the call above is wrong"
+
+    inputs = set()
     for _name, _job, _step, _script, words in STEPS:
         paths, _ = _paths_and_options(words)
-        for candidate in paths:
-            analysed.add(Path(candidate).parts[0])
+        inputs.update(Path(candidate) for candidate in paths)
 
-    missing = sorted(with_sources - analysed - set(NOT_ANALYSED))
+    def analysed(source):
+        return any(source == given or given in source.parents
+                   for given in inputs)
+
+    missing = sorted(str(source) for source in sources
+                     if source.parts[0] not in NOT_ANALYSED
+                     and not analysed(source))
     assert not missing, (
-        "these directories hold C sources that no cppcheck step analyses and "
-        "that NOT_ANALYSED does not explain: %s. Add them to a cppcheck step, "
-        "or to NOT_ANALYSED with the reason." % ", ".join(missing))
+        "these C sources are analysed by no cppcheck step and NOT_ANALYSED "
+        "does not explain their directory: %s. Add them to a cppcheck step "
+        "(a parent directory counts), or add the directory to NOT_ANALYSED "
+        "with the reason." % ", ".join(missing))
 
 
 @pytest.mark.parametrize("workflow,job", [(s[0], s[1]) for s in STEPS])
@@ -217,13 +231,30 @@ def test_a_cppcheck_step_can_fail_the_job(workflow, job):
             "reports success on any finding" % where)
 
         # `cppcheck ... | tee log` takes tee's status unless pipefail is set.
-        piped = any(re.search(r"^\s*cppcheck\b.*\|", line)
-                    for line in script.replace("\\\n", " ").splitlines())
-        if piped:
-            assert re.search(r"set\s+-o\s+pipefail", script), (
-                "%s: the cppcheck command is piped, so the step's status is "
-                "the last command's. GitHub runs `run:` under `bash -e`, not "
-                "`-o pipefail`: add `set -o pipefail`." % where)
+        # `set -o pipefail` has to *run before* the pipeline, not merely
+        # appear somewhere in the script: a `set` placed after it leaves a
+        # successful `tee` masking the cppcheck failure at execution time,
+        # and then returns 0 itself.
+        lines = script.replace("\\\n", " ").splitlines()
+        pipelines = [i for i, line in enumerate(lines)
+                     if re.search(r"^\s*cppcheck\b.*\|", line)]
+        if pipelines:
+            # A `shell:` that already selects pipefail covers the whole step.
+            shell = str(step.get("shell", ""))
+            if "pipefail" not in shell:
+                enabled = [i for i, line in enumerate(lines)
+                           if re.search(r"^\s*set\s+(-\S+\s+)*-o\s+pipefail\b",
+                                        line)]
+                assert enabled, (
+                    "%s: the cppcheck command is piped, so the step's status "
+                    "is the last command's. GitHub runs `run:` under `bash "
+                    "-e`, not `-o pipefail`: add `set -o pipefail`." % where)
+                assert min(enabled) < min(pipelines), (
+                    "%s: `set -o pipefail` is on line %d but the cppcheck "
+                    "pipeline is on line %d, so it has not run yet when the "
+                    "pipeline does. A successful `tee` still masks a cppcheck "
+                    "failure; move the `set` above the pipeline."
+                    % (where, min(enabled) + 1, min(pipelines) + 1))
 
 
 @pytest.mark.parametrize("workflow,job", [(s[0], s[1]) for s in STEPS])

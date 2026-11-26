@@ -34,7 +34,17 @@ static volatile uint32_t tick_ms = 0;
 
 /* ---- I/O port access (x86) ---- */
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(EBLDR_TEST_PORT_IO)
+/* Test seam. The real accessors below execute privileged instructions that
+ * fault in user space, so a host test cannot drive the UART status bit
+ * through them. Only the two accessors are replaced; every port read and
+ * write in this file goes through them, so the logic under test is the
+ * shipping logic. */
+uint8_t eboot_test_inb(uint16_t port);
+void eboot_test_outb(uint16_t port, uint8_t val);
+static inline uint8_t inb(uint16_t port) { return eboot_test_inb(port); }
+static inline void outb(uint16_t port, uint8_t val) { eboot_test_outb(port, val); }
+#elif defined(__x86_64__) || defined(_M_X64)
 static inline void outb(uint16_t port, uint8_t val)
 {
 #if defined(__GNUC__)
@@ -93,11 +103,25 @@ static int x86_uart_init(uint32_t baud)
     return EOS_OK;
 }
 
+/* Spins to wait for THR-empty before giving up on a byte.
+ *
+ * The wait has to be bounded by iterations rather than by tick_ms: nothing
+ * in this port advances tick_ms, so a time-based bound would never expire.
+ * A UART that is absent, wedged, or (on a build without __GNUC__, where the
+ * port I/O asm is preprocessed out and inb always answers 0) simply not
+ * readable must not be able to hang the bootloader in a loop with no exit.
+ * Large enough that a working 16550 at the slowest supported baud is never
+ * cut short; small enough to be a blink rather than a hang. */
+#define X86_UART_TX_SPINS 1000000u
+
 static int x86_uart_send(const void *buf, size_t len)
 {
     const uint8_t *p = (const uint8_t *)buf;
     for (size_t i = 0; i < len; i++) {
-        while (!(inb(COM1_BASE + 5) & 0x20)) {}  /* Wait THR empty */
+        uint32_t spins = X86_UART_TX_SPINS;
+        while (!(inb(COM1_BASE + 5) & 0x20)) {  /* Wait THR empty */
+            if (--spins == 0u) return EOS_ERR_TIMEOUT;
+        }
         outb(COM1_BASE, p[i]);
     }
     return EOS_OK;

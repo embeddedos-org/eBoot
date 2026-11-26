@@ -310,6 +310,26 @@ target_link_libraries(eboot_test_x86_flash_range PRIVATE eboot_core)
 add_test(NAME test_x86_flash_range COMMAND eboot_test_x86_flash_range)
 list(APPEND EBLDR_UNIT_TESTS test_x86_flash_range)
 
+# --- test_x86_uart_send_bounded: the THR-empty wait must terminate ---
+# Built with EBLDR_TEST_PORT_IO, which swaps board_x86_64_efi.c's inb/outb
+# for hooks the test supplies. That is the only way to reach the condition
+# the unbounded THR wait hung on -- an inb() that never reports THR-empty --
+# because the real inb() is a privileged instruction that faults in user
+# space. Every port access in the file goes through those two accessors. The
+# board file is #included rather than listed as a source, as with
+# test_x86_flash_range, so there is one translation unit and one
+# board_x86_64_efi_get_ops(). A hang shows up as a ctest timeout.
+add_executable(eboot_test_x86_uart_send_bounded unit/test_x86_uart_send_bounded.c)
+target_compile_definitions(eboot_test_x86_uart_send_bounded PRIVATE
+    EBLDR_TEST_PORT_IO)
+target_include_directories(eboot_test_x86_uart_send_bounded PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../boards/x86_64_efi
+)
+target_link_libraries(eboot_test_x86_uart_send_bounded PRIVATE eboot_core)
+add_test(NAME test_x86_uart_send_bounded COMMAND eboot_test_x86_uart_send_bounded)
+set_tests_properties(test_x86_uart_send_bounded PROPERTIES TIMEOUT 30)
+list(APPEND EBLDR_UNIT_TESTS test_x86_uart_send_bounded)
+
 # --- test_bootloader_protect: HAL allow-list + core policy ---
 add_executable(eboot_test_bootloader_protect unit/test_bootloader_protect.c)
 target_link_libraries(eboot_test_bootloader_protect PRIVATE eboot_core)
