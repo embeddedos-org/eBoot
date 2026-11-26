@@ -161,7 +161,23 @@ static int recovery_handle_auth(void)
         uint8_t resp[1 + RCVR_CHALLENGE_SIZE];
         resp[0] = RCVR_ACK;
         memcpy(&resp[1], challenge, RCVR_CHALLENGE_SIZE);
-        eos_hal_uart_send(resp, sizeof(resp));
+        /* The send can stop part-way now that a port whose THR never
+         * empties returns EOS_ERR_TIMEOUT instead of spinning forever.
+         * Entering RCVR_AUTH_CHALLENGE_SENT on a partial write would have
+         * the device report success while the client holds a truncated
+         * challenge, and the attempt would then fail at the response
+         * timeout with nothing saying why. Stay in RCVR_AUTH_NONE (which
+         * is this branch's condition, so the next attempt draws a fresh
+         * challenge) and report the error.
+         *
+         * auth_fail_count is deliberately not incremented: it drives the
+         * backoff and the lockout, and a fault in our own UART must not
+         * spend a client's attempts or lock recovery out of the board.
+         * It is the only way in. */
+        int tx = eos_hal_uart_send(resp, sizeof(resp));
+        if (tx != EOS_OK) {
+            return tx;
+        }
 
         auth_state = RCVR_AUTH_CHALLENGE_SENT;
         return EOS_OK;
