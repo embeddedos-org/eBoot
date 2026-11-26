@@ -152,17 +152,119 @@ def test_budget_matches_the_linker_script():
     assert gate.DEFAULT_BUDGET == int(match.group(1)) * 1024
 
 
-def test_workflow_gates_stage0():
-    """The STM32F4 job runs the gate with the measured minimum."""
+def _build_arm_job():
     doc = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "build.yml")
         .read_text(encoding="utf-8"))
     job = doc["jobs"]["build-arm"]
     assert job["name"] == "Cross-compile STM32F4"
-    runs = [step.get("run", "") for step in job["steps"]]
+    return job
+
+
+def test_workflow_gates_stage0():
+    """The STM32F4 job runs the gate with the measured minimum."""
+    runs = [step.get("run", "") for step in _build_arm_job()["steps"]]
     gate_steps = [run for run in runs
-                  if "check_stage0_size.py" in run]
+                  if "check_stage0_size.py" in run
+                  and "--explain-overflow" not in run]
     assert len(gate_steps) == 1, (
         "expected exactly one stage-0 gate step, found %d" % len(gate_steps))
     assert "--min-free 16" in gate_steps[0]
     assert "ebldr_stage0.elf" in gate_steps[0]
+
+
+# The gate needs an ELF, so it cannot reach an image that overflows the
+# region outright: that fails at link time and leaves nothing to
+# measure, and CI would show only ld's error. These pin the other half.
+
+LD_OVERFLOW = (
+    "[100%] Linking C executable ebldr_stage0.elf\n"
+    "/usr/lib/gcc/arm-none-eabi/14.2.1/../../../arm-none-eabi/bin/ld: "
+    "ebldr_stage0.elf section `.text' will not fit in region `FLASH'\n"
+    "/usr/lib/gcc/arm-none-eabi/14.2.1/../../../arm-none-eabi/bin/ld: "
+    "region `FLASH' overflowed by 16 bytes\n"
+    "collect2: error: ld returned 1 exit status\n")
+
+LD_OVERFLOW_UNQUOTED = "ld: region FLASH overflowed by 240 bytes\n"
+
+
+def test_find_overflow_reads_the_linker_figure():
+    assert gate.find_overflow(LD_OVERFLOW) == ("FLASH", 16)
+
+
+def test_find_overflow_tolerates_the_other_quoting_style():
+    """ld's quoting varies between versions; the match must not."""
+    assert gate.find_overflow(LD_OVERFLOW_UNQUOTED) == ("FLASH", 240)
+
+
+def test_find_overflow_returns_none_for_an_unrelated_failure():
+    assert gate.find_overflow("undefined reference to `memcpy'\n") is None
+
+
+def test_explain_overflow_states_the_budget_and_what_must_come_out():
+    found, message = gate.explain_overflow(LD_OVERFLOW, 16384, 16)
+    assert found
+    # 16 over the 16384-byte region, and 16 more wanted spare.
+    assert "16400" in message and "16384" in message
+    assert "32 bytes have to come out" in message
+    assert "#207" in message
+
+
+def test_explain_overflow_does_not_invent_one():
+    found, message = gate.explain_overflow("ld: cannot find -lc\n", 16384, 16)
+    assert not found and message is None
+
+
+def test_main_explain_overflow_reports_and_exits_zero(tmp_path, capsys):
+    """The failed build is what fails the job; this only explains it.
+
+    A non-zero exit here would add a second failure, and is also how
+    this step could start masking a different build error.
+    """
+    log = tmp_path / "build-arm.log"
+    log.write_text(LD_OVERFLOW, encoding="utf-8")
+    assert gate.main(["--explain-overflow", str(log), "--min-free", "16"]) == 0
+    assert "overflowed its FLASH region by 16 bytes" in capsys.readouterr().out
+
+
+def test_main_explain_overflow_is_quiet_about_other_failures(tmp_path, capsys):
+    log = tmp_path / "build-arm.log"
+    log.write_text("undefined reference to `foo'\n", encoding="utf-8")
+    assert gate.main(["--explain-overflow", str(log)]) == 0
+    assert "other than a stage-0 flash region overflow" in capsys.readouterr().out
+
+
+def test_main_explain_overflow_survives_a_missing_log(tmp_path):
+    missing = tmp_path / "nope.log"
+    assert gate.main(["--explain-overflow", str(missing)]) == 0
+
+
+def test_main_requires_an_elf_or_a_log():
+    with pytest.raises(SystemExit) as excinfo:
+        gate.main(["--min-free", "16"])
+    assert excinfo.value.code == 2
+
+
+def test_workflow_keeps_the_build_log_and_explains_an_overflow():
+    """The diagnostic is useless if the log is not kept, and dangerous
+    if it could pass a failed build."""
+    steps = _build_arm_job()["steps"]
+    by_name = {step.get("name", ""): step for step in steps}
+
+    build = by_name["Build"]
+    assert "tee build-arm.log" in build["run"], (
+        "the Build step must keep its log for the overflow diagnostic")
+    assert "set -o pipefail" in build["run"], (
+        "piping into tee takes tee's status without pipefail, so a failed "
+        "build would report success")
+    assert build.get("continue-on-error") is not True
+
+    explain = by_name["Explain a stage-0 overflow"]
+    assert explain["if"] == "failure()", (
+        "the diagnostic must run only on failure, and must not be the "
+        "thing that decides the job")
+    assert "--explain-overflow build-arm.log" in explain["run"]
+    assert "--min-free 16" in explain["run"]
+    assert explain.get("continue-on-error") is not True
+
+    assert list(steps).index(build) < list(steps).index(explain)

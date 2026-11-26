@@ -34,18 +34,32 @@ spare, 1 when it fits the region but is under the minimum (or does not
 fit at all), 2 on a usage or tool error.
 
 Scope: the gate covers the headroom zone -- an image that fits the
-region but leaves too little spare. An image that overflows the region
-fails at link time, before any ELF exists to measure, so that case
-still reports the linker error; the gate cannot diagnose it.
+region but leaves too little spare. An image that *overflows* the
+region fails at link time, before any ELF exists to measure, so the
+gate proper cannot reach it. `--explain-overflow` covers that case
+from the other side: given the build log, it recognises the linker's
+`region FLASH overflowed` and prints the same budget and policy the
+gate would have. The workflow runs it as an `if: failure()` step after
+the build, so an oversized image gets the headroom diagnostic too and
+the build's own non-zero status still fails the job.
 """
 
 import argparse
+import re
 import subprocess
 import sys
 
 DEFAULT_BUDGET = 16384
 DEFAULT_MIN_FREE = 16
 TIMEOUT_SECONDS = 60
+
+#: ld reports an overflow as, for example:
+#:   ebldr_stage0.elf section `.text' will not fit in region `FLASH'
+#:   region `FLASH' overflowed by 16 bytes
+#: The quoting style varies between ld versions, so match loosely.
+OVERFLOW_RE = re.compile(
+    r"region\s+[`'\"]?(?P<region>\w+)[`'\"]?\s+overflowed\s+by\s+"
+    r"(?P<bytes>\d+)\s+bytes?", re.IGNORECASE)
 
 
 def parse_size_output(text):
@@ -62,6 +76,36 @@ def parse_size_output(text):
         if len(fields) >= 6 and fields[0].isdigit() and fields[1].isdigit():
             return int(fields[0]), int(fields[1])
     raise ValueError("no size data line in output: %r" % text.strip())
+
+
+def find_overflow(text):
+    """Return (region, bytes_over) for a linker region overflow, or None."""
+    match = OVERFLOW_RE.search(text)
+    if match is None:
+        return None
+    return match.group("region"), int(match.group("bytes"))
+
+
+def explain_overflow(text, budget, min_free):
+    """Return (found, message) for an overflow reported in a build log.
+
+    The gate cannot measure an image that never linked, so this reads
+    the linker's own figure and states the budget and the policy in the
+    same terms the gate uses.
+    """
+    found = find_overflow(text)
+    if found is None:
+        return False, None
+    region, over = found
+    return True, (
+        "stage-0 overflowed its %s region by %d bytes: the image needs "
+        "%d bytes and the region is %d. The gate wants %d bytes spare on "
+        "top of that, so %d bytes have to come out -- a change that adds "
+        "code stage-0 links needs a slimmer verify path or a larger "
+        "stage-0 (moving the stage-0/stage-1 boundary, which needs its "
+        "own decision). Do not raise the region size or lower the "
+        "minimum to make it fit; see #207."
+        % (region, over, budget + over, budget, min_free, over + min_free))
 
 
 def check(used, budget, min_free):
@@ -110,8 +154,15 @@ def top_symbols(elf, nm, count):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--elf", required=True,
-                        help="stage-0 ELF to measure")
+    parser.add_argument("--elf",
+                        help="stage-0 ELF to measure (required unless "
+                        "--explain-overflow)")
+    parser.add_argument("--explain-overflow", metavar="BUILD_LOG",
+                        help="read a build log instead of an ELF and, if it "
+                        "records a linker region overflow, print the budget "
+                        "and policy for it. For an `if: failure()` step "
+                        "after the build: the image never linked, so there "
+                        "is no ELF to measure")
     parser.add_argument("--size", default="arm-none-eabi-size",
                         help="size tool (default: %(default)s)")
     parser.add_argument("--nm", default="arm-none-eabi-nm",
@@ -130,6 +181,31 @@ def main(argv=None):
         parser.error("--min-free must not be negative")
     if args.budget <= 0:
         parser.error("--budget must be positive")
+    if not args.elf and not args.explain_overflow:
+        parser.error("one of --elf or --explain-overflow is required")
+
+    if args.explain_overflow:
+        # Diagnostic for a build that already failed. It reports what the
+        # linker error does not say -- the budget and the policy -- and
+        # exits 0 either way: the failing build step is what fails the
+        # job, and this step must not be able to turn that into a pass
+        # or add a second, confusing failure.
+        try:
+            with open(args.explain_overflow, "r", errors="replace") as log:
+                contents = log.read()
+        except OSError as error:
+            print("::warning::cannot read build log %s: %s"
+                  % (args.explain_overflow, error), file=sys.stderr)
+            return 0
+        found, message = explain_overflow(contents, args.budget,
+                                          args.min_free)
+        if found:
+            print("::error::%s" % message, file=sys.stderr)
+            print(message)
+        else:
+            print("the build failed for a reason other than a stage-0 "
+                  "flash region overflow; see the build step's log")
+        return 0
 
     # List form, no shell: argv[0] is the tool to exec, never a shell
     # string, so the tool and file names cannot inject a command.

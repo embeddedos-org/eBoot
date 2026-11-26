@@ -63,7 +63,23 @@ jobs:
             -DCMAKE_C_FLAGS="-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -specs=nosys.specs"
 
       - name: Build
-        run: cmake --build build-arm --parallel
+        run: |
+          set -o pipefail
+          cmake --build build-arm --parallel 2>&1 | tee build-arm.log
+
+      # The headroom gate below needs an ELF, so it cannot reach the case
+      # where stage-0 overflows its region outright: that fails at link
+      # time and leaves nothing to measure, and CI would show only the
+      # linker error. This step reads the build log for that error and
+      # prints the same budget and policy the gate would have. `if:
+      # failure()` does not mask anything -- the Build step's own
+      # non-zero status is what fails the job, and this script exits 0.
+      - name: Explain a stage-0 overflow
+        if: failure()
+        run: |
+          python3 tools/check_stage0_size.py \
+            --explain-overflow build-arm.log --min-free 16
+
       - name: The production-key branch was compiled, not the dev key
         run: |
           test -f build-arm/generated/production_key.c
