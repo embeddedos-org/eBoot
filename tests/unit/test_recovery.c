@@ -783,9 +783,61 @@ TEST(test_recovery_keeps_the_session_after_a_later_receive_error)
     ASSERT(no_transport_entries() == 0);
 }
 
+/* A feed counter that ends the loop itself, for a session nothing else
+ * would end. */
+#define FEED_CAP 8
+static void capped_watchdog_feed(void)
+{
+    if (++wdt_feeds >= FEED_CAP)
+        longjmp(exit_jmp, 1);
+}
+
+/* #205 asks for a host test using an ops table with **no uart_recv**, and
+ * the tests above do not provide one: feeds_during_recovery() installs
+ * scripted_result_recv over whatever the caller passed, so a NULL
+ * uart_recv never reaches the loop. This drives it directly.
+ *
+ * It records the gap rather than a fix. This PR judges uart_init only, so
+ * a port that initialises a UART it cannot read from still counts as
+ * having a transport: eos_hal_uart_recv() returns EOS_ERR_GENERIC for the
+ * missing op (hal/hal_core.c:147), the loop treats any receive error on an
+ * initialised port as a wait, and it feeds for ever. Nothing in the loop
+ * would stop, so the feed counter stops it.
+ *
+ * Closing the gap means judging the first receive. That was in this PR at
+ * its first head and was removed because it made stm32f4 stage-0 overflow
+ * its flash region -- see the PR body and #207. When it comes back this
+ * test must be updated to expect no feeds and a no-transport log entry;
+ * failing then is the point. */
+TEST(test_a_port_with_no_uart_recv_still_feeds_and_is_not_yet_no_transport)
+{
+    setup();
+    static eos_board_ops_t ops;
+    ops = sim_ops;
+    ops.watchdog_feed = capped_watchdog_feed;
+    ops.uart_recv = NULL;          /* the table #205 asks about */
+    eos_hal_init(&ops);
+    eos_boot_log_init(0);
+
+    wdt_feeds = 0;
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+
+    /* Observed, not desired: uart_init succeeded, so the session runs and
+     * the watchdog keeps being fed on a port that can never deliver a
+     * command. Only the cap ended it. */
+    ASSERT(wdt_feeds == FEED_CAP);
+    ASSERT(no_transport_entries() == 0);
+    ASSERT(out_len == 0);          /* and nothing is ever answered */
+}
+
 int main(void)
 {
     printf("=== test_recovery ===\n");
+    run_test_a_port_with_no_uart_recv_still_feeds_and_is_not_yet_no_transport();
     run_test_write_range_helper_rejects_invalid_bounds();
     run_test_write_rejects_offset_past_slot_end();
     run_test_auth_refuses_an_unprovisioned_secret();
