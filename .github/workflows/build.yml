@@ -63,7 +63,23 @@ jobs:
             -DCMAKE_C_FLAGS="-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -specs=nosys.specs"
 
       - name: Build
-        run: cmake --build build-arm --parallel
+        run: |
+          set -o pipefail
+          cmake --build build-arm --parallel 2>&1 | tee build-arm.log
+
+      # The headroom gate below needs an ELF, so it cannot reach the case
+      # where stage-0 overflows its region outright: that fails at link
+      # time and leaves nothing to measure, and CI would show only the
+      # linker error. This step reads the build log for that error and
+      # prints the same budget and policy the gate would have. `if:
+      # failure()` does not mask anything -- the Build step's own
+      # non-zero status is what fails the job, and this script exits 0.
+      - name: Explain a stage-0 overflow
+        if: failure()
+        run: |
+          python3 tools/check_stage0_size.py \
+            --explain-overflow build-arm.log --min-free 16
+
       - name: The production-key branch was compiled, not the dev key
         run: |
           test -f build-arm/generated/production_key.c
@@ -85,6 +101,19 @@ jobs:
 
       - name: Report size
         run: arm-none-eabi-size build-arm/*.elf 2>/dev/null || true
+
+      # Stage-0 has almost no room in its 16 KiB flash region (12 bytes
+      # free on master at #207 filing, arm-none-eabi-gcc 14.2.1), so a
+      # small change fails to link with `region FLASH overflowed` -- and
+      # the failure mode is a cryptic linker error. Gate the headroom
+      # here instead: the script prints the figure and fails with a
+      # clear message when the free space drops under the 16-byte
+      # minimum. The minimum is the policy, set from the measured
+      # headroom at landing; do not lower it to make a change fit (see
+      # tools/check_stage0_size.py and #207).
+      - name: Gate stage-0 headroom
+        run: |
+          python3 tools/check_stage0_size.py --elf build-arm/ebldr_stage0.elf --min-free 16
 
   lint:
     name: Static Analysis
