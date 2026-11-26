@@ -52,6 +52,7 @@ static int sifive_uart_recv(void *buf, size_t len, uint32_t timeout_ms)
         uint32_t data;
         do {
             data = UART_RXDATA;
+            /* cppcheck-suppress unsignedLessThanZero  // tick_ms is volatile and advances in the timer interrupt; cppcheck folds it to its initialiser 0, which makes the difference a constant it then reads as a sign test */
             if ((tick_ms - start) >= timeout_ms) return EOS_ERR_TIMEOUT;
         } while (data & 0x80000000);
         p[i] = (uint8_t)(data & 0xFF);

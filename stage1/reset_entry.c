@@ -54,10 +54,12 @@ void Reset_Handler(void)
 {
     uint32_t *src = &_sidata;
     uint32_t *dst = &_sdata;
+    /* cppcheck-suppress comparePointers  // _sdata and _edata are linker symbols bounding one section, not two C objects; this is the startup idiom and there is no standard-conforming way to write it */
     while (dst < &_edata)
         *dst++ = *src++;
 
     dst = &_sbss;
+    /* cppcheck-suppress comparePointers  // same: _sbss and _ebss bound the .bss the linker script emitted */
     while (dst < &_ebss)
         *dst++ = 0;
 

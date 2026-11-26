@@ -28,10 +28,12 @@ int eos_bootloader_protect_apply(void)
     eos_bootloader_protect_policy_t policy =
         (eos_bootloader_protect_policy_t)EBLDR_BOOTLOADER_PROTECT_POLICY;
 
+    /* cppcheck-suppress knownConditionTrueFalse  // policy is EBLDR_BOOTLOADER_PROTECT_POLICY, a build-time choice; the branch is dead only for the default this build selected */
     if (policy == EOS_BOOTLOADER_PROTECT_NEVER) {
         return EOS_OK;
     }
 
+    /* cppcheck-suppress knownConditionTrueFalse  // same: a different -DEBLDR_BOOTLOADER_PROTECT_POLICY takes the other branch */
     if (policy == EOS_BOOTLOADER_PROTECT_PRODUCTION) {
         /* Only protect if not in debug build */
 #ifdef EBLDR_DEBUG_BUILD

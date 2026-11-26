@@ -41,7 +41,7 @@ int eos_rtsvc_get_variable(const char *name, void *data, uint32_t *size)
     if (!name || !data || !size) return EOS_ERR_INVALID;
     if (!rtsvc_initialized) return EOS_ERR_GENERIC;
 
-    eos_runtime_var_t *var = find_var(name);
+    const eos_runtime_var_t *var = find_var(name);
     if (!var) return EOS_ERR_NOT_FOUND;
 
     if (*size < var->size) {

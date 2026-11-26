@@ -52,11 +52,13 @@ void Reset_Handler(void)
     /* Copy .data section from flash to RAM */
     uint32_t *src = &_sidata;
     uint32_t *dst = &_sdata;
+    /* cppcheck-suppress comparePointers  // _sdata and _edata are linker symbols bounding one section, not two C objects; this is the startup idiom and there is no standard-conforming way to write it */
     while (dst < &_edata)
         *dst++ = *src++;
 
     /* Zero .bss section */
     dst = &_sbss;
+    /* cppcheck-suppress comparePointers  // same: _sbss and _ebss bound the .bss the linker script emitted */
     while (dst < &_ebss)
         *dst++ = 0;
 
@@ -70,7 +72,7 @@ void Reset_Handler(void)
      * before the first line of stage-0 runs. */
     {
         volatile uint32_t *stack_ptr = &_ebss;
-        volatile uint32_t *stack_end = (volatile uint32_t *)(__builtin_frame_address(0));
+        volatile uint32_t *const stack_end = (volatile uint32_t *)(__builtin_frame_address(0));
         while (stack_ptr < stack_end - 16) {
             *stack_ptr++ = 0xDEADBEEF;
         }

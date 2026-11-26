@@ -116,6 +116,7 @@ static int x86_flash_erase(uint32_t addr, size_t len)
         *(volatile uint8_t *)(uintptr_t)(X86_FLASH_BASE + 0x2AAA) = 0x55;
         *(volatile uint8_t *)(uintptr_t)aligned_addr = 0x30;
         /* Poll for erase completion */
+        /* cppcheck-suppress knownConditionTrueFalse  // the NOR device drives DQ7 during erase; cppcheck reads the preceding volatile command write back as if it were the stored value */
         while (!(*(volatile uint8_t *)(uintptr_t)aligned_addr & 0x80)) {}
         aligned_addr += sector_size;
     }
