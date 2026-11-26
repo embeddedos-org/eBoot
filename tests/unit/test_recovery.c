@@ -661,9 +661,183 @@ TEST(test_plain_recovery_entry_erases_nothing)
     ASSERT(sim_flash[SIM_SLOT_B_ADDR] == 0x5A);
 }
 
+/* ---- A recovery session on a port that has no UART (#205) ---- */
+
+static int wdt_feeds;
+static void counting_watchdog_feed(void) { wdt_feeds++; }
+
+/* A receive that returns one scripted result per call and stops the loop when
+ * the script runs out. */
+static const int *recv_results;
+static size_t recv_results_len;
+static size_t recv_calls;
+
+static int scripted_result_recv(void *buf, size_t len, uint32_t timeout_ms)
+{
+    (void)buf; (void)len; (void)timeout_ms;
+    if (recv_calls >= recv_results_len)
+        longjmp(exit_jmp, 1);
+    /* A successful receive delivers a PING, so a loop that goes on to handle
+     * it answers on the simulated UART. */
+    memset(buf, 0, len);
+    ((uint8_t *)buf)[0] = 0x01; /* RCVR_CMD_PING */
+    return recv_results[recv_calls++];
+}
+
+/* Enter recovery on `ops` with the receive results in `results`; return how
+ * often the watchdog was fed before the script ran out. */
+static int feeds_during_recovery(eos_board_ops_t board, const int *results, size_t n)
+{
+    /* The HAL keeps the pointer it is given, and the caller reads the boot
+     * log through it after this returns: the table must outlive the call. */
+    static eos_board_ops_t ops;
+    ops = board;
+    ops.watchdog_feed = counting_watchdog_feed;
+    ops.uart_recv = scripted_result_recv;
+    eos_hal_init(&ops);
+    eos_boot_log_init(0);
+
+    wdt_feeds = 0;
+    recv_results = results;
+    recv_results_len = n;
+    recv_calls = 0;
+
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+    return wdt_feeds;
+}
+
+/* Number of boot-log entries that say recovery was entered without a
+ * transport. */
+static int no_transport_entries(void)
+{
+    int n = 0;
+    for (uint32_t i = 0; i < EOS_BOOT_LOG_MAX; i++) {
+        eos_boot_log_entry_t e;
+        if (eos_boot_log_read(i, &e) != EOS_OK)
+            continue;
+        if (e.event == EOS_LOG_RECOVERY_ENTER &&
+            e.detail == EOS_RECOVERY_NO_TRANSPORT)
+            n++;
+    }
+    return n;
+}
+
+/* The control: a port with a UART and no client yet. Every pass waits out a
+ * timeout and feeds the watchdog, as before, and the log says nothing about
+ * a missing transport. Five timeouts, then the sixth pass feeds and the
+ * script ends. */
+TEST(test_recovery_feeds_the_watchdog_while_it_waits_for_a_client)
+{
+    static const int waits[] = {
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+    };
+    ASSERT(feeds_during_recovery(sim_ops, waits, 5) == 6);
+    ASSERT(no_transport_entries() == 0);
+}
+
+/* A port whose ops table has no uart_init (samd51 after #201 is one: its
+ * uart_recv is a stub that returns a timeout at once). The loop used to feed
+ * the watchdog on every pass of a wait nothing could end. */
+TEST(test_recovery_does_not_feed_the_watchdog_when_uart_init_fails)
+{
+    static const int waits[] = {
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+        EOS_ERR_TIMEOUT, EOS_ERR_TIMEOUT,
+    };
+    eos_board_ops_t no_init = sim_ops;
+    no_init.uart_init = NULL;
+    ASSERT(feeds_during_recovery(no_init, waits, 5) == 0);
+    ASSERT(no_transport_entries() == 1);
+}
+
+/* Without a transport no command is handled, even if the receive stub hands
+ * something back: a port whose UART was never initialised has no business
+ * answering on it. Two PINGs arrive; nothing is sent. */
+TEST(test_recovery_handles_no_command_without_a_transport)
+{
+    static const int packets[] = { EOS_OK, EOS_OK };
+    eos_board_ops_t no_init = sim_ops;
+    no_init.uart_init = NULL;
+    ASSERT(feeds_during_recovery(no_init, packets, 2) == 0);
+    ASSERT(out_len == 0);
+
+    /* The control: the same two PINGs on a port with a UART are answered. */
+    setup();
+    ASSERT(feeds_during_recovery(sim_ops, packets, 2) == 3);
+    ASSERT(out_len > 0);
+}
+
+/* A receive error on a port whose UART initialised (framing, overrun) is not
+ * "no transport": the session goes on and the watchdog is still fed. */
+TEST(test_recovery_keeps_the_session_after_a_later_receive_error)
+{
+    static const int mixed[] = {
+        EOS_ERR_GENERIC, EOS_ERR_TIMEOUT, EOS_ERR_GENERIC, EOS_ERR_TIMEOUT,
+    };
+    ASSERT(feeds_during_recovery(sim_ops, mixed, 4) == 5);
+    ASSERT(no_transport_entries() == 0);
+}
+
+/* A feed counter that ends the loop itself, for a session nothing else
+ * would end. */
+#define FEED_CAP 8
+static void capped_watchdog_feed(void)
+{
+    if (++wdt_feeds >= FEED_CAP)
+        longjmp(exit_jmp, 1);
+}
+
+/* #205 asks for a host test using an ops table with **no uart_recv**, and
+ * the tests above do not provide one: feeds_during_recovery() installs
+ * scripted_result_recv over whatever the caller passed, so a NULL
+ * uart_recv never reaches the loop. This drives it directly.
+ *
+ * It records the gap rather than a fix. This PR judges uart_init only, so
+ * a port that initialises a UART it cannot read from still counts as
+ * having a transport: eos_hal_uart_recv() returns EOS_ERR_GENERIC for the
+ * missing op (hal/hal_core.c:147), the loop treats any receive error on an
+ * initialised port as a wait, and it feeds for ever. Nothing in the loop
+ * would stop, so the feed counter stops it.
+ *
+ * Closing the gap means judging the first receive. That was in this PR at
+ * its first head and was removed because it made stm32f4 stage-0 overflow
+ * its flash region -- see the PR body and #207. When it comes back this
+ * test must be updated to expect no feeds and a no-transport log entry;
+ * failing then is the point. */
+TEST(test_a_port_with_no_uart_recv_still_feeds_and_is_not_yet_no_transport)
+{
+    setup();
+    static eos_board_ops_t ops;
+    ops = sim_ops;
+    ops.watchdog_feed = capped_watchdog_feed;
+    ops.uart_recv = NULL;          /* the table #205 asks about */
+    eos_hal_init(&ops);
+    eos_boot_log_init(0);
+
+    wdt_feeds = 0;
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+    if (setjmp(exit_jmp) == 0) {
+        eos_recovery_enter(&bctl);
+    }
+
+    /* Observed, not desired: uart_init succeeded, so the session runs and
+     * the watchdog keeps being fed on a port that can never deliver a
+     * command. Only the cap ended it. */
+    ASSERT(wdt_feeds == FEED_CAP);
+    ASSERT(no_transport_entries() == 0);
+    ASSERT(out_len == 0);          /* and nothing is ever answered */
+}
+
 int main(void)
 {
     printf("=== test_recovery ===\n");
+    run_test_a_port_with_no_uart_recv_still_feeds_and_is_not_yet_no_transport();
     run_test_write_range_helper_rejects_invalid_bounds();
     run_test_write_rejects_offset_past_slot_end();
     run_test_auth_refuses_an_unprovisioned_secret();
@@ -675,6 +849,10 @@ int main(void)
     run_test_info_reports_a_board_without_an_entropy_source();
     run_test_requested_factory_reset_is_carried_out_on_entry();
     run_test_plain_recovery_entry_erases_nothing();
+    run_test_recovery_feeds_the_watchdog_while_it_waits_for_a_client();
+    run_test_recovery_does_not_feed_the_watchdog_when_uart_init_fails();
+    run_test_recovery_handles_no_command_without_a_transport();
+    run_test_recovery_keeps_the_session_after_a_later_receive_error();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

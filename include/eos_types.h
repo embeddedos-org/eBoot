@@ -165,6 +165,13 @@ typedef struct {
 #define EBLDR_FAIL_STAGE1_NO_IMAGE 0xBAD3 /* the build embedded no stage-1 image to verify against */
 #define EBLDR_FAIL_BTLDR_REPLACE 0xBAD4 /* a stage-1 replacement was refused or failed (ADR-022) */
 
+/* `detail` value of the EOS_LOG_RECOVERY_ENTER entry eos_recovery_enter()
+ * writes on a port with no usable UART (eos_hal_uart_init() missing or
+ * failing). Such a session cannot be reached, handles no command and does
+ * not feed the watchdog. Callers log RECOVERY_ENTER themselves with detail
+ * 0, so only this value carries information. */
+#define EOS_RECOVERY_NO_TRANSPORT 1U  /* small on purpose: stage-0 has no room for a literal */
+
 /* ---------------- RTOS Boot Types (Phase 2) ---------------- */
 
 typedef enum {

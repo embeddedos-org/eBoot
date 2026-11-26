@@ -506,8 +506,15 @@ static int recovery_handle_boot_log(uint32_t start_index, uint16_t requested_cou
 
 int eos_recovery_enter(eos_bootctl_t *bctl)
 {
-    eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE, 0);
-    eos_hal_uart_init(RCVR_BAUD_RATE);
+    /* Recovery is a UART protocol. A port whose uart_init is missing or
+     * fails has no transport; the entry's detail records it, so a boot log
+     * can tell "waiting for a client" from "cannot be reached". The rule
+     * is this one test and no more: stage-0 links this function and has
+     * bytes, not kilobytes, to spare on STM32F4. */
+    uint32_t no_transport = (eos_hal_uart_init(RCVR_BAUD_RATE) != EOS_OK);
+
+    /* detail: 0, or EOS_RECOVERY_NO_TRANSPORT (which is 1). */
+    eos_boot_log_append(EOS_LOG_RECOVERY_ENTER, EOS_SLOT_NONE, no_transport);
 
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
     /* Persist the log head with the flag, so the entries the caller and
@@ -536,11 +543,20 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
     auth_fail_count = 0;
 
     while (1) {
-        eos_hal_watchdog_feed();
+        /* The watchdog is fed only while a client could still arrive.
+         * Without a transport nothing can ever be received, so feeding it
+         * would hold the device in this loop for good; left unfed, a board
+         * that has a watchdog resets and tries to boot again. */
+        if (!no_transport)
+            eos_hal_watchdog_feed();
 
         rcvr_packet_t pkt;
         int rc = eos_hal_uart_recv(&pkt, sizeof(pkt), RCVR_TIMEOUT_MS);
-        if (rc != EOS_OK)
+
+        /* Without a transport nothing is handled, whatever a receive stub
+         * hands back. With one, any receive error is a wait like a timeout:
+         * a framing or overrun error does not end the session. */
+        if (rc != EOS_OK || no_transport)
             continue;
 
         /* Check authentication for destructive commands */
