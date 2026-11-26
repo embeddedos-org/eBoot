@@ -1552,6 +1552,23 @@ value for `EBLDR_PRODUCTION_KEY`.
    is erased. On the F407 (4 x 16K, 1 x 64K, 7 x 128K sectors) that is why
    the small regions take a full sector each.
 
+## Stage-0 size budget
+
+Stage-0 is 16 KiB and almost full: 12 bytes free on master at #207
+filing (CI toolchain), so any security fix that adds an instruction to
+code stage-0 links can fail to link, and the pressure is to drop the
+check rather than find the room. The budget is therefore gated, not
+just documented: `tools/check_stage0_size.py` prints the figure and
+the Cross-compile STM32F4 job fails with a clear message when the free
+space drops under the 16-byte minimum. Do not lower the minimum to
+make a change fit; a change that does not fit needs a slimmer verify
+path or a larger stage-0 (moving the stage-0/stage-1 boundary, which
+needs its own decision). What is measured: the stage-0 link emits
+`ebldr_stage0.map`; LTO was tried and breaks the firmware link; and
+newlib's `memcpy`/`memset` stay in the image because `core/` calls
+them from ~17 sites, so removing them would mean rewriting `core/`,
+not stage-0.
+
 ## Adapting to Other MCUs
 
 To port to a different MCU, create a new `boards/<mcu>/` directory and:
