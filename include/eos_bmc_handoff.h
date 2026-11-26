@@ -35,7 +35,7 @@ typedef struct {
 int  eos_bmc_handoff_init(eos_bmc_handoff_t *bmc, uint32_t i2c_addr);
 int  eos_bmc_handoff_report_phase(eos_bmc_handoff_t *bmc, eos_bmc_boot_phase_t phase);
 int  eos_bmc_handoff_report_error(eos_bmc_handoff_t *bmc, uint32_t error_code);
-int  eos_bmc_handoff_check_override(eos_bmc_handoff_t *bmc);
+int  eos_bmc_handoff_check_override(const eos_bmc_handoff_t *bmc);
 void eos_bmc_handoff_dump(const eos_bmc_handoff_t *bmc);
 
 #endif /* EOS_BMC_HANDOFF_H */

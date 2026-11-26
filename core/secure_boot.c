@@ -135,7 +135,7 @@ eos_secure_boot_result_t eos_secure_boot(const eos_secure_boot_config_t *cfg,
             return EOS_SBOOT_ERR_SIGNATURE;
         }
 
-        uint8_t zeros[32] = {0};
+        const uint8_t zeros[32] = {0};
         if (secure_compare(otp_key_hash, zeros, 32) != 0) {
             /* Provisioned, and nothing here compares against it. Refuse
              * rather than boot on a key this function has not checked. */

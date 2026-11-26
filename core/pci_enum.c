@@ -29,7 +29,7 @@ static volatile uint32_t *pci_ecam_addr(uint32_t ecam_base,
 static uint32_t pci_read32(uint32_t ecam, uint8_t bus, uint8_t dev,
                            uint8_t func, uint16_t reg)
 {
-    volatile uint32_t *p = pci_ecam_addr(ecam, bus, dev, func, reg);
+    const volatile uint32_t *const p = pci_ecam_addr(ecam, bus, dev, func, reg);
     return *p;
 }
 

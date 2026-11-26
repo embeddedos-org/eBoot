@@ -40,7 +40,7 @@ int eos_bmc_handoff_report_error(eos_bmc_handoff_t *bmc, uint32_t error_code)
     return 0;
 }
 
-int eos_bmc_handoff_check_override(eos_bmc_handoff_t *bmc)
+int eos_bmc_handoff_check_override(const eos_bmc_handoff_t *bmc)
 {
     if (!bmc || !bmc->connected) return 0;
     /* Check if BMC wants to override boot (e.g., force recovery, PXE boot)

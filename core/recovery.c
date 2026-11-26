@@ -452,6 +452,7 @@ static int recovery_collect_boot_log_entries(
         uint32_t entry_index = (valid_entry_count == EOS_BOOT_LOG_MAX) ?
                                ((log_head + i) % EOS_BOOT_LOG_MAX) : i;
 
+        /* cppcheck-suppress uninitvar  // the loop above writes every element of raw_entries and returns on the first eos_boot_log_read() that fails, so entry_index is initialised here; cppcheck cannot see the out-parameter being written. Zeroing the array instead would add a memset to stage-0, which has no flash headroom (#207). */
         if (raw_entries[entry_index].event == 0)
             continue;
 
