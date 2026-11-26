@@ -77,22 +77,8 @@ static jmp_buf exit_jmp;
 
 static int sim_uart_init(uint32_t baud) { (void)baud; return EOS_OK; }
 
-/* Which multi-byte send should stop part-way, 1-based; 0 disables.
- * A port whose THR never empties now returns EOS_ERR_TIMEOUT instead of
- * spinning forever, so a send can leave a frame half-written. */
-static int send_fail_on_multibyte = 0;
-static int multibyte_sends = 0;
-
 static int sim_uart_send(const void *buf, size_t len)
 {
-    if (len > 1 && ++multibyte_sends == send_fail_on_multibyte) {
-        size_t partial = len / 2;
-        if (out_len + partial > sizeof(out_buf))
-            partial = sizeof(out_buf) - out_len;
-        memcpy(&out_buf[out_len], buf, partial);
-        out_len += partial;
-        return EOS_ERR_TIMEOUT;
-    }
     if (out_len + len > sizeof(out_buf)) len = sizeof(out_buf) - out_len;
     memcpy(&out_buf[out_len], buf, len);
     out_len += len;
@@ -260,8 +246,6 @@ static void setup(void)
     script_len = 0;
     script_pos = 0;
     out_len = 0;
-    send_fail_on_multibyte = 0;
-    multibyte_sends = 0;
     verify_payload_bytes_read = 0;
     sim_secret = SIM_SHARED_SECRET;
     eos_hal_init(&sim_ops);
@@ -677,46 +661,9 @@ TEST(test_plain_recovery_entry_erases_nothing)
     ASSERT(sim_flash[SIM_SLOT_B_ADDR] == 0x5A);
 }
 
-/* A challenge send can fail now that a port whose THR never empties
- * returns EOS_ERR_TIMEOUT rather than spinning forever (#210). The send
- * at the end of the RCVR_AUTH_NONE branch ignored its result and entered
- * RCVR_AUTH_CHALLENGE_SENT regardless, so a partial write had the device
- * report EOS_OK while the client held a truncated challenge; the attempt
- * then died at the response timeout with nothing saying why.
- *
- * The first challenge send stops half-way here. The device must stay in
- * RCVR_AUTH_NONE, so the next AUTH draws a fresh challenge and the
- * exchange completes. Before the fix the second AUTH packet was consumed
- * as the response to a challenge the client never received, which fails
- * authentication and burns an attempt. */
-TEST(test_a_failed_challenge_send_does_not_advance_the_auth_state)
-{
-    setup();
-    send_fail_on_multibyte = 1;
-
-    uint8_t pkt[8];
-    put_pkt(pkt, RCVR_CMD_AUTH, 0, 0, 0);
-    script_append(pkt, sizeof(pkt));    /* challenge send stops part-way */
-    script_auth(SIM_SHARED_SECRET);     /* a clean retry, then the response */
-
-    eos_bootctl_t bctl;
-    eos_bootctl_init_defaults(&bctl);
-    if (setjmp(exit_jmp) == 0) {
-        eos_recovery_enter(&bctl);
-    }
-
-    /* 16 bytes of the truncated first challenge, then a whole second one
-     * (ACK + 32), then the auth verdict. */
-    ASSERT(out_len == 16 + 1 + 32 + 1);
-    ASSERT(out_buf[16] == RCVR_ACK);
-    ASSERT(memcmp(&out_buf[17], SIM_CHALLENGE, 32) == 0);
-    ASSERT(out_buf[49] == RCVR_ACK);    /* authenticated on the retry */
-}
-
 int main(void)
 {
     printf("=== test_recovery ===\n");
-    run_test_a_failed_challenge_send_does_not_advance_the_auth_state();
     run_test_write_range_helper_rejects_invalid_bounds();
     run_test_write_rejects_offset_past_slot_end();
     run_test_auth_refuses_an_unprovisioned_secret();

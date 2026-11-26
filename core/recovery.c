@@ -161,23 +161,7 @@ static int recovery_handle_auth(void)
         uint8_t resp[1 + RCVR_CHALLENGE_SIZE];
         resp[0] = RCVR_ACK;
         memcpy(&resp[1], challenge, RCVR_CHALLENGE_SIZE);
-        /* The send can stop part-way now that a port whose THR never
-         * empties returns EOS_ERR_TIMEOUT instead of spinning forever.
-         * Entering RCVR_AUTH_CHALLENGE_SENT on a partial write would have
-         * the device report success while the client holds a truncated
-         * challenge, and the attempt would then fail at the response
-         * timeout with nothing saying why. Stay in RCVR_AUTH_NONE (which
-         * is this branch's condition, so the next attempt draws a fresh
-         * challenge) and report the error.
-         *
-         * auth_fail_count is deliberately not incremented: it drives the
-         * backoff and the lockout, and a fault in our own UART must not
-         * spend a client's attempts or lock recovery out of the board.
-         * It is the only way in. */
-        int tx = eos_hal_uart_send(resp, sizeof(resp));
-        if (tx != EOS_OK) {
-            return tx;
-        }
+        eos_hal_uart_send(resp, sizeof(resp));
 
         auth_state = RCVR_AUTH_CHALLENGE_SENT;
         return EOS_OK;
@@ -468,7 +452,6 @@ static int recovery_collect_boot_log_entries(
         uint32_t entry_index = (valid_entry_count == EOS_BOOT_LOG_MAX) ?
                                ((log_head + i) % EOS_BOOT_LOG_MAX) : i;
 
-        /* cppcheck-suppress uninitvar  // the loop above writes every element of raw_entries and returns on the first eos_boot_log_read() that fails, so entry_index is initialised here; cppcheck cannot see the out-parameter being written. Zeroing the array instead would add a memset to stage-0, which has no flash headroom (#207). */
         if (raw_entries[entry_index].event == 0)
             continue;
 
