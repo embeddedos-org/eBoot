@@ -182,14 +182,42 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install tools
         run: sudo apt-get install -y cppcheck clang-tidy
+      # Three separate things made this step unable to fail; all three are
+      # fixed here (#208):
+      #
+      #  1. `src/` does not exist in this repository and never has. cppcheck
+      #     answered "could not find or open any of the paths given" and
+      #     analysed zero files from 2026-05-27 on. The C sources live under
+      #     core/, hal/, stage0/, stage1/ and boards/ -- 134 files, which is
+      #     what this line now hands it.
+      #     tests/unit/test_static_analysis_paths.py fails if a directory
+      #     holding C sources is left off, so a rename cannot empty it again.
+      #  2. `| tee` makes the pipeline's status tee's, so --error-exitcode=1
+      #     was discarded before continue-on-error ever saw it. GitHub runs
+      #     `run:` under `bash -e`, not `-o pipefail`; the step sets it.
+      #  3. continue-on-error: true threw away what was left. Removed: this
+      #     job is in ci-gate's needs:, and a gate member that cannot fail is
+      #     the fail-open shape the gate exists to remove.
+      #
+      # --inline-suppr honours the `cppcheck-suppress` comments in the tree.
+      # Each sits on the line it covers and states its reason; no finding is
+      # suppressed from here. unmatchedSuppression is: build.yml's lint job
+      # runs a different cppcheck version over the same files, so a comment
+      # one version needs is unmatched for the other. That is scoped to the
+      # one file where it happens, not suppressed wholesale: cppcheck 2.13 in
+      # build.yml reports uninitvar in core/recovery.c, 2.7 here does not.
       - name: cppcheck
         run: |
-          cppcheck --enable=all --error-exitcode=1 \
+          set -o pipefail
+          cppcheck --enable=all --error-exitcode=1 --inline-suppr \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
-            -I include/ src/ 2>&1 | tee cppcheck.log
-        continue-on-error: true
+            --suppress=unmatchedSuppression:core/recovery.c \
+            -I include/ core/ hal/ stage0/ stage1/ boards/ 2>&1 \
+            | tee cppcheck.log
       - name: Upload analysis report
+        # if: always() -- the report is wanted most when the step above failed.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eboot-static-analysis

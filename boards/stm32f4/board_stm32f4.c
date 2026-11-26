@@ -119,7 +119,7 @@ static int stm32f4_flash_read(uint32_t addr, void *buf, size_t len)
 
 static void flash_unlock(void)
 {
-    if (FLASH_CR & (1 << 31)) { /* LOCK bit */
+    if (FLASH_CR & (1u << 31)) { /* LOCK bit */
         FLASH_KEYR = FLASH_KEY1;
         FLASH_KEYR = FLASH_KEY2;
     }
@@ -127,7 +127,7 @@ static void flash_unlock(void)
 
 static void flash_lock(void)
 {
-    FLASH_CR |= (1 << 31);
+    FLASH_CR |= (1u << 31);
 }
 
 static void flash_wait_busy(void)
@@ -576,7 +576,7 @@ static eos_reset_reason_t stm32f4_get_reset_reason(void)
     if (csr & (1 << 28)) return EOS_RESET_SOFTWARE;
     if (csr & (1 << 26)) return EOS_RESET_PIN;
     if (csr & (1 << 25)) return EOS_RESET_BROWNOUT;
-    if (csr & (1 << 31)) return EOS_RESET_LOCKUP;
+    if (csr & (1u << 31)) return EOS_RESET_LOCKUP;
 
     return EOS_RESET_POWER_ON;
 }

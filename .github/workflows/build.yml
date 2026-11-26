@@ -117,20 +117,35 @@ jobs:
 
   lint:
     name: Static Analysis
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: now that this job can fail (#208), an image
+    # refresh that ships a newer cppcheck would otherwise turn master red with
+    # no change in the repository. Bump deliberately.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
 
+      # `|| true` after --error-exitcode=1 cancelled it: this step reported
+      # success on any finding. Dropped (#208). The findings it was hiding are
+      # fixed in the same change; --inline-suppr honours the per-line
+      # `cppcheck-suppress` comments, each with its reason.
+      #
+      # unmatchedSuppression: ci.yml's static-analysis job runs cppcheck 2.7
+      # with --enable=all over the same files and reports
+      # knownConditionTrueFalse in these two, where this job's 2.13 with
+      # --enable=warning,style does not. Scoped to those two files rather
+      # than suppressed wholesale.
       - name: Run cppcheck
         run: |
-          cppcheck --enable=warning,style \
+          cppcheck --enable=warning,style --inline-suppr \
             --suppress=missingIncludeSystem \
             --suppress=missingInclude \
+            --suppress=unmatchedSuppression:core/bootloader_protect.c \
+            --suppress=unmatchedSuppression:core/debug_lock.c \
             --error-exitcode=1 \
-            core/ hal/ 2>&1 || true
+            core/ hal/
 
   build-r5:
     name: Cross-assemble Cortex-R5 stage-0
