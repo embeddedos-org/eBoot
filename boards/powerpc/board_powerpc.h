@@ -12,8 +12,17 @@
 
 #include "eos_hal.h"
 
-#define POWERPC_FLASH_BASE          0xFF000000
-#define POWERPC_FLASH_SIZE          (32 * 1024 * 1024)
+/* 16 MiB, not 32 (#197). 0xFF000000 + 32 MiB is 0x101000000: the declared
+ * flash ended 16 MiB past the 4 GiB address space, and any range check
+ * written as `addr + len <= flash_base + flash_size` computes that in 32 bits,
+ * where it wraps to 0x01000000 and refuses every address in the device.
+ * Only 16 MiB fits above this base, and every region below lies inside it:
+ * slot A 0xFF100000, slot B 0xFF700000, recovery 0xFFD00000, boot control
+ * 0xFFFFF000, its backup 0xFFFFE000 and the log 0xFFFFD000. A base of
+ * 0xFE000000 with 32 MiB would also be coherent but leaves the lower half
+ * named by no constant here. */
+#define POWERPC_FLASH_BASE          0xFF000000u
+#define POWERPC_FLASH_SIZE          (16u * 1024u * 1024u)
 #define POWERPC_RAM_BASE            0x00000000
 #define POWERPC_RAM_SIZE            (256 * 1024 * 1024)
 

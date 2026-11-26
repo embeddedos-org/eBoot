@@ -15,18 +15,38 @@
 #define PRU_FLASH_SIZE    (8*1024)
 #define PRU_RAM_BASE      0x00000000
 #define PRU_RAM_SIZE      (16*1024)
-#define PRU_SLOT_A        (PRU_FLASH_BASE + 0x20000)
-#define PRU_SLOT_B        (PRU_FLASH_BASE + PRU_FLASH_SIZE / 3 + 0x20000)
-#define PRU_RECOVERY      (PRU_FLASH_BASE + 2 * PRU_FLASH_SIZE / 3)
-#define PRU_BOOTCTL       (PRU_FLASH_BASE + PRU_FLASH_SIZE - 0x2000)
+/* This port names no slots, no recovery image and no boot-control block
+ * (#199). It used to compute them from these formulas, copied across eight
+ * ports from one with a megabyte of flash:
+ *
+ *     SLOT_A   = FLASH_BASE + 0x20000
+ *     SLOT_B   = FLASH_BASE + FLASH_SIZE / 3 + 0x20000
+ *     RECOVERY = FLASH_BASE + 2 * FLASH_SIZE / 3
+ *     BOOTCTL  = FLASH_BASE + FLASH_SIZE - 0x2000
+ *
+ * The 0x20000 is a fixed 128 KiB bootloader reservation that does not depend
+ * on the flash size, so on a device of 8 KiB both slots started past the end
+ * of the flash declared right above them: slot A at 0x20000, slot B at
+ * 0x20aaa, in a device ending at 0x2000. The boot-control address came out as
+ * FLASH_SIZE - 0x2000 == 0, the reset vector.
+ *
+ * The honest answer for a device this small is that it has no A/B layout to
+ * declare. Stage-0 alone occupies 16 KiB on the one board in this tree with
+ * real drivers (stm32f4), and 8 KiB cannot hold that plus two slots plus a
+ * recovery image plus the boot-control page. The ops table already names no
+ * flash operations on this port -- every entry is NULL -- and it now names no
+ * regions either; a field left out reads as 0, which eos_board_ops_t
+ * documents as "this port has none". Declaring addresses that are not in the
+ * device was worse than declaring nothing: docs/board-ops-status.md and the
+ * README present the ops table as the port's memory map, so whoever writes
+ * the first flash driver here would have inherited them.
+ *
+ * A port that grows an A/B layout declares it with sizes, as pic24 and
+ * cortex_m0plus now do, and tools/board_memory_map.py checks it fits. */
 
 static const eos_board_ops_t pru_ops = {
     .flash_base       = PRU_FLASH_BASE,
     .flash_size       = PRU_FLASH_SIZE,
-    .slot_a_addr      = PRU_SLOT_A,
-    .slot_b_addr      = PRU_SLOT_B,
-    .recovery_addr    = PRU_RECOVERY,
-    .bootctl_addr     = PRU_BOOTCTL,
     .app_vector_offset = 0x00,
     .flash_read       = NULL,
     .flash_write      = NULL,

@@ -498,8 +498,23 @@ if(NOT EBLDR_BOARD STREQUAL "none")
                 ${CMAKE_CURRENT_SOURCE_DIR}/boards/${EBLDR_BOARD}
             )
             target_link_libraries(ebldr_stage0 PRIVATE eboot_core board_${EBLDR_BOARD})
+            # Stage-0 is 16 KiB on stm32f4 and GCC rewrites recognised
+            # copy / zero loop idioms as memcpy/memset calls. In
+            # reset_entry.c that turned the .data copy and .bss zeroing
+            # into calls and cost 16 bytes (Reset_Handler 108 -> 92,
+            # arm-none-eabi-gcc 13.2.1). Keep those loops as loops, in
+            # every stage-0 translation unit. This does not remove
+            # newlib's memcpy/memset from the image: eboot_core calls
+            # them from ~17 sites (bootctl, recovery, ed25519, sha256/
+            # sha512, keystore, the stm32f4 port), so the objects stay
+            # linked regardless -- removing them would mean rewriting
+            # core/, not stage-0 (see #207). It only stops stage-0's own
+            # sources adding further calls.
+            target_compile_options(ebldr_stage0 PRIVATE
+                -fno-tree-loop-distribute-patterns)
+
             set_target_properties(ebldr_stage0 PROPERTIES
-                LINK_FLAGS "-T${_LD_STAGE0} -nostartfiles"
+                LINK_FLAGS "-T${_LD_STAGE0} -nostartfiles -Wl,-Map=\"${CMAKE_CURRENT_BINARY_DIR}/ebldr_stage0.map\""
                 SUFFIX ".elf"
             )
             add_custom_command(TARGET ebldr_stage0 POST_BUILD
