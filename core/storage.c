@@ -56,9 +56,11 @@ void eos_storage_dump(const eos_storage_dev_t *dev)
 {
 #ifdef EBOOT_ENABLE_PRINTF
     const char *types[] = {"SPI_NOR","SPI_NAND","eMMC","SD","NVMe","PNOR","INTERNAL"};
+    const char *tname = (unsigned)dev->type < sizeof(types)/sizeof(types[0])
+                        ? types[dev->type] : "UNKNOWN";
     printf("Storage: %s [%s] %uKB sector=%u page=%u %s%s\n",
            dev->name ? dev->name : "(unnamed)",
-           types[dev->type], dev->total_size / 1024,
+           tname, dev->total_size / 1024,
            dev->sector_size, dev->page_size,
            dev->initialized ? "init" : "uninit",
            dev->write_protect ? " WP" : "");

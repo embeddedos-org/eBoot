@@ -198,6 +198,20 @@ TEST(test_write_protect_blocks_write_and_erase)
     ASSERT(eos_storage_read(&dev, 0, buf, 16) == 0);
 }
 
+TEST(test_dump_out_of_range_type)
+{
+    /* eos_storage_dump must not read past the types[] array when
+       dev->type is out of range.  Before the fix, any value >= 7
+       was an out-of-bounds read. */
+    eos_storage_dev_t dev;
+    setup(&dev);
+    dev.type = (eos_storage_type_t)99;   /* well past the array end */
+    /* If the bounds check is missing this is undefined behaviour
+       (likely a crash under ASan).  With the fix it prints "UNKNOWN". */
+    eos_storage_dump(&dev);
+    /* Reaching here without crashing is the pass condition. */
+}
+
 int main(void)
 {
     printf("=== eBoot Storage Bounds & Overflow Regression Tests ===\n");
@@ -208,6 +222,7 @@ int main(void)
     run_test_write_integer_overflow();
     run_test_valid_read_write_erase();
     run_test_write_protect_blocks_write_and_erase();
+    run_test_dump_out_of_range_type();
 
     printf("\nResults: %d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
