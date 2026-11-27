@@ -28,6 +28,11 @@ int eos_recovery_write_in_range(uint32_t base, uint32_t slot_size,
 
 /**
  * @brief Enter the UART recovery command loop. Does not return on success.
+ *
+ * Returns the eos_bootctl_save() error without entering the loop when the
+ * entry state (cleared force-recovery flag, log head) cannot be persisted:
+ * a session run on unpersisted state would silently lose the entry it just
+ * logged (#215). The flag is still set on flash, so the next reset retries.
  */
 int eos_recovery_enter(eos_bootctl_t *bctl);
 
