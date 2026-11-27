@@ -511,9 +511,16 @@ int eos_recovery_enter(eos_bootctl_t *bctl)
 
     bctl->flags &= ~EOS_FLAG_FORCE_RECOVERY;
     /* Persist the log head with the flag, so the entries the caller and
-     * this function appended are not overwritten on the next boot. */
+     * this function appended are not overwritten on the next boot. A
+     * failed save must not enter the session: the in-RAM head has
+     * already advanced past the entry just appended, so a session run
+     * on unpersisted state would lose it on the next boot, silently
+     * (#215). The flag is still set on flash, so the next reset
+     * re-enters recovery and retries the save. */
     bctl->log_head = eos_boot_log_get_head();
-    eos_bootctl_save(bctl);
+    int save_rc = eos_bootctl_save(bctl);
+    if (save_rc != EOS_OK)
+        return save_rc;
 
     /* Carry out a factory reset the application requested with
      * eos_fw_factory_reset(): erase both slots and return the boot control

@@ -40,6 +40,11 @@ static uint8_t sim_flash[SIM_FLASH_SIZE];
 
 static size_t verify_payload_bytes_read = 0;
 
+/* Fail flash writes to the primary boot-control block, so eos_bootctl_save()
+ * reports EOS_ERR_FLASH. Only the primary copy is failed: the save returns
+ * on the first failure, before touching the backup. */
+static bool sim_fail_bootctl_writes = false;
+
 static int sim_flash_read(uint32_t addr, void *buf, size_t len)
 {
     if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
@@ -53,6 +58,8 @@ static int sim_flash_read(uint32_t addr, void *buf, size_t len)
 static int sim_flash_write(uint32_t addr, const void *buf, size_t len)
 {
     if (addr + len > SIM_FLASH_SIZE) return EOS_ERR_FLASH;
+    if (sim_fail_bootctl_writes && addr == SIM_BOOTCTL_ADDR)
+        return EOS_ERR_FLASH;
     memcpy(&sim_flash[addr], buf, len);
     return EOS_OK;
 }
@@ -187,6 +194,7 @@ static const eos_board_ops_t sim_ops = {
 
 /* ---- Recovery protocol packet (mirrors the private struct in recovery.c) ---- */
 
+#define RCVR_CMD_PING  0x01
 #define RCVR_CMD_WRITE 0x04
 #define RCVR_CMD_VERIFY 0x05
 #define RCVR_CMD_AUTH  0x10
@@ -247,6 +255,7 @@ static void setup(void)
     script_pos = 0;
     out_len = 0;
     verify_payload_bytes_read = 0;
+    sim_fail_bootctl_writes = false;
     sim_secret = SIM_SHARED_SECRET;
     eos_hal_init(&sim_ops);
 }
@@ -642,6 +651,36 @@ TEST(test_requested_factory_reset_is_carried_out_on_entry)
     ASSERT(saved.boot_count == 0);
 }
 
+/* A failed entry save must keep recovery from starting: the in-RAM head
+ * has already advanced past the RECOVERY_ENTER entry, so a session run
+ * on unpersisted state would lose that entry on the next boot (#215).
+ * Before the fix the save result was dropped and the session started
+ * anyway, so the scripted PING is answered only if the loop runs. */
+TEST(test_recovery_entry_returns_when_the_entry_save_fails)
+{
+    sim_fail_bootctl_writes = true;
+    eos_boot_log_init(0);
+
+    uint8_t pkt[8];
+    put_pkt(pkt, RCVR_CMD_PING, 0, 0, 0);
+    script_append(pkt, sizeof(pkt));
+
+    eos_bootctl_t bctl;
+    eos_bootctl_init_defaults(&bctl);
+
+    volatile int rc = EOS_OK;
+    if (setjmp(exit_jmp) == 0) {
+        rc = eos_recovery_enter(&bctl);
+    } else {
+        /* The command loop ran: the failed save did not stop entry. */
+        ASSERT(0);
+    }
+
+    ASSERT(rc == EOS_ERR_FLASH);
+    ASSERT(script_pos == 0);  /* the PING was never read */
+    ASSERT(out_len == 0);     /* nothing was sent */
+}
+
 /* Only a factory-reset request erases anything: an ordinary entry into
  * recovery leaves both slots alone. */
 TEST(test_plain_recovery_entry_erases_nothing)
@@ -674,6 +713,7 @@ int main(void)
     run_test_info_sends_the_packed_layout_the_client_parses_and_nothing_else();
     run_test_info_reports_a_board_without_an_entropy_source();
     run_test_requested_factory_reset_is_carried_out_on_entry();
+    run_test_recovery_entry_returns_when_the_entry_save_fails();
     run_test_plain_recovery_entry_erases_nothing();
     printf("%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

@@ -83,7 +83,10 @@ int eboot_jump_to_app(eos_bootctl_t *bctl, eos_slot_t slot)
     /* Update log head in boot control */
     extern uint32_t eos_boot_log_get_head(void);
     bctl->log_head = eos_boot_log_get_head();
-    eos_bootctl_save(bctl);
+    /* A failed save costs the log head, not the boot: the image is
+     * verified, so the jump proceeds either way. Deliberately
+     * unchecked, for the same reason as stage0/jump_stage1.c. */
+    (void)eos_bootctl_save(bctl);
 
     eos_hal_watchdog_feed();
 

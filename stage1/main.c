@@ -56,8 +56,11 @@ int eboot_main(void)
 
     /* Check for explicit recovery / factory reset requests */
     if (eboot_should_recover(&bctl)) {
-        eos_recovery_enter(&bctl);
-        /* Does not return */
+        /* Does not return on success. On failure it returns the entry
+         * save error (#215): recovery was requested, so falling through
+         * to a normal boot here would boot an image the operator did
+         * not ask for. Return instead; the reset entry halts. */
+        return eos_recovery_enter(&bctl);
     }
 
     /* Scan all firmware slots */
